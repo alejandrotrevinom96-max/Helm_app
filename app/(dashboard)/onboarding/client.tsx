@@ -1,0 +1,163 @@
+'use client';
+
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+
+type Candidate = {
+  repo: {
+    id: number;
+    name: string;
+    fullName: string;
+    description: string | null;
+    htmlUrl: string;
+    language: string | null;
+    isPrivate: boolean;
+  };
+  stack: {
+    framework: string;
+    hasSupabase: boolean;
+    hasStripe: boolean;
+    hasVercelConfig: boolean;
+  };
+};
+
+export function OnboardingClient({
+  candidates,
+  scanError,
+  userId,
+}: {
+  candidates: Candidate[];
+  scanError: string | null;
+  userId: string;
+}) {
+  const router = useRouter();
+  const [selected, setSelected] = useState<Set<number>>(
+    new Set(candidates.map((c) => c.repo.id))
+  );
+  const [submitting, setSubmitting] = useState(false);
+
+  const toggle = (id: number) => {
+    const next = new Set(selected);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelected(next);
+  };
+
+  const handleContinue = async () => {
+    setSubmitting(true);
+    const chosen = candidates.filter((c) => selected.has(c.repo.id));
+    const res = await fetch('/api/onboarding/create-projects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projects: chosen }),
+    });
+    if (res.ok) {
+      router.push('/analytics');
+    } else {
+      setSubmitting(false);
+      alert('Error creating projects. Try again.');
+    }
+  };
+
+  return (
+    <div className="min-h-screen px-6 py-16">
+      <div className="max-w-3xl mx-auto">
+        <div className="mb-12">
+          <p className="font-mono text-xs text-accent uppercase tracking-widest mb-4">
+            Step 1 of 3
+          </p>
+          <h1 className="font-display text-5xl font-normal mb-4 leading-tight">
+            We found <em className="text-accent italic font-light">{candidates.length}</em>{' '}
+            {candidates.length === 1 ? 'project' : 'projects'}
+          </h1>
+          <p className="text-text-dim text-lg">
+            Helm scanned your recent repos for SaaS signals (Next.js, Supabase, Stripe, Vercel).
+            Select which ones to track.
+          </p>
+        </div>
+
+        {scanError && (
+          <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4 mb-6 text-red-300 text-sm">
+            Couldn&apos;t scan repos: {scanError}
+          </div>
+        )}
+
+        {candidates.length === 0 && !scanError && (
+          <div className="bg-bg-elev border border-border rounded-xl p-12 text-center">
+            <p className="text-text-dim mb-4">
+              No SaaS-like projects detected in your recent repos.
+            </p>
+            <p className="text-text-faint text-sm">
+              We look for repos with Next.js + Supabase, Stripe, or vercel.json.
+              You can add a project manually from the dashboard.
+            </p>
+          </div>
+        )}
+
+        <div className="space-y-3 mb-8">
+          {candidates.map((c) => (
+            <label
+              key={c.repo.id}
+              className={`block bg-bg-elev border rounded-xl p-5 cursor-pointer transition-all ${
+                selected.has(c.repo.id)
+                  ? 'border-accent shadow-[0_0_0_1px_rgba(255,107,53,0.5)]'
+                  : 'border-border hover:border-border-bright'
+              }`}
+            >
+              <div className="flex items-start gap-4">
+                <input
+                  type="checkbox"
+                  checked={selected.has(c.repo.id)}
+                  onChange={() => toggle(c.repo.id)}
+                  className="mt-1 w-5 h-5 accent-accent"
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-2">
+                    <h3 className="font-medium text-lg">{c.repo.name}</h3>
+                    {c.repo.isPrivate && (
+                      <span className="text-[10px] font-mono px-2 py-0.5 bg-bg border border-border rounded text-text-faint">
+                        PRIVATE
+                      </span>
+                    )}
+                  </div>
+                  {c.repo.description && (
+                    <p className="text-text-dim text-sm mb-3 line-clamp-2">
+                      {c.repo.description}
+                    </p>
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    <Tag>{c.stack.framework}</Tag>
+                    {c.stack.hasSupabase && <Tag>supabase</Tag>}
+                    {c.stack.hasStripe && <Tag>stripe</Tag>}
+                    {c.stack.hasVercelConfig && <Tag>vercel</Tag>}
+                  </div>
+                </div>
+              </div>
+            </label>
+          ))}
+        </div>
+
+        <div className="flex justify-between items-center">
+          <p className="text-text-faint text-sm">
+            {selected.size} of {candidates.length} selected
+          </p>
+          <button
+            onClick={handleContinue}
+            disabled={selected.size === 0 || submitting}
+            className="bg-accent text-bg px-6 py-3 rounded-lg font-medium disabled:opacity-50 hover:opacity-90 transition-opacity"
+          >
+            {submitting ? 'Setting up...' : 'Continue → Connect integrations'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Tag({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="text-xs font-mono px-2 py-1 bg-bg border border-border rounded text-text-dim">
+      {children}
+    </span>
+  );
+}
