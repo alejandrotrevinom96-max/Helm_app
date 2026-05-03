@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Skeleton } from '@/components/ui/skeleton';
 
 const INTEGRATIONS = [
   {
@@ -149,8 +150,8 @@ export function IntegrationsClient({
   return (
     <div className="p-4 md:p-8 max-w-4xl">
       <div className="mb-8 md:mb-10">
-        <h1 className="font-display text-3xl md:text-4xl font-medium tracking-tight">Integrations</h1>
-        <p className="text-text-dim mt-1 text-sm">
+        <h1 className="font-display text-display-md font-light tracking-tight">Integrations</h1>
+        <p className="text-text-2 mt-2 max-w-2xl text-sm">
           Connect your data sources, then map each Helm project to its remote counterpart.
         </p>
       </div>
@@ -181,7 +182,10 @@ export function IntegrationsClient({
             </p>
           </div>
           {loadingOptions && (
-            <div className="text-text-faint text-sm mb-4">Loading remote projects…</div>
+            <div className="space-y-2 mb-4" aria-label="Loading remote projects">
+              <Skeleton className="h-4 w-48" />
+              <Skeleton className="h-4 w-64" />
+            </div>
           )}
           <div className="space-y-4">
             {allProjects.map((p) => (
@@ -263,7 +267,7 @@ function CredentialCard({
   };
 
   return (
-    <div className="bg-bg-elev border border-border rounded-xl p-4 md:p-6">
+    <div className="glass rounded-2xl p-4 md:p-6">
       <div className="flex justify-between items-start gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2 mb-1">
@@ -279,7 +283,7 @@ function CredentialCard({
               </span>
             )}
           </div>
-          <p className="text-text-dim text-sm">{integration.description}</p>
+          <p className="text-text-2 text-sm">{integration.description}</p>
         </div>
         <div className="flex gap-3 flex-shrink-0 text-sm">
           {isConnected && (
@@ -334,7 +338,7 @@ function CredentialCard({
 
       {showForm && (
         <div className="mt-4 pt-4 border-t border-border">
-          <p className="text-xs text-text-faint mb-3">{integration.instructions}</p>
+          <p className="text-xs text-text-3 mb-3">{integration.instructions}</p>
           <input
             type="password"
             value={token}
@@ -345,7 +349,7 @@ function CredentialCard({
           <button
             onClick={save}
             disabled={saving || !token}
-            className="bg-accent text-bg px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
+            className="bg-[image:var(--accent-grad)] text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50 transition-transform hover:-translate-y-0.5"
           >
             {saving ? 'Saving…' : 'Save & Connect'}
           </button>
@@ -404,15 +408,15 @@ function ProjectMappingCard({
   };
 
   return (
-    <div className="bg-bg-elev border border-border rounded-xl p-4 md:p-6">
+    <div className="glass rounded-2xl p-4 md:p-6">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-accent to-orange-400 flex items-center justify-center font-display font-semibold text-bg">
+          <div className="w-8 h-8 rounded-lg bg-[image:var(--accent-grad)] flex items-center justify-center font-display font-semibold text-white">
             {project.name[0].toUpperCase()}
           </div>
           <div>
             <h3 className="font-medium">{project.name}</h3>
-            <div className="text-xs font-mono text-text-faint">
+            <div className="text-xs font-mono text-text-3">
               {project.githubRepoFullName ?? '—'}
             </div>
           </div>
@@ -468,12 +472,12 @@ function ProjectMappingCard({
         <button
           onClick={save}
           disabled={saving || !dirty}
-          className="bg-accent text-bg px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
+          className="bg-[image:var(--accent-grad)] text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50 transition-transform hover:-translate-y-0.5"
         >
           {saving ? 'Saving…' : 'Save mappings'}
         </button>
         {savedAt && !dirty && (
-          <span className="text-xs text-green-400">Saved.</span>
+          <span className="text-xs text-success">Saved.</span>
         )}
       </div>
     </div>
@@ -521,7 +525,7 @@ function ProviderSelect({
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="text-[11px] font-mono uppercase tracking-widest text-text-faint mb-1.5 block">
+      <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-1.5 block">
         {label}
       </span>
       {children}

@@ -21,27 +21,41 @@ export function WaitlistForm({ pageId, ctaText }: { pageId: string; ctaText: str
 
   if (submitted) {
     return (
-      <div className="bg-bg-elev border border-border rounded-xl p-6 max-w-md mx-auto">
-        <p className="text-2xl font-display mb-2">You&apos;re in. ✓</p>
-        <p className="text-text-dim text-sm">We&apos;ll email you when we have updates.</p>
+      <div className="glass-elevated rounded-2xl p-8 max-w-md mx-auto">
+        <div className="w-12 h-12 mx-auto mb-4 rounded-full bg-success-soft border border-success/20 flex items-center justify-center">
+          <svg
+            className="w-6 h-6 text-success"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={1.5}
+          >
+            <path d="M5 13l4 4L19 7" />
+          </svg>
+        </div>
+        <p className="text-2xl font-display font-light mb-2">You&apos;re in.</p>
+        <p className="text-text-2 text-sm">We&apos;ll email you when we have updates.</p>
       </div>
     );
   }
 
   return (
-    <form onSubmit={submit} className="flex gap-2 max-w-md mx-auto bg-bg-elev border border-border-bright rounded-xl p-1.5">
+    <form
+      onSubmit={submit}
+      className="flex flex-col sm:flex-row gap-2 max-w-md mx-auto glass-elevated rounded-2xl p-1.5"
+    >
       <input
         type="email"
         required
         value={email}
         onChange={(e) => setEmail(e.target.value)}
         placeholder="you@example.com"
-        className="flex-1 bg-transparent border-none outline-none px-4 py-2 text-text"
+        className="flex-1 bg-transparent border-none outline-none px-4 py-2 text-text-1 placeholder:text-text-3"
       />
       <button
         type="submit"
         disabled={loading}
-        className="bg-accent text-bg px-5 py-2 rounded-lg font-medium disabled:opacity-50"
+        className="bg-[image:var(--accent-grad)] text-white px-5 py-2 rounded-xl font-medium disabled:opacity-50 transition-transform hover:-translate-y-0.5"
       >
         {loading ? '...' : ctaText}
       </button>

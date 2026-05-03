@@ -45,21 +45,23 @@ export function MarketingClient({
   return (
     <div className="p-4 md:p-8">
       <div className="mb-6 md:mb-8">
-        <h1 className="font-display text-3xl md:text-4xl font-medium tracking-tight">Marketing</h1>
-        <p className="text-text-dim mt-1 text-sm">Generate posts tailored to your project</p>
+        <h1 className="font-display text-display-md font-light tracking-tight">Marketing</h1>
+        <p className="text-text-2 mt-2 max-w-2xl text-sm">
+          Generate posts tailored to your project
+        </p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-4">
-        <div className="bg-bg-elev border border-border rounded-xl p-4 md:p-6">
+        <div className="glass rounded-2xl p-4 md:p-6">
           <div className="flex flex-wrap gap-2 mb-4 border-b border-border pb-4">
             {PLATFORMS.map((p) => (
               <button
                 key={p.id}
                 onClick={() => setPlatform(p.id)}
-                className={`px-3 py-1.5 rounded-md text-xs flex items-center gap-2 border ${
+                className={`px-3 py-1.5 rounded-md text-xs flex items-center gap-2 border transition-colors ${
                   platform === p.id
                     ? 'border-accent bg-accent-soft text-accent'
-                    : 'border-border bg-bg text-text-dim'
+                    : 'border-border bg-bg text-text-2 hover:text-text-1'
                 }`}
               >
                 <span style={{ color: p.color }}>●</span>
@@ -68,7 +70,7 @@ export function MarketingClient({
             ))}
           </div>
 
-          <label className="block text-xs font-mono uppercase tracking-wider text-text-faint mb-2">
+          <label className="block text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2">
             What do you want to post about?
           </label>
           <textarea
@@ -81,7 +83,7 @@ export function MarketingClient({
           <button
             onClick={generate}
             disabled={loading || !prompt.trim()}
-            className="mt-4 bg-accent text-bg px-5 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
+            className="mt-4 bg-[image:var(--accent-grad)] text-white px-5 py-2 rounded-lg text-sm font-medium disabled:opacity-50 transition-transform hover:-translate-y-0.5"
           >
             {loading ? 'Generating...' : 'Generate with Claude →'}
           </button>
@@ -99,18 +101,18 @@ export function MarketingClient({
           )}
         </div>
 
-        <div className="bg-bg-elev border border-border rounded-xl p-5">
+        <div className="glass rounded-2xl p-5">
           <div className="font-display text-base font-medium mb-1">Recent generations</div>
-          <div className="text-[10px] font-mono uppercase tracking-widest text-text-faint mb-4">
+          <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-4">
             Last {recentPosts.length}
           </div>
           {recentPosts.length === 0 && (
-            <p className="text-text-faint text-sm">No posts generated yet.</p>
+            <p className="text-text-3 text-sm">No posts generated yet.</p>
           )}
           {recentPosts.map((p) => (
             <div key={p.id} className="bg-bg border border-border rounded-lg p-3 mb-2 text-xs">
-              <div className="text-text-faint font-mono mb-1">{p.platform}</div>
-              <div className="line-clamp-3 text-text-dim">{p.content}</div>
+              <div className="text-text-3 font-mono mb-1">{p.platform}</div>
+              <div className="line-clamp-3 text-text-2">{p.content}</div>
             </div>
           ))}
         </div>

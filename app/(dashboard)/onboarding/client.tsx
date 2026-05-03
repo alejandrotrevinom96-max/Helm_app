@@ -63,31 +63,31 @@ export function OnboardingClient({
     <div className="min-h-screen px-4 md:px-6 py-8 md:py-16">
       <div className="max-w-3xl mx-auto">
         <div className="mb-8 md:mb-12">
-          <p className="font-mono text-xs text-accent uppercase tracking-widest mb-4">
+          <p className="font-mono text-[10px] text-accent uppercase tracking-[0.15em] mb-4">
             Step 1 of 3
           </p>
-          <h1 className="font-display text-4xl md:text-5xl font-normal mb-4 leading-tight">
-            We found <em className="text-accent italic font-light">{candidates.length}</em>{' '}
+          <h1 className="font-display text-display-lg font-light leading-tight mb-4">
+            We found <em className="editorial-italic">{candidates.length}</em>{' '}
             {candidates.length === 1 ? 'project' : 'projects'}
           </h1>
-          <p className="text-text-dim text-base md:text-lg">
+          <p className="text-text-2 text-base md:text-lg max-w-2xl">
             Helm scanned your recent repos for SaaS signals (Next.js, Supabase, Stripe, Vercel).
             Select which ones to track.
           </p>
         </div>
 
         {scanError && (
-          <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4 mb-6 text-red-300 text-sm">
+          <div className="bg-danger/10 border border-danger/30 rounded-lg p-4 mb-6 text-danger text-sm">
             Couldn&apos;t scan repos: {scanError}
           </div>
         )}
 
         {candidates.length === 0 && !scanError && (
-          <div className="bg-bg-elev border border-border rounded-xl p-12 text-center">
-            <p className="text-text-dim mb-4">
+          <div className="glass rounded-2xl p-12 text-center">
+            <p className="text-text-2 mb-4">
               No SaaS-like projects detected in your recent repos.
             </p>
-            <p className="text-text-faint text-sm">
+            <p className="text-text-3 text-sm">
               We look for repos with Next.js + Supabase, Stripe, or vercel.json.
               You can add a project manually from the dashboard.
             </p>
@@ -98,10 +98,10 @@ export function OnboardingClient({
           {candidates.map((c) => (
             <label
               key={c.repo.id}
-              className={`block bg-bg-elev border rounded-xl p-5 cursor-pointer transition-all ${
+              className={`block glass rounded-2xl p-5 cursor-pointer transition-all hover:-translate-y-0.5 ${
                 selected.has(c.repo.id)
-                  ? 'border-accent shadow-[0_0_0_1px_rgba(255,107,53,0.5)]'
-                  : 'border-border hover:border-border-bright'
+                  ? 'border-accent shadow-[0_0_0_1px_var(--accent-glow)]'
+                  : 'hover:border-border-bright'
               }`}
             >
               <div className="flex items-start gap-4">
@@ -115,13 +115,13 @@ export function OnboardingClient({
                   <div className="flex items-center gap-2 mb-2">
                     <h3 className="font-medium text-lg">{c.repo.name}</h3>
                     {c.repo.isPrivate && (
-                      <span className="text-[10px] font-mono px-2 py-0.5 bg-bg border border-border rounded text-text-faint">
+                      <span className="text-[10px] font-mono px-2 py-0.5 bg-bg border border-border rounded text-text-3 tracking-[0.15em]">
                         PRIVATE
                       </span>
                     )}
                   </div>
                   {c.repo.description && (
-                    <p className="text-text-dim text-sm mb-3 line-clamp-2">
+                    <p className="text-text-2 text-sm mb-3 line-clamp-2">
                       {c.repo.description}
                     </p>
                   )}
@@ -138,13 +138,13 @@ export function OnboardingClient({
         </div>
 
         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
-          <p className="text-text-faint text-sm">
+          <p className="text-text-3 text-sm">
             {selected.size} of {candidates.length} selected
           </p>
           <button
             onClick={handleContinue}
             disabled={selected.size === 0 || submitting}
-            className="bg-accent text-bg px-6 py-3 rounded-lg font-medium disabled:opacity-50 hover:opacity-90 transition-opacity"
+            className="bg-[image:var(--accent-grad)] text-white px-7 py-3 rounded-lg font-medium disabled:opacity-50 transition-transform hover:-translate-y-0.5"
           >
             {submitting ? 'Setting up...' : 'Continue → Connect integrations'}
           </button>
@@ -156,7 +156,7 @@ export function OnboardingClient({
 
 function Tag({ children }: { children: React.ReactNode }) {
   return (
-    <span className="text-xs font-mono px-2 py-1 bg-bg border border-border rounded text-text-dim">
+    <span className="text-xs font-mono px-2 py-1 bg-bg border border-border rounded text-text-2">
       {children}
     </span>
   );

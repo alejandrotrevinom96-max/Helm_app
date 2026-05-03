@@ -7,23 +7,66 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        bg: '#0a0a0a',
-        'bg-elev': '#111111',
-        'bg-card': '#161616',
-        'bg-hover': '#1c1c1c',
-        border: '#262626',
-        'border-bright': '#404040',
-        text: '#fafafa',
-        'text-dim': '#a3a3a3',
-        'text-faint': '#525252',
-        accent: '#ff6b35',
-        'accent-soft': 'rgba(255, 107, 53, 0.08)',
-        'accent-glow': 'rgba(255, 107, 53, 0.4)',
+        bg: 'var(--bg)',
+        'bg-elev': 'var(--bg-elev)',
+        surface: {
+          1: 'var(--surface-1)',
+          2: 'var(--surface-2)',
+        },
+        border: {
+          DEFAULT: 'var(--border)',
+          bright: 'var(--border-bright)',
+        },
+        text: {
+          1: 'var(--text-1)',
+          2: 'var(--text-2)',
+          3: 'var(--text-3)',
+        },
+        accent: {
+          DEFAULT: 'var(--accent)',
+          hover: 'var(--accent-hover)',
+          soft: 'var(--accent-soft)',
+          glow: 'var(--accent-glow)',
+        },
+        success: {
+          DEFAULT: 'var(--success)',
+          soft: 'var(--success-soft)',
+        },
+        danger: 'var(--danger)',
       },
       fontFamily: {
-        display: ['Fraunces', 'serif'],
+        display: ['Fraunces', 'Georgia', 'serif'],
         sans: ['Geist', 'system-ui', 'sans-serif'],
         mono: ['JetBrains Mono', 'monospace'],
+      },
+      fontSize: {
+        'display-xl': [
+          'clamp(3rem, 8vw, 7rem)',
+          { lineHeight: '0.95', letterSpacing: '-0.03em' },
+        ],
+        'display-lg': [
+          'clamp(2.5rem, 6vw, 5rem)',
+          { lineHeight: '1', letterSpacing: '-0.025em' },
+        ],
+        'display-md': [
+          'clamp(2rem, 4vw, 3rem)',
+          { lineHeight: '1.1', letterSpacing: '-0.02em' },
+        ],
+        metric: [
+          'clamp(2.5rem, 5vw, 3.5rem)',
+          { lineHeight: '1', letterSpacing: '-0.02em' },
+        ],
+      },
+      boxShadow: {
+        editorial: 'var(--shadow-1)',
+        'editorial-lg': 'var(--shadow-2)',
+        glass: 'var(--shadow-glass)',
+      },
+      backdropBlur: {
+        glass: '20px',
+      },
+      animation: {
+        'theme-fade': 'fade 0.4s ease',
       },
     },
   },

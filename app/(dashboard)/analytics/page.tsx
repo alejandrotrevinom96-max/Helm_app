@@ -37,6 +37,21 @@ export default async function AnalyticsPage() {
 
   const connected = new Set(connectedIntegrations.map((i) => i.provider));
 
+  // Last sync timestamp across all sources for this project
+  const [latestSync] = await db
+    .select({ syncedAt: metricSnapshots.syncedAt })
+    .from(metricSnapshots)
+    .where(eq(metricSnapshots.projectId, project.id))
+    .orderBy(desc(metricSnapshots.syncedAt))
+    .limit(1);
+
+  // Whether the active project still has any remote mapped
+  const hasMappings = !!(
+    project.vercelProjectId ||
+    project.supabaseProjectRef ||
+    project.metaAdAccountId
+  );
+
   return (
     <AnalyticsClient
       project={project}
@@ -44,6 +59,8 @@ export default async function AnalyticsPage() {
       hasVercel={connected.has('vercel')}
       hasSupabase={connected.has('supabase')}
       hasMeta={connected.has('meta')}
+      lastSyncAt={latestSync?.syncedAt ?? null}
+      hasMappings={hasMappings}
     />
   );
 }
