@@ -84,6 +84,16 @@ export const projects = pgTable(
     domain: text('domain'),
     isActive: boolean('is_active').default(true),
     createdAt: timestamp('created_at').defaultNow().notNull(),
+    // Brand context (for the marketing tab)
+    brandUrl: text('brand_url'),
+    brandContext: jsonb('brand_context').$type<{
+      voice?: string;
+      tone?: string[];
+      audience?: string;
+      keyPhrases?: string[];
+      productFocus?: string;
+      extractedAt?: string;
+    }>(),
   },
   (t) => ({
     uniqueUserRepo: unique().on(t.userId, t.githubRepoId),
@@ -179,6 +189,29 @@ export const helmWaitlist = pgTable('helm_waitlist', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
+// ===== Scheduled Posts =====
+// Posts the user composed and scheduled for later (no auto-post yet — the
+// cron just flips status to 'notified' so a future Resend hook can email
+// the user a reminder + ready-to-paste content).
+export const scheduledPosts = pgTable('scheduled_posts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  projectId: uuid('project_id')
+    .notNull()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  platform: text('platform').notNull(), // instagram | facebook | linkedin | threads
+  content: text('content').notNull(),
+  templateUsed: text('template_used'),
+  scheduledFor: timestamp('scheduled_for').notNull(),
+  status: text('status').notNull().default('scheduled'),
+  // 'scheduled' | 'notified' | 'posted' | 'cancelled'
+  notifiedAt: timestamp('notified_at'),
+  postedAt: timestamp('posted_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
 // ===== Type exports =====
 export type User = typeof users.$inferSelect;
 export type Project = typeof projects.$inferSelect;
@@ -187,3 +220,4 @@ export type MetricSnapshot = typeof metricSnapshots.$inferSelect;
 export type GeneratedPost = typeof generatedPosts.$inferSelect;
 export type ResearchFinding = typeof researchFindings.$inferSelect;
 export type WaitlistPage = typeof waitlistPages.$inferSelect;
+export type ScheduledPost = typeof scheduledPosts.$inferSelect;

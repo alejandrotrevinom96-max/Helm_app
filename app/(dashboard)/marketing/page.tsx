@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { db } from '@/lib/db';
-import { generatedPosts } from '@/lib/db/schema';
-import { eq, desc } from 'drizzle-orm';
+import { generatedPosts, scheduledPosts } from '@/lib/db/schema';
+import { eq, desc, and, asc } from 'drizzle-orm';
 import { redirect } from 'next/navigation';
 import { getActiveProject } from '@/lib/active-project';
 import { MarketingClient } from './client';
@@ -21,5 +21,23 @@ export default async function MarketingPage() {
     .orderBy(desc(generatedPosts.createdAt))
     .limit(10);
 
-  return <MarketingClient project={project} recentPosts={recentPosts} />;
+  const upcoming = await db
+    .select()
+    .from(scheduledPosts)
+    .where(
+      and(
+        eq(scheduledPosts.projectId, project.id),
+        eq(scheduledPosts.status, 'scheduled')
+      )
+    )
+    .orderBy(asc(scheduledPosts.scheduledFor))
+    .limit(10);
+
+  return (
+    <MarketingClient
+      project={project}
+      recentPosts={recentPosts}
+      upcoming={upcoming}
+    />
+  );
 }

@@ -1,6 +1,6 @@
 import { db } from '@/lib/db';
-import { projects, integrations, metricSnapshots } from '@/lib/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { projects, integrations, metricSnapshots, scheduledPosts } from '@/lib/db/schema';
+import { eq, and, lte } from 'drizzle-orm';
 import { decrypt } from '@/lib/crypto';
 import { getVercelAnalytics } from '@/lib/integrations/vercel';
 import { getAuthUsersCount } from '@/lib/integrations/supabase-mgmt';
@@ -95,5 +95,29 @@ export async function GET(request: Request) {
     }
   }
 
-  return NextResponse.json({ synced, projects: allProjects.length });
+  // Mark scheduled posts that are due so the user knows it's time to post.
+  // TODO: when Resend (or similar) is wired up, send an email here with the
+  // ready-to-paste content instead of just flipping the status flag.
+  const due = await db
+    .select()
+    .from(scheduledPosts)
+    .where(
+      and(
+        eq(scheduledPosts.status, 'scheduled'),
+        lte(scheduledPosts.scheduledFor, new Date())
+      )
+    );
+
+  for (const post of due) {
+    await db
+      .update(scheduledPosts)
+      .set({ status: 'notified', notifiedAt: new Date() })
+      .where(eq(scheduledPosts.id, post.id));
+  }
+
+  return NextResponse.json({
+    synced,
+    projects: allProjects.length,
+    notifiedPosts: due.length,
+  });
 }

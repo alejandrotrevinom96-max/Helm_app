@@ -41,3 +41,32 @@ export function timeAgo(date: Date | string): string {
   const months = Math.floor(days / 30);
   return `${months}mo`;
 }
+
+/**
+ * Format a future date as "Today 6 PM", "Tomorrow 9 AM", "Wed Mar 5 · 3 PM".
+ * Used for the upcoming-posts sidebar.
+ */
+export function formatScheduledDate(date: Date | string): string {
+  const d = typeof date === 'string' ? new Date(date) : date;
+  const now = new Date();
+  const tomorrow = new Date(now);
+  tomorrow.setDate(now.getDate() + 1);
+
+  const isToday = d.toDateString() === now.toDateString();
+  const isTomorrow = d.toDateString() === tomorrow.toDateString();
+
+  const time = d.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+
+  if (isToday) return `Today ${time}`;
+  if (isTomorrow) return `Tomorrow ${time}`;
+
+  const day = d.toLocaleDateString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  });
+  return `${day} · ${time}`;
+}

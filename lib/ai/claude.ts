@@ -9,15 +9,31 @@ const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
 // Use Opus for nuanced tasks (research synthesis, qualitative analysis)
 const OPUS_MODEL = 'claude-opus-4-7';
 
+export interface BrandContext {
+  voice?: string;
+  tone?: string[];
+  audience?: string;
+  keyPhrases?: string[];
+  productFocus?: string;
+  extractedAt?: string;
+}
+
 interface ProjectContext {
   name: string;
   description?: string;
   recentSignups?: number;
   recentFeatures?: string[];
+  brandContext?: BrandContext | null;
+  templateHint?: string | null;
 }
 
 /**
  * Generate a social media post tailored to a platform and project context.
+ *
+ * Brand context (when present) is injected so Claude matches the user's
+ * actual voice/tone instead of producing generic SaaS copy. Template hint
+ * (when present) steers the structure of the post (e.g. milestone with
+ * 3 bullets, hot take with strong opener + counter-arguments).
  */
 export async function generatePost(params: {
   platform: 'instagram' | 'facebook' | 'linkedin' | 'threads';
@@ -37,21 +53,48 @@ export async function generatePost(params: {
       'Punchy, 50-80 words max. Conversational, like a tweet but slightly longer. No hashtags.',
   };
 
-  const systemPrompt = `You are a marketing assistant for an indie hacker building "${context.name}".
+  const brandSection = context.brandContext
+    ? [
+        '',
+        'Brand voice (match this exactly):',
+        context.brandContext.voice && `- Voice: ${context.brandContext.voice}`,
+        context.brandContext.tone?.length &&
+          `- Tone: ${context.brandContext.tone.join(', ')}`,
+        context.brandContext.audience &&
+          `- Audience: ${context.brandContext.audience}`,
+        context.brandContext.keyPhrases?.length &&
+          `- Phrases the brand uses: ${context.brandContext.keyPhrases.join(', ')}`,
+        context.brandContext.productFocus &&
+          `- Product focus: ${context.brandContext.productFocus}`,
+      ]
+        .filter(Boolean)
+        .join('\n')
+    : '';
+
+  const templateSection = context.templateHint
+    ? `\nTemplate guidance: ${context.templateHint}`
+    : '';
+
+  // Hype-word ban only applies when the brand tone is restrained.
+  const tone = context.brandContext?.tone ?? [];
+  const allowsHype = tone.includes('playful') || tone.includes('bold');
+
+  const systemPrompt = `You are a marketing assistant for "${context.name}".
 
 Project context:
 ${context.description ? `- Description: ${context.description}` : ''}
 ${context.recentSignups ? `- Recent signups: ${context.recentSignups}` : ''}
 ${context.recentFeatures?.length ? `- Recent features: ${context.recentFeatures.join(', ')}` : ''}
+${brandSection}
 
 Platform: ${platform}
 Platform guidance: ${platformGuidance[platform]}
+${templateSection}
 
 Rules:
 - Write in first person as the founder
 - Be authentic, not salesy
-- No "Are you tired of..." openings
-- No empty hype or buzzwords
+- No "Are you tired of..." openings${allowsHype ? '' : '\n- No empty hype or buzzwords'}
 - Output ONLY the post text, no preamble or explanation`;
 
   const response = await anthropic.messages.create({
