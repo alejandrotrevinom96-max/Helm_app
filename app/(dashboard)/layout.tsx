@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { projects, users } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { redirect } from 'next/navigation';
+import { headers } from 'next/headers';
 import { Sidebar } from '@/components/dashboard/sidebar';
 
 export default async function DashboardLayout({
@@ -21,7 +22,15 @@ export default async function DashboardLayout({
     .from(projects)
     .where(eq(projects.userId, user.id));
 
-  if (!dbUser?.hasCompletedOnboarding && userProjects.length === 0) {
+  // Avoid self-redirect loop when the user is already on /onboarding.
+  // Without this guard the layout would trigger a 307 to its own URL,
+  // which under HMR + scanUserRepos burns through GitHub's API quota.
+  const pathname = (await headers()).get('x-pathname') ?? '';
+  if (
+    !dbUser?.hasCompletedOnboarding &&
+    userProjects.length === 0 &&
+    !pathname.startsWith('/onboarding')
+  ) {
     redirect('/onboarding');
   }
 
