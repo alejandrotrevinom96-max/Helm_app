@@ -31,7 +31,21 @@ export async function POST(request: Request) {
           hasStripe: p.stack.hasStripe,
         },
       })
-      .onConflictDoNothing();
+      // Re-running onboarding for the same repo refreshes its name and the
+      // detected stack snapshot, but intentionally preserves slug and the
+      // Vercel/Supabase/Meta mappings the user has configured since.
+      .onConflictDoUpdate({
+        target: [projects.userId, projects.githubRepoId],
+        set: {
+          name: p.repo.name,
+          githubRepoFullName: p.repo.fullName,
+          detectedStack: {
+            framework: p.stack.framework,
+            hasSupabase: p.stack.hasSupabase,
+            hasStripe: p.stack.hasStripe,
+          },
+        },
+      });
   }
 
   await db

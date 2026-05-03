@@ -1,8 +1,9 @@
 import { createClient } from '@/lib/supabase/server';
 import { db } from '@/lib/db';
-import { projects, integrations, metricSnapshots } from '@/lib/db/schema';
+import { integrations, metricSnapshots } from '@/lib/db/schema';
 import { eq, and, gte, desc } from 'drizzle-orm';
 import { redirect } from 'next/navigation';
+import { getActiveProject } from '@/lib/active-project';
 import { AnalyticsClient } from './client';
 
 export default async function AnalyticsPage() {
@@ -10,8 +11,7 @@ export default async function AnalyticsPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
-  const userProjects = await db.select().from(projects).where(eq(projects.userId, user.id));
-  const project = userProjects[0];
+  const project = await getActiveProject(user.id);
   if (!project) redirect('/onboarding');
 
   // Last 30 days of metrics

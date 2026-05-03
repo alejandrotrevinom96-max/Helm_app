@@ -2,24 +2,41 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useState, useTransition } from 'react';
 import type { Project } from '@/lib/db/schema';
+import { setActiveProject } from '@/app/(dashboard)/actions';
 
 const navItems = [
   { href: '/analytics', label: 'Analytics', icon: AnalyticsIcon },
   { href: '/marketing', label: 'Marketing', icon: MarketingIcon },
   { href: '/research', label: 'Research', icon: ResearchIcon },
   { href: '/validate', label: 'Validate', icon: ValidateIcon },
+  { href: '/integrations', label: 'Integrations', icon: IntegrationsIcon },
 ];
 
 export function Sidebar({
-  projects,
+  activeProject,
+  allProjects,
   user,
 }: {
-  projects: Project[];
+  activeProject: Project | null;
+  allProjects: Project[];
   user: { name: string; email: string; avatarUrl: string | null };
 }) {
   const pathname = usePathname();
-  const activeProject = projects[0]; // TODO: project switcher
+  const [open, setOpen] = useState(false);
+  const [isPending, startTransition] = useTransition();
+
+  const switchProject = (id: string) => {
+    if (id === activeProject?.id) {
+      setOpen(false);
+      return;
+    }
+    startTransition(async () => {
+      await setActiveProject(id);
+      setOpen(false);
+    });
+  };
 
   return (
     <aside className="bg-bg border-r border-border flex flex-col">
@@ -38,16 +55,73 @@ export function Sidebar({
       </div>
 
       {activeProject && (
-        <div className="m-4 p-3 bg-bg-elev border border-border rounded-lg flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-accent to-orange-400 flex items-center justify-center font-display font-semibold text-bg">
-            {activeProject.name[0].toUpperCase()}
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-medium truncate">{activeProject.name}</div>
-            <div className="text-xs font-mono text-text-faint truncate">
-              {activeProject.domain || activeProject.githubRepoFullName}
+        <div className="relative m-4">
+          <button
+            onClick={() => setOpen(!open)}
+            disabled={isPending}
+            className="w-full p-3 bg-bg-elev border border-border rounded-lg flex items-center gap-3 hover:border-border-bright transition-colors disabled:opacity-50"
+          >
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-accent to-orange-400 flex items-center justify-center font-display font-semibold text-bg">
+              {activeProject.name[0].toUpperCase()}
             </div>
-          </div>
+            <div className="flex-1 min-w-0 text-left">
+              <div className="text-sm font-medium truncate">{activeProject.name}</div>
+              <div className="text-xs font-mono text-text-faint truncate">
+                {activeProject.domain || activeProject.githubRepoFullName}
+              </div>
+            </div>
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              className={`text-text-faint flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
+            >
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </button>
+
+          {open && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+              <div className="absolute top-full left-0 right-0 mt-1 bg-bg-elev border border-border-bright rounded-lg shadow-xl z-20 overflow-hidden">
+                {allProjects.map((p) => (
+                  <button
+                    key={p.id}
+                    onClick={() => switchProject(p.id)}
+                    disabled={isPending}
+                    className={`w-full p-3 flex items-center gap-3 text-left transition-colors disabled:opacity-50 ${
+                      p.id === activeProject.id
+                        ? 'bg-accent-soft'
+                        : 'hover:bg-bg'
+                    }`}
+                  >
+                    <div className="w-7 h-7 rounded-md bg-gradient-to-br from-accent to-orange-400 flex items-center justify-center font-display font-semibold text-bg text-sm">
+                      {p.name[0].toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm truncate">{p.name}</div>
+                      <div className="text-[11px] font-mono text-text-faint truncate">
+                        {p.githubRepoFullName}
+                      </div>
+                    </div>
+                    {p.id === activeProject.id && (
+                      <span className="text-accent text-xs">✓</span>
+                    )}
+                  </button>
+                ))}
+                <Link
+                  href="/onboarding"
+                  className="block w-full p-3 border-t border-border text-sm text-accent hover:bg-bg text-center transition-colors"
+                  onClick={() => setOpen(false)}
+                >
+                  + Add project
+                </Link>
+              </div>
+            </>
+          )}
         </div>
       )}
 
@@ -117,6 +191,13 @@ function ValidateIcon() {
   return (
     <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
       <path d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
+    </svg>
+  );
+}
+function IntegrationsIcon() {
+  return (
+    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+      <path d="M14 5l7 7m0 0l-7 7m7-7H3" />
     </svg>
   );
 }

@@ -52,7 +52,7 @@ export function OnboardingClient({
       body: JSON.stringify({ projects: chosen }),
     });
     if (res.ok) {
-      router.push('/analytics');
+      router.push('/integrations');
     } else {
       setSubmitting(false);
       alert('Error creating projects. Try again.');

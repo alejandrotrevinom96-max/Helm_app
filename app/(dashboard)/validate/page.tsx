@@ -1,8 +1,9 @@
 import { createClient } from '@/lib/supabase/server';
 import { db } from '@/lib/db';
-import { projects, waitlistPages, waitlistSignups } from '@/lib/db/schema';
+import { waitlistPages, waitlistSignups } from '@/lib/db/schema';
 import { eq, sql } from 'drizzle-orm';
 import { redirect } from 'next/navigation';
+import { getActiveProject } from '@/lib/active-project';
 import { ValidateClient } from './client';
 
 export default async function ValidatePage() {
@@ -10,8 +11,7 @@ export default async function ValidatePage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
-  const userProjects = await db.select().from(projects).where(eq(projects.userId, user.id));
-  const project = userProjects[0];
+  const project = await getActiveProject(user.id);
   if (!project) redirect('/onboarding');
 
   // Get all waitlist pages with signup counts

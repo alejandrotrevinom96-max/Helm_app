@@ -1,10 +1,11 @@
 import { createClient } from '@/lib/supabase/server';
 import { db } from '@/lib/db';
-import { projects, users } from '@/lib/db/schema';
+import { users } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { redirect } from 'next/navigation';
 import { headers } from 'next/headers';
 import { Sidebar } from '@/components/dashboard/sidebar';
+import { getActiveProject, getAllUserProjects } from '@/lib/active-project';
 
 export default async function DashboardLayout({
   children,
@@ -16,11 +17,8 @@ export default async function DashboardLayout({
   if (!user) redirect('/login');
 
   const [dbUser] = await db.select().from(users).where(eq(users.id, user.id)).limit(1);
-
-  const userProjects = await db
-    .select()
-    .from(projects)
-    .where(eq(projects.userId, user.id));
+  const allProjects = await getAllUserProjects(user.id);
+  const activeProject = await getActiveProject(user.id);
 
   // Avoid self-redirect loop when the user is already on /onboarding.
   // Without this guard the layout would trigger a 307 to its own URL,
@@ -28,7 +26,7 @@ export default async function DashboardLayout({
   const pathname = (await headers()).get('x-pathname') ?? '';
   if (
     !dbUser?.hasCompletedOnboarding &&
-    userProjects.length === 0 &&
+    allProjects.length === 0 &&
     !pathname.startsWith('/onboarding')
   ) {
     redirect('/onboarding');
@@ -37,7 +35,8 @@ export default async function DashboardLayout({
   return (
     <div className="grid grid-cols-[240px_1fr] min-h-screen">
       <Sidebar
-        projects={userProjects}
+        activeProject={activeProject}
+        allProjects={allProjects}
         user={{
           name: dbUser?.name ?? 'Founder',
           email: dbUser?.email ?? '',

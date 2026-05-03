@@ -55,34 +55,40 @@ export const integrations = pgTable(
 
 // ===== Projects =====
 // Auto-detected from GitHub repos during onboarding
-export const projects = pgTable('projects', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  userId: uuid('user_id')
-    .notNull()
-    .references(() => users.id, { onDelete: 'cascade' }),
-  name: text('name').notNull(),
-  slug: text('slug').notNull(), // URL-safe version
-  // GitHub
-  githubRepoFullName: text('github_repo_full_name'), // 'owner/repo'
-  githubRepoId: integer('github_repo_id'),
-  // Vercel
-  vercelProjectId: text('vercel_project_id'),
-  vercelTeamId: text('vercel_team_id'),
-  // Supabase
-  supabaseProjectRef: text('supabase_project_ref'),
-  // Meta Ads
-  metaAdAccountId: text('meta_ad_account_id'),
-  // Detected stack
-  detectedStack: jsonb('detected_stack').$type<{
-    framework?: string;
-    hasSupabase?: boolean;
-    hasStripe?: boolean;
-    hasMeta?: boolean;
-  }>(),
-  domain: text('domain'),
-  isActive: boolean('is_active').default(true),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-});
+export const projects = pgTable(
+  'projects',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    slug: text('slug').notNull(), // URL-safe version
+    // GitHub
+    githubRepoFullName: text('github_repo_full_name'), // 'owner/repo'
+    githubRepoId: integer('github_repo_id'),
+    // Vercel
+    vercelProjectId: text('vercel_project_id'),
+    vercelTeamId: text('vercel_team_id'),
+    // Supabase
+    supabaseProjectRef: text('supabase_project_ref'),
+    // Meta Ads
+    metaAdAccountId: text('meta_ad_account_id'),
+    // Detected stack
+    detectedStack: jsonb('detected_stack').$type<{
+      framework?: string;
+      hasSupabase?: boolean;
+      hasStripe?: boolean;
+      hasMeta?: boolean;
+    }>(),
+    domain: text('domain'),
+    isActive: boolean('is_active').default(true),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    uniqueUserRepo: unique().on(t.userId, t.githubRepoId),
+  })
+);
 
 // ===== Metric Snapshots =====
 // Cached metric values to avoid hammering APIs

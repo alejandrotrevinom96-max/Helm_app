@@ -1,8 +1,9 @@
 import { createClient } from '@/lib/supabase/server';
 import { db } from '@/lib/db';
-import { projects, researchFindings } from '@/lib/db/schema';
+import { researchFindings } from '@/lib/db/schema';
 import { eq, desc } from 'drizzle-orm';
 import { redirect } from 'next/navigation';
+import { getActiveProject } from '@/lib/active-project';
 import { ResearchClient } from './client';
 
 export default async function ResearchPage() {
@@ -10,8 +11,7 @@ export default async function ResearchPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
-  const userProjects = await db.select().from(projects).where(eq(projects.userId, user.id));
-  const project = userProjects[0];
+  const project = await getActiveProject(user.id);
   if (!project) redirect('/onboarding');
 
   const findings = await db

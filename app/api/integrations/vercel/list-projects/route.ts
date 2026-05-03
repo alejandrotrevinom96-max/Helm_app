@@ -1,0 +1,35 @@
+import { createClient } from '@/lib/supabase/server';
+import { db } from '@/lib/db';
+import { integrations } from '@/lib/db/schema';
+import { eq, and } from 'drizzle-orm';
+import { decrypt } from '@/lib/crypto';
+import { listVercelProjects } from '@/lib/integrations/vercel';
+import { NextResponse } from 'next/server';
+
+export async function GET() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const [int] = await db
+    .select()
+    .from(integrations)
+    .where(and(eq(integrations.userId, user.id), eq(integrations.provider, 'vercel')))
+    .limit(1);
+  if (!int) return NextResponse.json({ projects: [] });
+
+  try {
+    const token = decrypt(int.encryptedAccessToken);
+    const projects = await listVercelProjects(token);
+    return NextResponse.json({
+      projects: projects.map((p) => ({
+        id: p.id,
+        name: p.name,
+        repo: p.link?.repo,
+        domain: p.targets?.production?.domain,
+      })),
+    });
+  } catch {
+    return NextResponse.json({ error: 'Failed to list Vercel projects' }, { status: 500 });
+  }
+}
