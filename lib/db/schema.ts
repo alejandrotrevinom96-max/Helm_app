@@ -166,6 +166,24 @@ export const waitlistPages = pgTable('waitlist_pages', {
   }>(),
   isActive: boolean('is_active').default(true),
   createdAt: timestamp('created_at').defaultNow().notNull(),
+  // Validation template + per-template config
+  template: text('template').default('minimal'),
+  // 'minimal' | 'beta-tester' | 'feature-vote' | 'pricing-test' | 'survey-5q'
+  templateConfig: jsonb('template_config').$type<{
+    subtitle?: string;
+    ctaText?: string;
+    qualifyingQuestions?: {
+      question: string;
+      type: 'text' | 'select';
+      options?: string[];
+    }[];
+    features?: { id: string; title: string; description: string }[];
+    maxVotesPerUser?: number;
+    pricePerMonth?: number;
+    priceVariant?: 'a' | 'b';
+    discountPct?: number;
+    questions?: string[];
+  }>(),
 });
 
 // ===== Waitlist Signups =====
@@ -177,6 +195,26 @@ export const waitlistSignups = pgTable('waitlist_signups', {
     .references(() => waitlistPages.id, { onDelete: 'cascade' }),
   email: text('email').notNull(),
   metadata: jsonb('metadata'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// ===== Waitlist Responses =====
+// Generic response storage for any of the 5 validate templates. The shape of
+// `responses` jsonb depends on the page's template:
+//   minimal      → {}
+//   beta-tester  → { q0: "...", q1: "..." }
+//   feature-vote → { votes: ['feat-1', 'feat-3'] }
+//   pricing-test → { commit: true, price, discountedPrice, variant }
+//   survey-5q    → { q0: "...", q1: "...", ... }
+export const waitlistResponses = pgTable('waitlist_responses', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  waitlistPageId: uuid('waitlist_page_id')
+    .notNull()
+    .references(() => waitlistPages.id, { onDelete: 'cascade' }),
+  email: text('email'),
+  responses: jsonb('responses').$type<Record<string, unknown>>(),
+  ipHash: text('ip_hash'), // sha256(ip + slug) for dedup
+  userAgent: text('user_agent'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
@@ -251,5 +289,6 @@ export type MetricSnapshot = typeof metricSnapshots.$inferSelect;
 export type GeneratedPost = typeof generatedPosts.$inferSelect;
 export type ResearchFinding = typeof researchFindings.$inferSelect;
 export type WaitlistPage = typeof waitlistPages.$inferSelect;
+export type WaitlistResponse = typeof waitlistResponses.$inferSelect;
 export type ScheduledPost = typeof scheduledPosts.$inferSelect;
 export type ResearchConfig = typeof researchConfig.$inferSelect;

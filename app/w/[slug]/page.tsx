@@ -1,10 +1,16 @@
 import { db } from '@/lib/db';
-import { waitlistPages, waitlistSignups } from '@/lib/db/schema';
-import { eq, sql } from 'drizzle-orm';
+import { waitlistPages } from '@/lib/db/schema';
+import { eq } from 'drizzle-orm';
 import { notFound } from 'next/navigation';
-import { WaitlistForm } from './form';
+import type { TemplateConfig } from '@/lib/validate/defaults';
+import type { PublicPageData } from './templates/_shared';
+import { MinimalTemplate } from './templates/minimal';
+import { BetaTesterTemplate } from './templates/beta-tester';
+import { FeatureVoteTemplate } from './templates/feature-vote';
+import { PricingTestTemplate } from './templates/pricing-test';
+import { Survey5QTemplate } from './templates/survey-5q';
 
-export default async function PublicWaitlistPage({
+export default async function WaitlistPublicPage({
   params,
 }: {
   params: Promise<{ slug: string }>;
@@ -19,39 +25,28 @@ export default async function PublicWaitlistPage({
 
   if (!page || !page.isActive) notFound();
 
-  const [count] = await db
-    .select({ c: sql<number>`count(*)::int` })
-    .from(waitlistSignups)
-    .where(eq(waitlistSignups.waitlistPageId, page.id));
+  // Server data → plain object the client templates can consume.
+  const pageData: PublicPageData = {
+    id: page.id,
+    slug: page.slug,
+    title: page.title,
+    subtitle: page.subtitle,
+    ctaText: page.ctaText,
+    template: page.template,
+    templateConfig: (page.templateConfig as TemplateConfig | null) ?? null,
+  };
 
-  return (
-    <div className="min-h-screen flex items-center justify-center px-4 md:px-6 py-12 md:py-16 relative overflow-hidden">
-      <div
-        aria-hidden
-        className="absolute top-0 left-1/2 -translate-x-1/2 w-[700px] h-[500px] bg-accent-glow blur-[120px] opacity-25 -z-10 pointer-events-none"
-      />
-
-      <div className="max-w-xl w-full text-center">
-        {(count?.c ?? 0) > 0 && (
-          <div className="inline-flex items-center gap-2 px-3 py-1 glass rounded-full mb-8 text-sm text-text-2">
-            <span className="w-2 h-2 rounded-full bg-success" />
-            {count.c} {count.c === 1 ? 'person' : 'people'} on the waitlist
-          </div>
-        )}
-        <h1 className="font-display text-display-lg font-light leading-tight tracking-tight mb-6">
-          {page.title}
-        </h1>
-        {page.subtitle && (
-          <p className="text-lg md:text-xl text-text-2 mb-10 leading-relaxed">{page.subtitle}</p>
-        )}
-        <WaitlistForm pageId={page.id} ctaText={page.ctaText ?? 'Join waitlist'} />
-        <p className="text-text-3 text-sm mt-12">
-          Built with{' '}
-          <a href="/" className="text-accent hover:underline">
-            Helm
-          </a>
-        </p>
-      </div>
-    </div>
-  );
+  switch (page.template) {
+    case 'beta-tester':
+      return <BetaTesterTemplate slug={slug} page={pageData} />;
+    case 'feature-vote':
+      return <FeatureVoteTemplate slug={slug} page={pageData} />;
+    case 'pricing-test':
+      return <PricingTestTemplate slug={slug} page={pageData} />;
+    case 'survey-5q':
+      return <Survey5QTemplate slug={slug} page={pageData} />;
+    case 'minimal':
+    default:
+      return <MinimalTemplate slug={slug} page={pageData} />;
+  }
 }
