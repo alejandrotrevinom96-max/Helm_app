@@ -58,6 +58,32 @@ export async function POST(request: Request) {
   return NextResponse.json(scheduled);
 }
 
+// Soft-delete a scheduled post (sets status='cancelled' so we keep history).
+// Only the owner can cancel; we double-check with eq(userId, user.id).
+export async function DELETE(request: Request) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const { searchParams } = new URL(request.url);
+  const id = searchParams.get('id');
+  if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 });
+
+  const [post] = await db
+    .select({ id: scheduledPosts.id })
+    .from(scheduledPosts)
+    .where(and(eq(scheduledPosts.id, id), eq(scheduledPosts.userId, user.id)))
+    .limit(1);
+  if (!post) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+
+  await db
+    .update(scheduledPosts)
+    .set({ status: 'cancelled' })
+    .where(eq(scheduledPosts.id, id));
+
+  return NextResponse.json({ ok: true });
+}
+
 export async function GET(request: Request) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();

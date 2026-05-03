@@ -2,105 +2,362 @@
 
 import { useState } from 'react';
 import type { Project, ResearchFinding } from '@/lib/db/schema';
-import { timeAgo } from '@/lib/utils';
+import { timeAgo, formatRelativeDate } from '@/lib/utils';
+import { GlassCard } from '@/components/ui/glass-card';
+import { Button } from '@/components/ui/button';
+import { SimpleMarkdown } from '@/components/ui/simple-markdown';
+import { KeywordChips } from './keyword-chips';
+
+type Sources = {
+  reddit: boolean;
+  hackernews: boolean;
+  indiehackers: boolean;
+  googleTrends: boolean;
+};
+
+type Filter = 'all' | 'reddit' | 'hackernews' | 'indiehackers';
+
+const SOURCE_LABELS: Record<keyof Sources, string> = {
+  reddit: 'Reddit',
+  hackernews: 'Hacker News',
+  indiehackers: 'Indie Hackers',
+  googleTrends: 'Google Trends',
+};
+
+const SOURCE_KEYS = ['reddit', 'hackernews', 'indiehackers', 'googleTrends'] as const;
+
+interface InitialConfig {
+  keywords: string[];
+  competitors: string[];
+  excludeWords: string[];
+  sources: Sources;
+  weeklyInsight: string | null;
+  weeklyInsightAt: Date | string | null;
+  lastSyncedAt: Date | string | null;
+}
 
 export function ResearchClient({
   project,
   findings,
+  initialConfig,
 }: {
   project: Project;
   findings: ResearchFinding[];
+  initialConfig: InitialConfig;
 }) {
-  const [scanning, setScanning] = useState(false);
-  const [filter, setFilter] = useState<'all' | 'reddit' | 'hackernews'>('all');
+  const [keywords, setKeywords] = useState(initialConfig.keywords);
+  const [competitors, setCompetitors] = useState(initialConfig.competitors);
+  const [excludeWords, setExcludeWords] = useState(initialConfig.excludeWords);
+  const [sources, setSources] = useState<Sources>(initialConfig.sources);
+  const [weeklyInsight, setWeeklyInsight] = useState(initialConfig.weeklyInsight);
+  const [weeklyInsightAt, setWeeklyInsightAt] = useState<Date | string | null>(
+    initialConfig.weeklyInsightAt
+  );
 
-  const filtered = findings.filter((f) => filter === 'all' || f.source === filter);
+  const [configOpen, setConfigOpen] = useState(initialConfig.keywords.length === 0);
+  const [filter, setFilter] = useState<Filter>('all');
+
+  const [scanLoading, setScanLoading] = useState(false);
+  const [scanStatus, setScanStatus] = useState<string | null>(null);
+  const [synthLoading, setSynthLoading] = useState(false);
+  const [synthError, setSynthError] = useState<string | null>(null);
+
+  const persistConfig = async (
+    patch: Partial<{
+      keywords: string[];
+      competitors: string[];
+      excludeWords: string[];
+      sources: Sources;
+    }>
+  ) => {
+    await fetch('/api/research/config', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: project.id, ...patch }),
+    });
+  };
+
+  // Optimistic local update + fire-and-forget persistence
+  const updateKeywords = (next: string[]) => {
+    setKeywords(next);
+    persistConfig({ keywords: next });
+  };
+  const updateCompetitors = (next: string[]) => {
+    setCompetitors(next);
+    persistConfig({ competitors: next });
+  };
+  const updateExcludeWords = (next: string[]) => {
+    setExcludeWords(next);
+    persistConfig({ excludeWords: next });
+  };
+  const updateSources = (next: Sources) => {
+    setSources(next);
+    persistConfig({ sources: next });
+  };
 
   const scan = async () => {
-    setScanning(true);
+    setScanLoading(true);
+    setScanStatus(null);
     try {
       const res = await fetch('/api/research/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ projectId: project.id }),
       });
-      if (res.ok) location.reload();
+      const data = await res.json();
+      if (res.ok) {
+        setScanStatus(`✓ Scanned ${data.scanned}, inserted ${data.inserted}`);
+        setTimeout(() => location.reload(), 1500);
+      } else {
+        setScanStatus(`Error: ${data.hint || data.error || 'failed'}`);
+      }
+    } catch (e) {
+      setScanStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
-      setScanning(false);
+      setScanLoading(false);
     }
   };
+
+  const generateInsight = async () => {
+    setSynthLoading(true);
+    setSynthError(null);
+    try {
+      const res = await fetch('/api/research/synthesize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId: project.id }),
+      });
+      const data = await res.json();
+      if (res.ok && data.insight) {
+        setWeeklyInsight(data.insight);
+        setWeeklyInsightAt(new Date());
+      } else {
+        setSynthError(data.hint || data.error || 'Synthesize failed');
+      }
+    } catch (e) {
+      setSynthError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSynthLoading(false);
+    }
+  };
+
+  const counts: Record<Filter, number> = {
+    all: findings.length,
+    reddit: findings.filter((f) => f.source === 'reddit').length,
+    hackernews: findings.filter((f) => f.source === 'hackernews').length,
+    indiehackers: findings.filter((f) => f.source === 'indiehackers').length,
+  };
+
+  const visibleFindings = findings.filter(
+    (f) => filter === 'all' || f.source === filter
+  );
 
   return (
     <div className="p-4 md:p-8">
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end gap-3 mb-6 md:mb-8">
         <div>
-          <h1 className="font-display text-display-md font-light tracking-tight">Market Research</h1>
+          <h1 className="font-display text-display-md font-light tracking-tight">
+            Research
+          </h1>
           <p className="text-text-2 mt-2 max-w-2xl text-sm">
-            Pain points and opportunities matching your niche
+            Pain points and opportunities from your community
           </p>
         </div>
-        <button
-          onClick={scan}
-          disabled={scanning}
-          className="bg-[image:var(--accent-grad)] text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50 self-start sm:self-auto transition-transform hover:-translate-y-0.5"
-        >
-          {scanning ? 'Scanning Reddit...' : 'Scan now →'}
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={generateInsight}
+            disabled={synthLoading}
+          >
+            {synthLoading ? 'Synthesizing…' : 'Generate insight'}
+          </Button>
+          <Button size="sm" onClick={scan} disabled={scanLoading}>
+            {scanLoading ? 'Scanning…' : 'Scan now ↻'}
+          </Button>
+        </div>
       </div>
 
-      <div className="flex gap-1 glass rounded-lg p-1 mb-6 w-fit">
-        {(['all', 'reddit', 'hackernews'] as const).map((f) => (
+      {scanStatus && (
+        <div className="mb-4 text-xs text-text-2">{scanStatus}</div>
+      )}
+      {synthError && (
+        <div className="mb-4 text-xs text-danger">{synthError}</div>
+      )}
+      {initialConfig.lastSyncedAt && !scanLoading && (
+        <div className="mb-4 text-[11px] font-mono text-text-3">
+          Last scan: {formatRelativeDate(initialConfig.lastSyncedAt)}
+        </div>
+      )}
+
+      {/* Configuration card (collapsible) */}
+      <GlassCard className="p-5 mb-6">
+        <button
+          onClick={() => setConfigOpen(!configOpen)}
+          className="w-full flex justify-between items-center"
+        >
+          <span className="font-display text-lg font-light">Configuration</span>
+          <span className="text-text-3 text-lg">{configOpen ? '−' : '+'}</span>
+        </button>
+
+        {configOpen && (
+          <div className="mt-4 space-y-5">
+            <KeywordChips
+              label="Keywords"
+              values={keywords}
+              onAdd={(v) => updateKeywords([...keywords, v])}
+              onRemove={(v) => updateKeywords(keywords.filter((k) => k !== v))}
+              placeholder="e.g. indie hacker, micro-saas"
+            />
+            <KeywordChips
+              label="Competitors"
+              values={competitors}
+              onAdd={(v) => updateCompetitors([...competitors, v])}
+              onRemove={(v) =>
+                updateCompetitors(competitors.filter((k) => k !== v))
+              }
+              placeholder="e.g. posthog, baremetrics"
+            />
+            <KeywordChips
+              label="Exclude words"
+              values={excludeWords}
+              accent="danger"
+              onAdd={(v) => updateExcludeWords([...excludeWords, v])}
+              onRemove={(v) =>
+                updateExcludeWords(excludeWords.filter((k) => k !== v))
+              }
+              placeholder="words to filter out"
+            />
+
+            <div>
+              <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2">
+                Sources
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {SOURCE_KEYS.map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => updateSources({ ...sources, [s]: !sources[s] })}
+                    className={`text-xs px-3 py-1.5 rounded-md border transition-colors ${
+                      sources[s]
+                        ? 'border-accent bg-accent-soft text-accent'
+                        : 'border-border text-text-3 hover:border-border-bright'
+                    }`}
+                  >
+                    {SOURCE_LABELS[s]}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-text-3 mt-2">
+                Twitter/X, Facebook, Instagram are not supported — their APIs
+                either cost $100+/mo or don&apos;t allow public-content search.
+              </p>
+            </div>
+          </div>
+        )}
+      </GlassCard>
+
+      {/* Insight banner */}
+      {weeklyInsight && (
+        <GlassCard elevated className="p-5 md:p-6 mb-6">
+          <div className="flex justify-between items-start mb-3 gap-3 flex-wrap">
+            <div>
+              <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-accent mb-1">
+                Insight of the week
+              </div>
+              <div className="text-xs text-text-3">
+                Generated {weeklyInsightAt ? formatRelativeDate(weeklyInsightAt) : ''}
+              </div>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={generateInsight}
+              disabled={synthLoading}
+            >
+              {synthLoading ? 'Regenerating…' : 'Regenerate'}
+            </Button>
+          </div>
+          <SimpleMarkdown text={weeklyInsight} />
+        </GlassCard>
+      )}
+
+      {/* Source filter chips */}
+      <div className="flex flex-wrap gap-2 mb-4">
+        {(['all', 'reddit', 'hackernews', 'indiehackers'] as const).map((s) => (
           <button
-            key={f}
-            onClick={() => setFilter(f)}
-            className={`px-3 py-1.5 rounded text-xs font-mono uppercase tracking-[0.1em] transition-colors ${
-              filter === f ? 'bg-bg text-text-1' : 'text-text-2 hover:text-text-1'
+            key={s}
+            onClick={() => setFilter(s)}
+            className={`text-[10px] font-mono uppercase tracking-[0.1em] px-3 py-1.5 rounded transition-colors ${
+              filter === s
+                ? 'bg-accent-soft text-accent'
+                : 'text-text-3 hover:text-text-1'
             }`}
           >
-            {f}
+            {s === 'all'
+              ? `All (${counts.all})`
+              : `${SOURCE_LABELS[s as keyof Sources]} (${counts[s]})`}
           </button>
         ))}
       </div>
 
-      {filtered.length === 0 && (
-        <div className="glass rounded-2xl p-8 md:p-12 text-center">
+      {visibleFindings.length === 0 && findings.length === 0 && (
+        <GlassCard className="p-8 md:p-12 text-center">
           <p className="font-display text-2xl mb-2">No findings yet</p>
-          <p className="text-text-2 text-sm mb-4">
-            Click &quot;Scan now&quot; to search Reddit for posts matching your project.
+          <p className="text-text-2 text-sm">
+            Add keywords above and click <em className="text-text-1">Scan now</em>{' '}
+            to search Reddit, HN, and Indie Hackers for matching posts.
           </p>
-        </div>
+        </GlassCard>
+      )}
+
+      {visibleFindings.length === 0 && findings.length > 0 && (
+        <p className="text-text-3 text-sm">
+          No findings from {filter}. Try a different filter or scan again.
+        </p>
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
-        {filtered.map((f) => (
-          <a
-            key={f.id}
-            href={f.url}
-            target="_blank"
-            rel="noopener"
-            className="glass rounded-2xl p-5 hover:border-border-bright transition-all hover:-translate-y-0.5"
-          >
-            <div className="flex justify-between items-center mb-3">
-              <span className="text-xs text-text-3 font-mono uppercase tracking-[0.1em]">{f.source}</span>
-              <span
-                className={`text-[11px] font-mono px-2 py-1 rounded-full ${
-                  (f.matchScore ?? 0) > 80
-                    ? 'bg-accent-soft text-accent'
-                    : 'bg-success-soft text-success'
-                }`}
-              >
-                {f.matchScore} match
-              </span>
-            </div>
-            <h3 className="text-sm font-medium mb-2 leading-snug">{f.title}</h3>
-            <p className="text-xs text-text-2 mb-3 line-clamp-2">{f.snippet}</p>
-            <div className="flex justify-between text-[11px] text-text-3 font-mono">
-              <span>↑ {f.upvotes ?? 0} · 💬 {f.comments ?? 0}</span>
-              <span>{f.postedAt && timeAgo(f.postedAt)}</span>
-            </div>
-          </a>
+        {visibleFindings.map((f) => (
+          <FindingCard key={f.id} finding={f} />
         ))}
       </div>
     </div>
+  );
+}
+
+function FindingCard({ finding }: { finding: ResearchFinding }) {
+  return (
+    <a
+      href={finding.url}
+      target="_blank"
+      rel="noopener"
+      className="glass rounded-2xl p-5 hover:border-border-bright transition-all hover:-translate-y-0.5 block"
+    >
+      <div className="flex justify-between items-center mb-3 gap-2">
+        <span className="text-[10px] font-mono uppercase tracking-[0.1em] text-text-3">
+          {finding.source}
+        </span>
+        <span
+          className={`text-[11px] font-mono px-2 py-1 rounded-full whitespace-nowrap ${
+            (finding.matchScore ?? 0) > 80
+              ? 'bg-accent-soft text-accent'
+              : 'bg-success-soft text-success'
+          }`}
+        >
+          {finding.matchScore} match
+        </span>
+      </div>
+      <h3 className="text-sm font-medium mb-2 leading-snug">{finding.title}</h3>
+      {finding.snippet && (
+        <p className="text-xs text-text-2 mb-3 line-clamp-2">{finding.snippet}</p>
+      )}
+      <div className="flex justify-between text-[11px] text-text-3 font-mono">
+        <span>
+          ↑ {finding.upvotes ?? 0} · 💬 {finding.comments ?? 0}
+        </span>
+        <span>{finding.postedAt && timeAgo(finding.postedAt)}</span>
+      </div>
+    </a>
   );
 }

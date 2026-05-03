@@ -1,10 +1,17 @@
 import { db } from '@/lib/db';
-import { projects, integrations, metricSnapshots, scheduledPosts } from '@/lib/db/schema';
-import { eq, and, lte } from 'drizzle-orm';
+import {
+  projects,
+  integrations,
+  metricSnapshots,
+  scheduledPosts,
+  researchConfig,
+} from '@/lib/db/schema';
+import { eq, and, lte, lt, isNull, or } from 'drizzle-orm';
 import { decrypt } from '@/lib/crypto';
 import { getVercelAnalytics } from '@/lib/integrations/vercel';
 import { getAuthUsersCount } from '@/lib/integrations/supabase-mgmt';
 import { getAdAccountInsights } from '@/lib/integrations/meta';
+import { generateWeeklyInsight } from '@/lib/research/generate-insight';
 import { NextResponse } from 'next/server';
 
 export async function GET(request: Request) {
@@ -115,9 +122,35 @@ export async function GET(request: Request) {
       .where(eq(scheduledPosts.id, post.id));
   }
 
+  // Auto-regenerate weekly research insight for projects whose last insight
+  // is older than 7 days (or has never run). Each call hits Claude Opus
+  // sequentially so we don't blast the rate limit; the loop is bounded by
+  // researchConfig rows, which is one-per-project.
+  const sevenDaysAgo = new Date(Date.now() - 7 * 86400 * 1000);
+  const stale = await db
+    .select()
+    .from(researchConfig)
+    .where(
+      or(
+        isNull(researchConfig.weeklyInsightAt),
+        lt(researchConfig.weeklyInsightAt, sevenDaysAgo)
+      )
+    );
+
+  let insightsGenerated = 0;
+  for (const cfg of stale) {
+    try {
+      const result = await generateWeeklyInsight(cfg.projectId);
+      if (result.ok) insightsGenerated++;
+    } catch (e) {
+      console.error('[CRON] insight failed for', cfg.projectId, e);
+    }
+  }
+
   return NextResponse.json({
     synced,
     projects: allProjects.length,
     notifiedPosts: due.length,
+    insightsGenerated,
   });
 }

@@ -86,6 +86,15 @@ export function MarketingClient({
     }
   };
 
+  const cancelPost = async (id: string) => {
+    if (!confirm('Cancel this scheduled post?')) return;
+    const res = await fetch(`/api/marketing/schedule?id=${id}`, {
+      method: 'DELETE',
+    });
+    if (res.ok) location.reload();
+    else alert('Could not cancel');
+  };
+
   const schedulePost = async () => {
     if (!output || !scheduledFor) return;
     setScheduleStatus('scheduling…');
@@ -293,12 +302,27 @@ export function MarketingClient({
               <p className="text-text-3 text-sm">No scheduled posts yet.</p>
             )}
             {upcoming.map((p) => (
-              <div key={p.id} className="border-l-2 border-accent pl-3 mb-3 last:mb-0">
-                <div className="text-[10px] font-mono uppercase tracking-[0.1em] text-accent mb-1">
-                  {p.platform} · {formatScheduledDate(p.scheduledFor)}
-                </div>
-                <div className="text-xs text-text-2 line-clamp-3 whitespace-pre-wrap">
-                  {p.content}
+              <div
+                key={p.id}
+                className="border-l-2 border-accent pl-3 mb-3 last:mb-0 group relative"
+              >
+                <div className="flex justify-between items-start gap-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[10px] font-mono uppercase tracking-[0.1em] text-accent mb-1">
+                      {p.platform} · {formatScheduledDate(p.scheduledFor)}
+                    </div>
+                    <div className="text-xs text-text-2 line-clamp-3 whitespace-pre-wrap">
+                      {p.content}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => cancelPost(p.id)}
+                    className="text-text-3 hover:text-danger opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity text-base leading-none px-1"
+                    title="Cancel scheduled post"
+                    aria-label="Cancel scheduled post"
+                  >
+                    ×
+                  </button>
                 </div>
               </div>
             ))}
