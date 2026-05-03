@@ -38,9 +38,12 @@ export function AnalyticsClient({
             Cross-referenced metrics from {[hasVercel && 'Vercel', hasSupabase && 'Supabase', hasMeta && 'Meta Ads'].filter(Boolean).join(', ') || 'no integrations yet'}
           </p>
         </div>
-        <a href="/integrations" className="text-sm text-accent hover:underline">
-          Manage integrations →
-        </a>
+        <div className="flex items-center gap-3 flex-wrap">
+          <SyncButton />
+          <a href="/integrations" className="text-sm text-accent hover:underline">
+            Manage integrations →
+          </a>
+        </div>
       </div>
 
       {missingIntegrations.length > 0 && (
@@ -75,6 +78,48 @@ export function AnalyticsClient({
           </a>
         </div>
       )}
+    </div>
+  );
+}
+
+function SyncButton() {
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
+
+  const sync = async () => {
+    setLoading(true);
+    setResult(null);
+    try {
+      const r = await fetch('/api/sync/trigger', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId: 'all' }),
+      });
+      const data = await r.json();
+      if (r.ok) {
+        const count = Array.isArray(data.synced) ? data.synced.length : 0;
+        setResult(`✓ Synced ${count} source${count === 1 ? '' : 's'}`);
+        setTimeout(() => location.reload(), 1500);
+      } else {
+        setResult(`Error: ${data.error ?? 'unknown'}`);
+      }
+    } catch (e) {
+      setResult(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-2">
+      {result && <span className="text-xs text-text-dim">{result}</span>}
+      <button
+        onClick={sync}
+        disabled={loading}
+        className="text-sm px-3 py-1.5 border border-border rounded-md hover:border-accent hover:text-accent transition-colors disabled:opacity-50"
+      >
+        {loading ? 'Syncing…' : 'Sync now ↻'}
+      </button>
     </div>
   );
 }
