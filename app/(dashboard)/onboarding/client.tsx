@@ -60,17 +60,17 @@ export function OnboardingClient({
   };
 
   return (
-    <div className="min-h-screen px-6 py-16">
+    <div className="min-h-screen px-4 md:px-6 py-8 md:py-16">
       <div className="max-w-3xl mx-auto">
-        <div className="mb-12">
+        <div className="mb-8 md:mb-12">
           <p className="font-mono text-xs text-accent uppercase tracking-widest mb-4">
             Step 1 of 3
           </p>
-          <h1 className="font-display text-5xl font-normal mb-4 leading-tight">
+          <h1 className="font-display text-4xl md:text-5xl font-normal mb-4 leading-tight">
             We found <em className="text-accent italic font-light">{candidates.length}</em>{' '}
             {candidates.length === 1 ? 'project' : 'projects'}
           </h1>
-          <p className="text-text-dim text-lg">
+          <p className="text-text-dim text-base md:text-lg">
             Helm scanned your recent repos for SaaS signals (Next.js, Supabase, Stripe, Vercel).
             Select which ones to track.
           </p>
@@ -137,7 +137,7 @@ export function OnboardingClient({
           ))}
         </div>
 
-        <div className="flex justify-between items-center">
+        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
           <p className="text-text-faint text-sm">
             {selected.size} of {candidates.length} selected
           </p>

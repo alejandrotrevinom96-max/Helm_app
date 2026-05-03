@@ -30,10 +30,10 @@ export function AnalyticsClient({
   ].filter(Boolean);
 
   return (
-    <div className="p-8">
-      <div className="flex justify-between items-end mb-8">
+    <div className="p-4 md:p-8">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end gap-3 mb-6 md:mb-8">
         <div>
-          <h1 className="font-display text-4xl font-medium tracking-tight">Analytics</h1>
+          <h1 className="font-display text-3xl md:text-4xl font-medium tracking-tight">Analytics</h1>
           <p className="text-text-dim mt-1 text-sm">
             Cross-referenced metrics from {[hasVercel && 'Vercel', hasSupabase && 'Supabase', hasMeta && 'Meta Ads'].filter(Boolean).join(', ') || 'no integrations yet'}
           </p>
@@ -44,20 +44,20 @@ export function AnalyticsClient({
       </div>
 
       {missingIntegrations.length > 0 && (
-        <div className="bg-accent-soft border border-accent/20 rounded-xl p-4 mb-6 flex items-center justify-between">
+        <div className="bg-accent-soft border border-accent/20 rounded-xl p-4 mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
             <p className="text-sm font-medium">Connect more sources for richer insights</p>
             <p className="text-xs text-text-dim mt-1">
               Missing: {missingIntegrations.join(', ')}
             </p>
           </div>
-          <a href="/integrations" className="bg-accent text-bg px-4 py-2 rounded-lg text-sm font-medium">
+          <a href="/integrations" className="bg-accent text-bg px-4 py-2 rounded-lg text-sm font-medium self-start sm:self-auto">
             Connect
           </a>
         </div>
       )}
 
-      <div className="grid grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-6">
         <KPI label="Visitors" value={formatNumber(visitors)} source="vercel" />
         <KPI label="Signups" value={formatNumber(signups)} source="supabase" />
         <KPI label="CAC" value={cac > 0 ? formatCurrency(cac) : '—'} source="computed" />
@@ -81,14 +81,14 @@ export function AnalyticsClient({
 
 function KPI({ label, value, source }: { label: string; value: string; source: string }) {
   return (
-    <div className="bg-bg-elev border border-border rounded-xl p-5">
-      <div className="flex justify-between items-center mb-3">
-        <div className="text-xs font-mono uppercase tracking-wider text-text-faint">{label}</div>
-        <div className="text-[10px] font-mono px-1.5 py-0.5 bg-bg border border-border rounded text-text-faint">
+    <div className="bg-bg-elev border border-border rounded-xl p-4 md:p-5">
+      <div className="flex justify-between items-center mb-3 gap-2">
+        <div className="text-xs font-mono uppercase tracking-wider text-text-faint truncate">{label}</div>
+        <div className="text-[10px] font-mono px-1.5 py-0.5 bg-bg border border-border rounded text-text-faint flex-shrink-0">
           {source}
         </div>
       </div>
-      <div className="font-display text-4xl font-medium tracking-tight">{value}</div>
+      <div className="font-display text-3xl md:text-4xl font-medium tracking-tight truncate">{value}</div>
     </div>
   );
 }

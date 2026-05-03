@@ -43,15 +43,15 @@ export function MarketingClient({
   };
 
   return (
-    <div className="p-8">
-      <div className="mb-8">
-        <h1 className="font-display text-4xl font-medium tracking-tight">Marketing</h1>
+    <div className="p-4 md:p-8">
+      <div className="mb-6 md:mb-8">
+        <h1 className="font-display text-3xl md:text-4xl font-medium tracking-tight">Marketing</h1>
         <p className="text-text-dim mt-1 text-sm">Generate posts tailored to your project</p>
       </div>
 
-      <div className="grid grid-cols-[1fr_360px] gap-4">
-        <div className="bg-bg-elev border border-border rounded-xl p-6">
-          <div className="flex gap-2 mb-4 border-b border-border pb-4">
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-4">
+        <div className="bg-bg-elev border border-border rounded-xl p-4 md:p-6">
+          <div className="flex flex-wrap gap-2 mb-4 border-b border-border pb-4">
             {PLATFORMS.map((p) => (
               <button
                 key={p.id}

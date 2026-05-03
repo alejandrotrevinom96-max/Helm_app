@@ -105,15 +105,15 @@ export function IntegrationsClient({
   }, [connected.join(',')]);
 
   return (
-    <div className="p-8 max-w-4xl">
-      <div className="mb-10">
-        <h1 className="font-display text-4xl font-medium tracking-tight">Integrations</h1>
+    <div className="p-4 md:p-8 max-w-4xl">
+      <div className="mb-8 md:mb-10">
+        <h1 className="font-display text-3xl md:text-4xl font-medium tracking-tight">Integrations</h1>
         <p className="text-text-dim mt-1 text-sm">
           Connect your data sources, then map each Helm project to its remote counterpart.
         </p>
       </div>
 
-      <section className="mb-12">
+      <section className="mb-10 md:mb-12">
         <div className="mb-4">
           <h2 className="font-display text-2xl font-medium">Account credentials</h2>
           <p className="text-text-faint text-xs mt-1">One-time setup per provider.</p>
@@ -188,7 +188,7 @@ function CredentialCard({
   };
 
   return (
-    <div className="bg-bg-elev border border-border rounded-xl p-6">
+    <div className="bg-bg-elev border border-border rounded-xl p-4 md:p-6">
       <div className="flex justify-between items-start">
         <div>
           <div className="flex items-center gap-2 mb-1">
@@ -279,7 +279,7 @@ function ProjectMappingCard({
   };
 
   return (
-    <div className="bg-bg-elev border border-border rounded-xl p-6">
+    <div className="bg-bg-elev border border-border rounded-xl p-4 md:p-6">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-accent to-orange-400 flex items-center justify-center font-display font-semibold text-bg">

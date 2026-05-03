@@ -31,16 +31,16 @@ export function ResearchClient({
   };
 
   return (
-    <div className="p-8">
-      <div className="flex justify-between items-end mb-8">
+    <div className="p-4 md:p-8">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end gap-3 mb-6 md:mb-8">
         <div>
-          <h1 className="font-display text-4xl font-medium tracking-tight">Market Research</h1>
+          <h1 className="font-display text-3xl md:text-4xl font-medium tracking-tight">Market Research</h1>
           <p className="text-text-dim mt-1 text-sm">Pain points and opportunities matching your niche</p>
         </div>
         <button
           onClick={scan}
           disabled={scanning}
-          className="bg-accent text-bg px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
+          className="bg-accent text-bg px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50 self-start sm:self-auto"
         >
           {scanning ? 'Scanning Reddit...' : 'Scan now →'}
         </button>
@@ -69,7 +69,7 @@ export function ResearchClient({
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
         {filtered.map((f) => (
           <a
             key={f.id}

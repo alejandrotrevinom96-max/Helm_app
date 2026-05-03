@@ -44,13 +44,13 @@ export function ValidateClient({
   const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
 
   return (
-    <div className="p-8">
-      <div className="mb-8">
-        <h1 className="font-display text-4xl font-medium tracking-tight">Validate</h1>
+    <div className="p-4 md:p-8">
+      <div className="mb-6 md:mb-8">
+        <h1 className="font-display text-3xl md:text-4xl font-medium tracking-tight">Validate</h1>
         <p className="text-text-dim mt-1 text-sm">Test ideas with public waitlist pages</p>
       </div>
 
-      <div className="bg-bg-elev border border-border rounded-xl p-6 mb-6">
+      <div className="bg-bg-elev border border-border rounded-xl p-4 md:p-6 mb-6">
         <h2 className="font-display text-xl font-medium mb-4">Create new waitlist page</h2>
         <input
           value={title}
@@ -84,18 +84,18 @@ export function ValidateClient({
       ) : (
         <div className="space-y-3">
           {pages.map((p) => (
-            <div key={p.id} className="bg-bg-elev border border-border rounded-xl p-5 flex justify-between items-center">
-              <div className="flex-1">
+            <div key={p.id} className="bg-bg-elev border border-border rounded-xl p-4 md:p-5 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
+              <div className="flex-1 min-w-0">
                 <h3 className="font-medium mb-1">{p.title}</h3>
                 <a
                   href={`/w/${p.slug}`}
                   target="_blank"
-                  className="text-xs font-mono text-accent hover:underline"
+                  className="text-xs font-mono text-accent hover:underline break-all"
                 >
                   {baseUrl}/w/{p.slug} ↗
                 </a>
               </div>
-              <div className="text-right">
+              <div className="text-left sm:text-right flex-shrink-0">
                 <div className="font-display text-2xl font-medium">{p.signupCount}</div>
                 <div className="text-[10px] uppercase tracking-wider text-text-faint">signups</div>
               </div>

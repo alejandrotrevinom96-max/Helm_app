@@ -33,7 +33,7 @@ export default async function DashboardLayout({
   }
 
   return (
-    <div className="grid grid-cols-[240px_1fr] min-h-screen">
+    <div className="min-h-screen md:grid md:grid-cols-[240px_1fr]">
       <Sidebar
         activeProject={activeProject}
         allProjects={allProjects}
