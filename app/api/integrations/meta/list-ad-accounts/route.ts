@@ -35,7 +35,21 @@ export async function GET() {
         currency: a.currency ?? '',
       })),
     });
-  } catch {
-    return NextResponse.json({ error: 'Failed to list Meta ad accounts' }, { status: 500 });
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e);
+    console.error('[META LIST AD ACCOUNTS ERROR]', {
+      userId: user.id,
+      error: detail,
+      stack: e instanceof Error ? e.stack : undefined,
+    });
+    return NextResponse.json(
+      {
+        error: 'Failed to list Meta ad accounts',
+        detail,
+        hint:
+          'Use a long-lived access token from a Meta System User with ads_read scope. Short-lived user tokens expire in ~1 hour.',
+      },
+      { status: 500 }
+    );
   }
 }

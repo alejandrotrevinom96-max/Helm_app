@@ -29,7 +29,21 @@ export async function GET() {
         domain: p.targets?.production?.domain,
       })),
     });
-  } catch {
-    return NextResponse.json({ error: 'Failed to list Vercel projects' }, { status: 500 });
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e);
+    console.error('[VERCEL LIST PROJECTS ERROR]', {
+      userId: user.id,
+      error: detail,
+      stack: e instanceof Error ? e.stack : undefined,
+    });
+    return NextResponse.json(
+      {
+        error: 'Failed to list Vercel projects',
+        detail,
+        hint:
+          'Verify your token is a Vercel Account Token from vercel.com/account/tokens with Full Account scope.',
+      },
+      { status: 500 }
+    );
   }
 }

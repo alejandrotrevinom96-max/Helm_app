@@ -30,6 +30,8 @@ const INTEGRATIONS = [
   },
 ] as const;
 
+type ProviderId = 'vercel' | 'supabase' | 'meta';
+
 type ProjectRow = {
   id: string;
   name: string;
@@ -44,6 +46,8 @@ type VercelOption = { id: string; name: string; repo?: string; domain?: string }
 type SupabaseOption = { ref: string; name: string; region: string };
 type MetaOption = { id: string; name: string; currency: string };
 
+type ProviderError = { message: string; hint?: string };
+
 export function IntegrationsClient({
   connected,
   allProjects,
@@ -53,50 +57,88 @@ export function IntegrationsClient({
 }) {
   const connectedSet = new Set(connected);
 
-  // Remote option lists, fetched once when the relevant credential is connected.
   const [vercelOptions, setVercelOptions] = useState<VercelOption[]>([]);
   const [supabaseOptions, setSupabaseOptions] = useState<SupabaseOption[]>([]);
   const [metaOptions, setMetaOptions] = useState<MetaOption[]>([]);
   const [loadingOptions, setLoadingOptions] = useState(false);
+  const [errors, setErrors] = useState<Record<ProviderId, ProviderError | null>>({
+    vercel: null,
+    supabase: null,
+    meta: null,
+  });
 
   useEffect(() => {
     let cancelled = false;
+
+    async function fetchListing<T>(
+      url: string,
+      provider: ProviderId,
+      pluck: (data: { projects?: T[]; accounts?: T[] }) => T[] | undefined,
+      setOptions: (v: T[]) => void
+    ) {
+      try {
+        const res = await fetch(url);
+        const data = await res.json();
+        if (cancelled) return;
+        if (res.ok) {
+          const list = pluck(data) ?? [];
+          setOptions(list);
+          setErrors((prev) => ({ ...prev, [provider]: null }));
+        } else {
+          setErrors((prev) => ({
+            ...prev,
+            [provider]: {
+              message: data.detail || data.error || `HTTP ${res.status}`,
+              hint: data.hint,
+            },
+          }));
+        }
+      } catch (e) {
+        if (cancelled) return;
+        setErrors((prev) => ({
+          ...prev,
+          [provider]: { message: e instanceof Error ? e.message : 'Network error' },
+        }));
+      }
+    }
+
     async function loadOptions() {
       setLoadingOptions(true);
       const tasks: Promise<void>[] = [];
       if (connectedSet.has('vercel')) {
         tasks.push(
-          fetch('/api/integrations/vercel/list-projects')
-            .then((r) => r.json())
-            .then((d) => {
-              if (!cancelled && d.projects) setVercelOptions(d.projects);
-            })
-            .catch(() => {})
+          fetchListing<VercelOption>(
+            '/api/integrations/vercel/list-projects',
+            'vercel',
+            (d) => d.projects,
+            setVercelOptions
+          )
         );
       }
       if (connectedSet.has('supabase')) {
         tasks.push(
-          fetch('/api/integrations/supabase/list-projects')
-            .then((r) => r.json())
-            .then((d) => {
-              if (!cancelled && d.projects) setSupabaseOptions(d.projects);
-            })
-            .catch(() => {})
+          fetchListing<SupabaseOption>(
+            '/api/integrations/supabase/list-projects',
+            'supabase',
+            (d) => d.projects,
+            setSupabaseOptions
+          )
         );
       }
       if (connectedSet.has('meta')) {
         tasks.push(
-          fetch('/api/integrations/meta/list-ad-accounts')
-            .then((r) => r.json())
-            .then((d) => {
-              if (!cancelled && d.accounts) setMetaOptions(d.accounts);
-            })
-            .catch(() => {})
+          fetchListing<MetaOption>(
+            '/api/integrations/meta/list-ad-accounts',
+            'meta',
+            (d) => d.accounts,
+            setMetaOptions
+          )
         );
       }
       await Promise.all(tasks);
       if (!cancelled) setLoadingOptions(false);
     }
+
     loadOptions();
     return () => {
       cancelled = true;
@@ -124,6 +166,7 @@ export function IntegrationsClient({
               key={int.id}
               integration={int}
               isConnected={connectedSet.has(int.id)}
+              error={errors[int.id as ProviderId]}
             />
           ))}
         </div>
@@ -149,6 +192,7 @@ export function IntegrationsClient({
                 vercelOptions={vercelOptions}
                 supabaseOptions={supabaseOptions}
                 metaOptions={metaOptions}
+                errors={errors}
               />
             ))}
           </div>
@@ -161,14 +205,20 @@ export function IntegrationsClient({
 function CredentialCard({
   integration,
   isConnected,
+  error,
 }: {
   integration: { id: string; name: string; description: string; instructions: string; inputLabel: string };
   isConnected: boolean;
+  error: ProviderError | null;
 }) {
   const router = useRouter();
   const [showForm, setShowForm] = useState(false);
   const [token, setToken] = useState('');
   const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<
+    null | { ok: true; count: number } | { ok: false; message: string; hint?: string }
+  >(null);
 
   const save = async () => {
     setSaving(true);
@@ -180,6 +230,7 @@ function CredentialCard({
     if (res.ok) {
       setToken('');
       setShowForm(false);
+      setTestResult(null);
       router.refresh();
     } else {
       alert('Failed to save. Check the token format.');
@@ -187,27 +238,99 @@ function CredentialCard({
     setSaving(false);
   };
 
+  const testConnection = async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const res = await fetch(`/api/integrations/health?provider=${integration.id}`);
+      const data = await res.json();
+      if (data.ok) {
+        setTestResult({ ok: true, count: data.count ?? 0 });
+      } else {
+        setTestResult({
+          ok: false,
+          message: data.detail || data.error || 'Unknown error',
+          hint: data.hint,
+        });
+      }
+    } catch (e) {
+      setTestResult({
+        ok: false,
+        message: e instanceof Error ? e.message : 'Network error',
+      });
+    }
+    setTesting(false);
+  };
+
   return (
     <div className="bg-bg-elev border border-border rounded-xl p-4 md:p-6">
-      <div className="flex justify-between items-start">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
+      <div className="flex justify-between items-start gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2 mb-1">
             <h3 className="font-medium text-lg">{integration.name}</h3>
-            {isConnected && (
+            {isConnected && !error && (
               <span className="text-[10px] font-mono px-2 py-0.5 bg-green-500/15 text-green-400 rounded">
                 CONNECTED
+              </span>
+            )}
+            {isConnected && error && (
+              <span className="text-[10px] font-mono px-2 py-0.5 bg-red-500/15 text-red-400 rounded">
+                ERROR
               </span>
             )}
           </div>
           <p className="text-text-dim text-sm">{integration.description}</p>
         </div>
-        <button
-          onClick={() => setShowForm(!showForm)}
-          className="text-sm text-accent hover:underline"
-        >
-          {showForm ? 'Cancel' : isConnected ? 'Replace token' : 'Connect'}
-        </button>
+        <div className="flex gap-3 flex-shrink-0 text-sm">
+          {isConnected && (
+            <button
+              onClick={testConnection}
+              disabled={testing}
+              className="text-accent hover:underline disabled:opacity-50"
+            >
+              {testing ? 'Testing…' : 'Test'}
+            </button>
+          )}
+          <button
+            onClick={() => setShowForm(!showForm)}
+            className="text-accent hover:underline"
+          >
+            {showForm ? 'Cancel' : isConnected ? 'Replace token' : 'Connect'}
+          </button>
+        </div>
       </div>
+
+      {error && !showForm && (
+        <div className="mt-4 bg-red-500/10 border border-red-500/30 rounded-lg p-3 text-xs">
+          <div className="text-red-300 font-medium mb-1">Couldn&apos;t reach {integration.name}</div>
+          <div className="text-red-200/80 break-words">{error.message}</div>
+          {error.hint && (
+            <div className="text-red-200/60 mt-2 leading-relaxed">{error.hint}</div>
+          )}
+        </div>
+      )}
+
+      {testResult && !showForm && (
+        <div
+          className={`mt-4 rounded-lg p-3 text-xs ${
+            testResult.ok
+              ? 'bg-green-500/10 border border-green-500/30 text-green-300'
+              : 'bg-red-500/10 border border-red-500/30 text-red-300'
+          }`}
+        >
+          {testResult.ok
+            ? `Connection OK — ${testResult.count} ${integration.id === 'meta' ? 'ad account(s)' : 'project(s)'} found.`
+            : (
+                <>
+                  <div className="font-medium mb-1">Connection failed</div>
+                  <div className="opacity-80 break-words">{testResult.message}</div>
+                  {testResult.hint && (
+                    <div className="opacity-60 mt-2 leading-relaxed">{testResult.hint}</div>
+                  )}
+                </>
+              )}
+        </div>
+      )}
 
       {showForm && (
         <div className="mt-4 pt-4 border-t border-border">
@@ -238,12 +361,14 @@ function ProjectMappingCard({
   vercelOptions,
   supabaseOptions,
   metaOptions,
+  errors,
 }: {
   project: ProjectRow;
   connected: Set<string>;
   vercelOptions: VercelOption[];
   supabaseOptions: SupabaseOption[];
   metaOptions: MetaOption[];
+  errors: Record<ProviderId, ProviderError | null>;
 }) {
   const router = useRouter();
   const [vercel, setVercel] = useState(project.vercelProjectId ?? '');
@@ -297,51 +422,44 @@ function ProjectMappingCard({
       <div className="grid gap-3">
         {connected.has('vercel') && (
           <Field label="Vercel project">
-            <select
+            <ProviderSelect
+              providerLabel="Vercel"
+              error={errors.vercel}
+              options={vercelOptions.map((o) => ({
+                value: o.id,
+                label: `${o.name}${o.repo ? ` · ${o.repo}` : ''}`,
+              }))}
               value={vercel}
-              onChange={(e) => setVercel(e.target.value)}
-              className="w-full bg-bg border border-border rounded-lg p-2.5 text-sm outline-none focus:border-accent"
-            >
-              <option value="">— none —</option>
-              {vercelOptions.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.name}
-                  {o.repo ? ` · ${o.repo}` : ''}
-                </option>
-              ))}
-            </select>
+              onChange={setVercel}
+            />
           </Field>
         )}
         {connected.has('supabase') && (
           <Field label="Supabase project">
-            <select
+            <ProviderSelect
+              providerLabel="Supabase"
+              error={errors.supabase}
+              options={supabaseOptions.map((o) => ({
+                value: o.ref,
+                label: `${o.name} (${o.ref})`,
+              }))}
               value={supabase}
-              onChange={(e) => setSupabase(e.target.value)}
-              className="w-full bg-bg border border-border rounded-lg p-2.5 text-sm outline-none focus:border-accent"
-            >
-              <option value="">— none —</option>
-              {supabaseOptions.map((o) => (
-                <option key={o.ref} value={o.ref}>
-                  {o.name} ({o.ref})
-                </option>
-              ))}
-            </select>
+              onChange={setSupabase}
+            />
           </Field>
         )}
         {connected.has('meta') && (
           <Field label="Meta ad account">
-            <select
+            <ProviderSelect
+              providerLabel="Meta"
+              error={errors.meta}
+              options={metaOptions.map((o) => ({
+                value: o.id,
+                label: `${o.name} (${o.id})`,
+              }))}
               value={meta}
-              onChange={(e) => setMeta(e.target.value)}
-              className="w-full bg-bg border border-border rounded-lg p-2.5 text-sm outline-none focus:border-accent"
-            >
-              <option value="">— none —</option>
-              {metaOptions.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.name} ({o.id})
-                </option>
-              ))}
-            </select>
+              onChange={setMeta}
+            />
           </Field>
         )}
       </div>
@@ -359,6 +477,44 @@ function ProjectMappingCard({
         )}
       </div>
     </div>
+  );
+}
+
+function ProviderSelect({
+  providerLabel,
+  error,
+  options,
+  value,
+  onChange,
+}: {
+  providerLabel: string;
+  error: ProviderError | null;
+  options: { value: string; label: string }[];
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  if (error) {
+    return (
+      <div className="bg-red-500/5 border border-red-500/30 rounded-lg p-3 text-xs">
+        <div className="text-red-300">
+          Can&apos;t load {providerLabel} projects. Fix the credential above and try again.
+        </div>
+      </div>
+    );
+  }
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="w-full bg-bg border border-border rounded-lg p-2.5 text-sm outline-none focus:border-accent"
+    >
+      <option value="">{options.length === 0 ? '— no projects found —' : '— none —'}</option>
+      {options.map((o) => (
+        <option key={o.value} value={o.value}>
+          {o.label}
+        </option>
+      ))}
+    </select>
   );
 }
 

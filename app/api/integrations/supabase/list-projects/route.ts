@@ -35,7 +35,21 @@ export async function GET() {
         region: p.region ?? '',
       })),
     });
-  } catch {
-    return NextResponse.json({ error: 'Failed to list Supabase projects' }, { status: 500 });
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e);
+    console.error('[SUPABASE LIST PROJECTS ERROR]', {
+      userId: user.id,
+      error: detail,
+      stack: e instanceof Error ? e.stack : undefined,
+    });
+    return NextResponse.json(
+      {
+        error: 'Failed to list Supabase projects',
+        detail,
+        hint:
+          'Verify your token is a Personal Access Token from supabase.com/dashboard/account/tokens — NOT a service_role key, anon key, or DB connection string.',
+      },
+      { status: 500 }
+    );
   }
 }
