@@ -37,7 +37,15 @@ const INTEGRATIONS = [
   },
 ] as const;
 
-export function IntegrationsClient({ connected }: { connected: string[] }) {
+type Project = { id: string; name: string };
+
+export function IntegrationsClient({
+  connected,
+  projects,
+}: {
+  connected: string[];
+  projects: Project[];
+}) {
   const connectedSet = new Set(connected);
 
   return (
@@ -55,6 +63,7 @@ export function IntegrationsClient({ connected }: { connected: string[] }) {
             key={int.id}
             integration={int}
             isConnected={connectedSet.has(int.id)}
+            projects={projects}
           />
         ))}
       </div>
@@ -65,21 +74,31 @@ export function IntegrationsClient({ connected }: { connected: string[] }) {
 function IntegrationCard({
   integration,
   isConnected,
+  projects,
 }: {
   integration: any;
   isConnected: boolean;
+  projects: Project[];
 }) {
   const [showForm, setShowForm] = useState(false);
   const [token, setToken] = useState('');
   const [extra, setExtra] = useState('');
+  const [projectId, setProjectId] = useState<string>(projects[0]?.id ?? '');
   const [saving, setSaving] = useState(false);
+
+  const needsProject = !!integration.extraInput;
 
   const save = async () => {
     setSaving(true);
     const res = await fetch('/api/integrations/save', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider: integration.id, token, extra }),
+      body: JSON.stringify({
+        provider: integration.id,
+        token,
+        extra,
+        projectId: needsProject ? projectId : undefined,
+      }),
     });
     if (res.ok) location.reload();
     else {
@@ -130,9 +149,22 @@ function IntegrationCard({
               className="w-full bg-bg border border-border rounded-lg p-2.5 text-sm mb-2 outline-none focus:border-accent"
             />
           )}
+          {needsProject && projects.length > 1 && (
+            <select
+              value={projectId}
+              onChange={(e) => setProjectId(e.target.value)}
+              className="w-full bg-bg border border-border rounded-lg p-2.5 text-sm mb-2 outline-none focus:border-accent"
+            >
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          )}
           <button
             onClick={save}
-            disabled={saving || !token}
+            disabled={saving || !token || (needsProject && !projectId)}
             className="bg-accent text-bg px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
           >
             {saving ? 'Saving...' : 'Save & Connect'}
