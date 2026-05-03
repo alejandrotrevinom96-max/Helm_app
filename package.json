@@ -16,6 +16,7 @@
     "@octokit/rest": "^21.0.2",
     "@supabase/ssr": "^0.5.2",
     "@supabase/supabase-js": "^2.46.1",
+    "@vercel/analytics": "^2.0.1",
     "@vercel/sdk": "^1.4.0",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
