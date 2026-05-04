@@ -58,6 +58,71 @@ export async function POST(request: Request) {
   return NextResponse.json(scheduled);
 }
 
+// Edit a still-scheduled post: change content and/or scheduledFor.
+// Only allowed while status is 'scheduled' — once cron flipped it to
+// 'notified' the user has presumably already used the content.
+export async function PATCH(request: Request) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const { searchParams } = new URL(request.url);
+  const id = searchParams.get('id');
+  if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 });
+
+  const body = await request.json().catch(() => ({}));
+  const { content, scheduledFor } = body as {
+    content?: unknown;
+    scheduledFor?: unknown;
+  };
+
+  const [post] = await db
+    .select({ id: scheduledPosts.id })
+    .from(scheduledPosts)
+    .where(
+      and(
+        eq(scheduledPosts.id, id),
+        eq(scheduledPosts.userId, user.id),
+        eq(scheduledPosts.status, 'scheduled')
+      )
+    )
+    .limit(1);
+  if (!post) {
+    return NextResponse.json(
+      { error: 'Not found or not editable' },
+      { status: 404 }
+    );
+  }
+
+  const updates: { content?: string; scheduledFor?: Date } = {};
+  if (content !== undefined) {
+    if (typeof content !== 'string' || !content.trim()) {
+      return NextResponse.json({ error: 'Content cannot be empty' }, { status: 400 });
+    }
+    updates.content = content.trim();
+  }
+  if (scheduledFor !== undefined) {
+    if (typeof scheduledFor !== 'string') {
+      return NextResponse.json({ error: 'Invalid date' }, { status: 400 });
+    }
+    const date = new Date(scheduledFor);
+    if (isNaN(date.getTime()) || date.getTime() <= Date.now()) {
+      return NextResponse.json(
+        { error: 'scheduledFor must be in the future' },
+        { status: 400 }
+      );
+    }
+    updates.scheduledFor = date;
+  }
+
+  if (Object.keys(updates).length === 0) {
+    return NextResponse.json({ error: 'No valid updates' }, { status: 400 });
+  }
+
+  await db.update(scheduledPosts).set(updates).where(eq(scheduledPosts.id, id));
+  return NextResponse.json({ ok: true });
+}
+
 // Soft-delete a scheduled post (sets status='cancelled' so we keep history).
 // Only the owner can cancel; we double-check with eq(userId, user.id).
 export async function DELETE(request: Request) {

@@ -86,8 +86,15 @@ export async function POST(request: Request) {
   const tasks: Array<Promise<NormalizedFinding[]>> = [];
 
   if (sources.reddit) {
+    // Use OR with quoted keywords. Joining with spaces is implicit AND on
+    // Reddit search and tends to return zero results once you have 3+ words.
+    // Cap to 5 to keep the query short — Reddit rejects over-complex queries.
+    const redditQuery = keywords
+      .slice(0, 5)
+      .map((k) => `"${k}"`)
+      .join(' OR ');
     tasks.push(
-      searchReddit(keywords.join(' '), { limit: 25, timeRange: 'week' }).then((posts) =>
+      searchReddit(redditQuery, { limit: 25, timeRange: 'week' }).then((posts) =>
         posts.map((p) => ({
           source: 'reddit' as const,
           externalId: p.id,

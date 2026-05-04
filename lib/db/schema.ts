@@ -159,6 +159,9 @@ export const waitlistPages = pgTable('waitlist_pages', {
   title: text('title').notNull(),
   subtitle: text('subtitle'),
   ctaText: text('cta_text').default('Join waitlist'),
+  // DEPRECATED: replaced by templateConfig below. Kept here only so the TS
+  // schema stays in sync with the DB column until we drop it via
+  // scripts/cleanup-legacy-config.ts. Don't read or write to this field.
   config: jsonb('config').$type<{
     primaryColor?: string;
     showCount?: boolean;

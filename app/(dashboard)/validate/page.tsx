@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { db } from '@/lib/db';
 import { waitlistPages, waitlistResponses } from '@/lib/db/schema';
-import { eq, sql } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { redirect } from 'next/navigation';
 import { getActiveProject } from '@/lib/active-project';
 import { ValidateClient } from './client';
@@ -32,7 +32,12 @@ export default async function ValidatePage() {
       waitlistResponses,
       eq(waitlistResponses.waitlistPageId, waitlistPages.id)
     )
-    .where(eq(waitlistPages.projectId, project.id))
+    .where(
+      and(
+        eq(waitlistPages.projectId, project.id),
+        eq(waitlistPages.isActive, true)
+      )
+    )
     .groupBy(waitlistPages.id);
 
   return <ValidateClient project={project} pages={pages} />;

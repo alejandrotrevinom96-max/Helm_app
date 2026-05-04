@@ -5,6 +5,26 @@ import { eq, and } from 'drizzle-orm';
 import { getDefaultConfig } from '@/lib/validate/defaults';
 import { NextResponse } from 'next/server';
 
+// Authorize a waitlist page id by joining through projects.userId. Returns
+// the page row if the caller owns it, null otherwise.
+async function findOwnedPage(pageId: string, userId: string) {
+  const [row] = await db
+    .select({
+      id: waitlistPages.id,
+      projectId: waitlistPages.projectId,
+      slug: waitlistPages.slug,
+      title: waitlistPages.title,
+      subtitle: waitlistPages.subtitle,
+      template: waitlistPages.template,
+      templateConfig: waitlistPages.templateConfig,
+    })
+    .from(waitlistPages)
+    .innerJoin(projects, eq(projects.id, waitlistPages.projectId))
+    .where(and(eq(waitlistPages.id, pageId), eq(projects.userId, userId)))
+    .limit(1);
+  return row ?? null;
+}
+
 const VALID_TEMPLATES = new Set([
   'minimal',
   'beta-tester',
@@ -72,4 +92,71 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
+}
+
+// Edit a waitlist page (title / templateConfig / isActive). Slug is
+// intentionally immutable so existing public URLs keep working.
+export async function PATCH(request: Request) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const { searchParams } = new URL(request.url);
+  const id = searchParams.get('id');
+  if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 });
+
+  const owned = await findOwnedPage(id, user.id);
+  if (!owned) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+
+  const body = await request.json();
+  const { title, templateConfig, isActive } = body as {
+    title?: unknown;
+    templateConfig?: unknown;
+    isActive?: unknown;
+  };
+
+  const updates: Record<string, unknown> = {};
+  if (title !== undefined) {
+    if (typeof title !== 'string' || !title.trim()) {
+      return NextResponse.json({ error: 'title must be non-empty string' }, { status: 400 });
+    }
+    updates.title = title.trim();
+  }
+  if (templateConfig !== undefined) {
+    if (typeof templateConfig !== 'object' || templateConfig === null) {
+      return NextResponse.json({ error: 'templateConfig must be object' }, { status: 400 });
+    }
+    updates.templateConfig = templateConfig;
+  }
+  if (isActive !== undefined) {
+    updates.isActive = !!isActive;
+  }
+
+  if (Object.keys(updates).length === 0) {
+    return NextResponse.json({ error: 'No valid updates' }, { status: 400 });
+  }
+
+  await db.update(waitlistPages).set(updates).where(eq(waitlistPages.id, id));
+  return NextResponse.json({ ok: true });
+}
+
+// Soft-delete: flip isActive=false. Public page returns 404, dashboard list
+// hides it. Keeps responses + signups intact for retrospective analysis.
+export async function DELETE(request: Request) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const { searchParams } = new URL(request.url);
+  const id = searchParams.get('id');
+  if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 });
+
+  const owned = await findOwnedPage(id, user.id);
+  if (!owned) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+
+  await db
+    .update(waitlistPages)
+    .set({ isActive: false })
+    .where(eq(waitlistPages.id, id));
+  return NextResponse.json({ ok: true });
 }

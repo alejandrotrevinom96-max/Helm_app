@@ -6,6 +6,7 @@ import { BrandCard, type BrandContext } from './brand-card';
 import { templates, categories } from '@/lib/marketing/templates';
 import { formatScheduledDate } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { EditScheduledModal, type EditablePost } from './edit-scheduled-modal';
 
 const PLATFORMS = [
   { id: 'instagram', label: 'Instagram', color: '#e1306c' },
@@ -35,6 +36,7 @@ export function MarketingClient({
   const [scheduledFor, setScheduledFor] = useState('');
   const [scheduleStatus, setScheduleStatus] = useState<string | null>(null);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
+  const [editingPost, setEditingPost] = useState<EditablePost | null>(null);
 
   useEffect(() => {
     if (!selectedTemplate) return;
@@ -259,13 +261,21 @@ export function MarketingClient({
               </div>
 
               {scheduleMode === 'later' && (
-                <input
-                  type="datetime-local"
-                  value={scheduledFor}
-                  onChange={(e) => setScheduledFor(e.target.value)}
-                  min={minDateTime}
-                  className="bg-bg-elev border border-border rounded-lg px-3 py-2 text-sm mb-3 text-text-1 [color-scheme:dark]"
-                />
+                <>
+                  <input
+                    type="datetime-local"
+                    value={scheduledFor}
+                    onChange={(e) => setScheduledFor(e.target.value)}
+                    min={minDateTime}
+                    className="bg-bg-elev border border-border rounded-lg px-3 py-2 text-sm text-text-1 [color-scheme:dark]"
+                  />
+                  <p className="text-xs text-text-3 mt-1 mb-3">
+                    Times in your timezone:{' '}
+                    <span className="font-mono">
+                      {Intl.DateTimeFormat().resolvedOptions().timeZone}
+                    </span>
+                  </p>
+                </>
               )}
 
               <div className="flex flex-wrap gap-2 items-center">
@@ -315,20 +325,37 @@ export function MarketingClient({
                       {p.content}
                     </div>
                   </div>
-                  <button
-                    onClick={() => cancelPost(p.id)}
-                    className="text-text-3 hover:text-danger opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity text-base leading-none px-1"
-                    title="Cancel scheduled post"
-                    aria-label="Cancel scheduled post"
-                  >
-                    ×
-                  </button>
+                  <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                    <button
+                      onClick={() =>
+                        setEditingPost({
+                          id: p.id,
+                          platform: p.platform,
+                          content: p.content,
+                          scheduledFor: p.scheduledFor,
+                        })
+                      }
+                      className="text-text-3 hover:text-accent text-xs leading-none px-1"
+                      title="Edit scheduled post"
+                      aria-label="Edit scheduled post"
+                    >
+                      ✎
+                    </button>
+                    <button
+                      onClick={() => cancelPost(p.id)}
+                      className="text-text-3 hover:text-danger text-base leading-none px-1"
+                      title="Cancel scheduled post"
+                      aria-label="Cancel scheduled post"
+                    >
+                      ×
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}
           </div>
 
-          <div className="glass rounded-2xl p-5">
+          <div className="glass rounded-2xl p-5" id="recent-generations">
             <div className="font-display text-lg font-light mb-1">Recent generations</div>
             <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-4">
               Last {recentPosts.length}
@@ -345,6 +372,12 @@ export function MarketingClient({
           </div>
         </div>
       </div>
+
+      <EditScheduledModal
+        post={editingPost}
+        onClose={() => setEditingPost(null)}
+        onSaved={() => location.reload()}
+      />
     </div>
   );
 }

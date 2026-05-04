@@ -61,6 +61,8 @@ export function ResearchClient({
   const [scanStatus, setScanStatus] = useState<string | null>(null);
   const [synthLoading, setSynthLoading] = useState(false);
   const [synthError, setSynthError] = useState<string | null>(null);
+  const [configError, setConfigError] = useState<string | null>(null);
+  const [configSaved, setConfigSaved] = useState(false);
 
   const persistConfig = async (
     patch: Partial<{
@@ -70,11 +72,24 @@ export function ResearchClient({
       sources: Sources;
     }>
   ) => {
-    await fetch('/api/research/config', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ projectId: project.id, ...patch }),
-    });
+    setConfigError(null);
+    try {
+      const res = await fetch('/api/research/config', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId: project.id, ...patch }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setConfigError(data.error ?? `Save failed (${res.status})`);
+      } else {
+        setConfigSaved(true);
+        // Auto-clear the green tick so the next save can flash it again.
+        setTimeout(() => setConfigSaved(false), 2000);
+      }
+    } catch (e) {
+      setConfigError(e instanceof Error ? e.message : String(e));
+    }
   };
 
   // Optimistic local update + fire-and-forget persistence
@@ -253,6 +268,21 @@ export function ResearchClient({
                 either cost $100+/mo or don&apos;t allow public-content search.
               </p>
             </div>
+
+            {configError && (
+              <div className="flex items-center gap-3 text-xs text-danger">
+                <span>⚠ {configError}</span>
+                <button
+                  onClick={() => setConfigError(null)}
+                  className="underline hover:text-text-1"
+                >
+                  dismiss
+                </button>
+              </div>
+            )}
+            {configSaved && !configError && (
+              <div className="text-xs text-success">✓ Saved</div>
+            )}
           </div>
         )}
       </GlassCard>

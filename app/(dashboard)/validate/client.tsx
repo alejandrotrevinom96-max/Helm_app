@@ -11,6 +11,80 @@ import {
 import { getDefaultConfig, type TemplateConfig } from '@/lib/validate/defaults';
 import { TemplateConfigEditor } from './template-config-editor';
 
+function PageActionsMenu({ pageId, title }: { pageId: string; title: string }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const archive = async () => {
+    if (
+      !confirm(
+        `Archive "${title}"? It will stop accepting responses but data is preserved.`
+      )
+    )
+      return;
+    setBusy(true);
+    const res = await fetch(`/api/waitlist-pages?id=${pageId}`, {
+      method: 'DELETE',
+    });
+    setBusy(false);
+    if (res.ok) location.reload();
+    else alert('Could not archive');
+  };
+
+  const duplicate = async () => {
+    setBusy(true);
+    const res = await fetch('/api/waitlist-pages/duplicate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: pageId }),
+    });
+    setBusy(false);
+    if (res.ok) location.reload();
+    else alert('Could not duplicate');
+  };
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen(!open)}
+        disabled={busy}
+        className="text-text-3 hover:text-text-1 px-2 py-1 disabled:opacity-50"
+        aria-label="Page actions"
+        aria-expanded={open}
+      >
+        ⋯
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 mt-1 z-20 glass-elevated rounded-lg py-1 min-w-[140px] shadow-editorial-lg">
+            <button
+              onClick={() => {
+                setOpen(false);
+                duplicate();
+              }}
+              disabled={busy}
+              className="w-full text-left px-3 py-2 text-xs hover:bg-surface-1 disabled:opacity-50"
+            >
+              Duplicate
+            </button>
+            <button
+              onClick={() => {
+                setOpen(false);
+                archive();
+              }}
+              disabled={busy}
+              className="w-full text-left px-3 py-2 text-xs text-danger hover:bg-surface-1 disabled:opacity-50"
+            >
+              Archive
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 interface PageWithCount {
   id: string;
   slug: string;
@@ -230,6 +304,7 @@ export function ValidateClient({
                 >
                   View →
                 </Link>
+                <PageActionsMenu pageId={p.id} title={p.title} />
               </div>
             </div>
           ))}

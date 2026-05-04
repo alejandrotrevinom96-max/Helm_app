@@ -68,12 +68,13 @@ export const validateTemplates: ValidateTemplate[] = [
     hasCustomFields: true,
   },
   {
+    // ID stays 'survey-5q' for back-compat with rows already in DB.
     id: 'survey-5q',
-    name: '5-question survey',
-    description: 'Quick survey + AI analysis of responses',
+    name: 'Multi-question survey',
+    description: 'Custom number of questions + AI analysis of responses',
     bestFor: 'Qualitative insights, problem validation',
     defaultCopy: {
-      title: 'Quick 5-question survey',
+      title: 'Quick survey',
       subtitle: 'Help us understand the problem we should solve.',
       ctaText: 'Submit answers',
     },
