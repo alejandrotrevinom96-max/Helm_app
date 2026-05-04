@@ -7,6 +7,7 @@ import { templates, categories } from '@/lib/marketing/templates';
 import { formatScheduledDate } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { EditScheduledModal, type EditablePost } from './edit-scheduled-modal';
+import { broadcastEvent, useBroadcast } from '@/hooks/use-broadcast';
 
 const PLATFORMS = [
   { id: 'instagram', label: 'Instagram', color: '#e1306c' },
@@ -88,13 +89,25 @@ export function MarketingClient({
     }
   };
 
+  // Listen for changes from other tabs and refresh when they happen so
+  // upcoming/recent lists don't go stale while the user has multiple tabs open.
+  useBroadcast((event) => {
+    if (event.type.startsWith('scheduled-post')) {
+      location.reload();
+    }
+  });
+
   const cancelPost = async (id: string) => {
     if (!confirm('Cancel this scheduled post?')) return;
     const res = await fetch(`/api/marketing/schedule?id=${id}`, {
       method: 'DELETE',
     });
-    if (res.ok) location.reload();
-    else alert('Could not cancel');
+    if (res.ok) {
+      broadcastEvent({ type: 'scheduled-post-deleted' });
+      location.reload();
+    } else {
+      alert('Could not cancel');
+    }
   };
 
   const schedulePost = async () => {
@@ -116,6 +129,7 @@ export function MarketingClient({
       const data = await res.json();
       if (res.ok) {
         setScheduleStatus('✓ Scheduled');
+        broadcastEvent({ type: 'scheduled-post-created' });
         setTimeout(() => location.reload(), 1500);
       } else {
         setScheduleStatus(null);

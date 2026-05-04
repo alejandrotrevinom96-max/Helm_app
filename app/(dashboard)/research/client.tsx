@@ -64,6 +64,12 @@ export function ResearchClient({
   const [configError, setConfigError] = useState<string | null>(null);
   const [configSaved, setConfigSaved] = useState(false);
 
+  // Pagination state — first page came from the server. We append more
+  // findings via /api/research/findings as the user clicks Load more.
+  const [allFindings, setAllFindings] = useState<ResearchFinding[]>(findings);
+  const [hasMore, setHasMore] = useState(findings.length === 50);
+  const [loadingMore, setLoadingMore] = useState(false);
+
   const persistConfig = async (
     patch: Partial<{
       keywords: string[];
@@ -157,15 +163,36 @@ export function ResearchClient({
   };
 
   const counts: Record<Filter, number> = {
-    all: findings.length,
-    reddit: findings.filter((f) => f.source === 'reddit').length,
-    hackernews: findings.filter((f) => f.source === 'hackernews').length,
-    indiehackers: findings.filter((f) => f.source === 'indiehackers').length,
+    all: allFindings.length,
+    reddit: allFindings.filter((f) => f.source === 'reddit').length,
+    hackernews: allFindings.filter((f) => f.source === 'hackernews').length,
+    indiehackers: allFindings.filter((f) => f.source === 'indiehackers').length,
   };
 
-  const visibleFindings = findings.filter(
+  const visibleFindings = allFindings.filter(
     (f) => filter === 'all' || f.source === filter
   );
+
+  const loadMore = async () => {
+    setLoadingMore(true);
+    try {
+      const sourceParam = filter !== 'all' ? `&source=${filter}` : '';
+      const res = await fetch(
+        `/api/research/findings?projectId=${project.id}&offset=${allFindings.length}&limit=20${sourceParam}`
+      );
+      const data = await res.json();
+      if (res.ok && Array.isArray(data.findings)) {
+        setAllFindings((prev) => [...prev, ...data.findings]);
+        setHasMore(!!data.hasMore);
+      } else {
+        setHasMore(false);
+      }
+    } catch {
+      setHasMore(false);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   return (
     <div className="p-4 md:p-8">
@@ -352,6 +379,14 @@ export function ResearchClient({
           <FindingCard key={f.id} finding={f} />
         ))}
       </div>
+
+      {hasMore && allFindings.length > 0 && (
+        <div className="flex justify-center mt-6">
+          <Button variant="ghost" onClick={loadMore} disabled={loadingMore}>
+            {loadingMore ? 'Loading…' : 'Load more findings'}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

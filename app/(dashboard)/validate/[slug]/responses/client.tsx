@@ -4,6 +4,10 @@ import Link from 'next/link';
 import type { TemplateConfig } from '@/lib/validate/defaults';
 import { GlassCard } from '@/components/ui/glass-card';
 import { timeAgo } from '@/lib/utils';
+import {
+  SurveyAnalysisPanel,
+  type SurveyAnalysis,
+} from '../survey-analysis-panel';
 
 interface ResponseRow {
   id: string;
@@ -17,12 +21,14 @@ export function ResponsesClient({
   title,
   template,
   templateConfig,
+  surveyAnalysis,
   responses,
 }: {
   slug: string;
   title: string;
   template: string;
   templateConfig: TemplateConfig | null;
+  surveyAnalysis: SurveyAnalysis | null;
   responses: ResponseRow[];
 }) {
   return (
@@ -48,6 +54,14 @@ export function ResponsesClient({
           </a>
         </p>
       </div>
+
+      {template === 'survey-5q' && (
+        <SurveyAnalysisPanel
+          slug={slug}
+          initialAnalysis={surveyAnalysis}
+          responseCount={responses.length}
+        />
+      )}
 
       {responses.length === 0 ? (
         <GlassCard className="p-8 md:p-12 text-center">

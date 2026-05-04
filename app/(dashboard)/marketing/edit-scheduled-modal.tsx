@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { GlassCard } from '@/components/ui/glass-card';
+import { broadcastEvent } from '@/hooks/use-broadcast';
 
 export interface EditablePost {
   id: string;
@@ -74,6 +75,7 @@ export function EditScheduledModal({
       if (!res.ok) {
         setError(data.error ?? 'Could not save');
       } else {
+        broadcastEvent({ type: 'scheduled-post-updated' });
         onSaved();
         onClose();
       }

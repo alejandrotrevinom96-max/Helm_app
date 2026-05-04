@@ -8,6 +8,7 @@ import {
 import { eq, and, desc } from 'drizzle-orm';
 import { redirect, notFound } from 'next/navigation';
 import type { TemplateConfig } from '@/lib/validate/defaults';
+import type { SurveyAnalysis } from '../survey-analysis-panel';
 import { ResponsesClient } from './client';
 
 export default async function ResponsesPage({
@@ -29,6 +30,7 @@ export default async function ResponsesPage({
       title: waitlistPages.title,
       template: waitlistPages.template,
       templateConfig: waitlistPages.templateConfig,
+      surveyAnalysis: waitlistPages.surveyAnalysis,
       projectUserId: projects.userId,
     })
     .from(waitlistPages)
@@ -51,6 +53,9 @@ export default async function ResponsesPage({
       title={page.title}
       template={page.template ?? 'minimal'}
       templateConfig={(page.templateConfig as TemplateConfig | null) ?? null}
+      surveyAnalysis={
+        (page.surveyAnalysis as SurveyAnalysis | null) ?? null
+      }
       responses={responses.map((r) => ({
         id: r.id,
         email: r.email,

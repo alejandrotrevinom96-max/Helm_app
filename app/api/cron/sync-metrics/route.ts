@@ -137,8 +137,14 @@ export async function GET(request: Request) {
       )
     );
 
+  // Cap how many insights we generate per cron run. Each Opus call costs
+  // real money and the cron is daily, so leftovers process tomorrow rather
+  // than blowing the budget on a backlog.
+  const MAX_INSIGHTS_PER_RUN = 10;
+  const toProcess = stale.slice(0, MAX_INSIGHTS_PER_RUN);
+
   let insightsGenerated = 0;
-  for (const cfg of stale) {
+  for (const cfg of toProcess) {
     try {
       const result = await generateWeeklyInsight(cfg.projectId);
       if (result.ok) insightsGenerated++;
@@ -147,10 +153,17 @@ export async function GET(request: Request) {
     }
   }
 
+  if (stale.length > MAX_INSIGHTS_PER_RUN) {
+    console.log(
+      `[CRON] insight cap hit: processed ${MAX_INSIGHTS_PER_RUN}/${stale.length}; rest defer to next run`
+    );
+  }
+
   return NextResponse.json({
     synced,
     projects: allProjects.length,
     notifiedPosts: due.length,
     insightsGenerated,
+    insightsDeferred: Math.max(0, stale.length - MAX_INSIGHTS_PER_RUN),
   });
 }

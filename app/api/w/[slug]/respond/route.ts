@@ -4,7 +4,7 @@ import {
   waitlistResponses,
   waitlistSignups,
 } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 import { createHash } from 'crypto';
 
@@ -48,6 +48,23 @@ export async function POST(
     request.headers.get('x-real-ip') ||
     'unknown';
   const ipHash = createHash('sha256').update(ip + slug).digest('hex');
+
+  // Dedup: if this IP already responded on this page, return the same
+  // success shape as a fresh submit. Showing a different "you already
+  // submitted" message would leak which pages an IP has interacted with.
+  const [existing] = await db
+    .select({ id: waitlistResponses.id })
+    .from(waitlistResponses)
+    .where(
+      and(
+        eq(waitlistResponses.waitlistPageId, page.id),
+        eq(waitlistResponses.ipHash, ipHash)
+      )
+    )
+    .limit(1);
+  if (existing) {
+    return NextResponse.json({ ok: true });
+  }
 
   await db.insert(waitlistResponses).values({
     waitlistPageId: page.id,

@@ -10,6 +10,9 @@ import {
 } from '@/lib/validate/templates';
 import { getDefaultConfig, type TemplateConfig } from '@/lib/validate/defaults';
 import { TemplateConfigEditor } from './template-config-editor';
+import { PreviewModal } from './preview-modal';
+import { Button } from '@/components/ui/button';
+import { broadcastEvent, useBroadcast } from '@/hooks/use-broadcast';
 
 function PageActionsMenu({ pageId, title }: { pageId: string; title: string }) {
   const [open, setOpen] = useState(false);
@@ -27,8 +30,12 @@ function PageActionsMenu({ pageId, title }: { pageId: string; title: string }) {
       method: 'DELETE',
     });
     setBusy(false);
-    if (res.ok) location.reload();
-    else alert('Could not archive');
+    if (res.ok) {
+      broadcastEvent({ type: 'waitlist-archived' });
+      location.reload();
+    } else {
+      alert('Could not archive');
+    }
   };
 
   const duplicate = async () => {
@@ -39,8 +46,12 @@ function PageActionsMenu({ pageId, title }: { pageId: string; title: string }) {
       body: JSON.stringify({ id: pageId }),
     });
     setBusy(false);
-    if (res.ok) location.reload();
-    else alert('Could not duplicate');
+    if (res.ok) {
+      broadcastEvent({ type: 'waitlist-duplicated' });
+      location.reload();
+    } else {
+      alert('Could not duplicate');
+    }
   };
 
   return (
@@ -121,12 +132,21 @@ export function ValidateClient({
     getDefaultConfig('minimal')
   );
   const [showConfig, setShowConfig] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   // Reset config when template changes so the editor shows the right defaults
   useEffect(() => {
     setTemplateConfig(getDefaultConfig(selectedTemplate));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTemplate]);
+
+  // Cross-tab refresh: if any other tab created/archived/duplicated a
+  // waitlist, our list is stale and the easiest fix is a full reload.
+  useBroadcast((event) => {
+    if (event.type.startsWith('waitlist-')) {
+      location.reload();
+    }
+  });
 
   const create = async () => {
     if (!title.trim()) return;
@@ -146,6 +166,7 @@ export function ValidateClient({
         }),
       });
       if (res.ok) {
+        broadcastEvent({ type: 'waitlist-created' });
         location.reload();
       } else {
         const data = await res.json();
@@ -251,6 +272,14 @@ export function ValidateClient({
         )}
 
         <div className="flex items-center gap-3 flex-wrap">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => setPreviewOpen(true)}
+            disabled={!title.trim()}
+          >
+            Preview ↗
+          </Button>
           <button
             onClick={create}
             disabled={creating || !title.trim()}
@@ -261,6 +290,14 @@ export function ValidateClient({
           {error && <span className="text-xs text-danger">{error}</span>}
         </div>
       </div>
+
+      <PreviewModal
+        open={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        template={selectedTemplate}
+        title={title}
+        templateConfig={templateConfig}
+      />
 
       <h2 className="font-display text-xl font-medium mb-4">Your pages</h2>
       {pages.length === 0 ? (
