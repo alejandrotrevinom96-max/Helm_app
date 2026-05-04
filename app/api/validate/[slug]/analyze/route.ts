@@ -7,6 +7,7 @@ import {
 } from '@/lib/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
 import { anthropic } from '@/lib/ai/claude';
+import { checkRateLimit } from '@/lib/rate-limit';
 import type { TemplateConfig } from '@/lib/validate/defaults';
 import { NextResponse } from 'next/server';
 
@@ -23,6 +24,7 @@ interface SurveyAnalysis {
   standoutQuotes: { text: string; from?: string; reason: string }[];
   nextActions: string[];
   generatedAt: string;
+  respondedCount?: number;
 }
 
 const SYSTEM_PROMPT = (productName: string) => `You are a market research analyst. You're given survey responses for "${productName}".
@@ -70,6 +72,20 @@ export async function POST(
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  // Rate limit: 5 analyze calls per 5 minutes per user. Each one hits Opus
+  // (~$0.10-0.30 in tokens) so we'd rather throttle than rack up surprise bills.
+  const limit = checkRateLimit(`analyze:${user.id}`, 5, 5 * 60 * 1000);
+  if (!limit.allowed) {
+    const minutes = Math.ceil(limit.resetMs / 60000);
+    return NextResponse.json(
+      {
+        error: 'Rate limit exceeded',
+        hint: `Wait ${minutes} minute${minutes === 1 ? '' : 's'} before regenerating.`,
+      },
+      { status: 429 }
+    );
+  }
 
   const { slug } = await params;
 
@@ -158,10 +174,15 @@ export async function POST(
   // Strip markdown fences if present (Opus sometimes wraps in ```json …)
   text = text.replace(/^```(?:json)?\s*|\s*```$/g, '').trim();
 
-  // The model returns everything except generatedAt — we stamp that ourselves.
-  let raw: Omit<SurveyAnalysis, 'generatedAt'>;
+  // Model returns the analysis fields; we stamp generatedAt and
+  // respondedCount ourselves so the UI can detect when the analysis went
+  // stale (new responses since this run).
+  let raw: Omit<SurveyAnalysis, 'generatedAt' | 'respondedCount'>;
   try {
-    raw = JSON.parse(text) as Omit<SurveyAnalysis, 'generatedAt'>;
+    raw = JSON.parse(text) as Omit<
+      SurveyAnalysis,
+      'generatedAt' | 'respondedCount'
+    >;
   } catch {
     return NextResponse.json(
       {
@@ -175,6 +196,7 @@ export async function POST(
   const parsed: SurveyAnalysis = {
     ...raw,
     generatedAt: new Date().toISOString(),
+    respondedCount: responses.length,
   };
 
   await db

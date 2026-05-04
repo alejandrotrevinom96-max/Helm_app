@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 
 const CHANNEL_NAME = 'helm-data-changes';
 
@@ -33,16 +33,22 @@ export function broadcastEvent(event: BroadcastEvent) {
   }
 }
 
+// Ref pattern: register the listener once on mount, but always invoke the
+// latest handler via the ref. This frees consumers from having to wrap their
+// handlers in useCallback to avoid re-subscriptions on every render.
 export function useBroadcast(handler: (event: BroadcastEvent) => void) {
+  const handlerRef = useRef(handler);
+  handlerRef.current = handler;
+
   useEffect(() => {
     const ch = getChannel();
     if (!ch) return;
 
     const onMessage = (e: MessageEvent<BroadcastEvent>) => {
-      handler(e.data);
+      handlerRef.current(e.data);
     };
 
     ch.addEventListener('message', onMessage);
     return () => ch.removeEventListener('message', onMessage);
-  }, [handler]);
+  }, []);
 }

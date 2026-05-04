@@ -71,9 +71,10 @@ export async function PATCH(request: Request) {
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 });
 
   const body = await request.json().catch(() => ({}));
-  const { content, scheduledFor } = body as {
+  const { content, scheduledFor, platform } = body as {
     content?: unknown;
     scheduledFor?: unknown;
+    platform?: unknown;
   };
 
   const [post] = await db
@@ -94,12 +95,18 @@ export async function PATCH(request: Request) {
     );
   }
 
-  const updates: { content?: string; scheduledFor?: Date } = {};
+  const updates: { content?: string; scheduledFor?: Date; platform?: string } = {};
   if (content !== undefined) {
     if (typeof content !== 'string' || !content.trim()) {
       return NextResponse.json({ error: 'Content cannot be empty' }, { status: 400 });
     }
     updates.content = content.trim();
+  }
+  if (platform !== undefined) {
+    if (typeof platform !== 'string' || !VALID_PLATFORMS.has(platform)) {
+      return NextResponse.json({ error: 'Invalid platform' }, { status: 400 });
+    }
+    updates.platform = platform;
   }
   if (scheduledFor !== undefined) {
     if (typeof scheduledFor !== 'string') {

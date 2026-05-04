@@ -5,6 +5,7 @@ import type { Project, ResearchFinding } from '@/lib/db/schema';
 import { timeAgo, formatRelativeDate } from '@/lib/utils';
 import { GlassCard } from '@/components/ui/glass-card';
 import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
 import { SimpleMarkdown } from '@/components/ui/simple-markdown';
 import { KeywordChips } from './keyword-chips';
 
@@ -313,6 +314,24 @@ export function ResearchClient({
           </div>
         )}
       </GlassCard>
+
+      {/* Synthesizing skeleton — only when there's no insight yet to show
+          in place. If there's a previous one, the user keeps seeing it with
+          the Regenerate button in loading state. */}
+      {synthLoading && !weeklyInsight && (
+        <GlassCard elevated className="p-5 md:p-6 mb-6" aria-label="Synthesizing insight">
+          <Skeleton className="h-3 w-32 mb-3" />
+          <Skeleton className="h-7 w-3/4 mb-4" />
+          <div className="space-y-2 mb-4">
+            <Skeleton className="h-3 w-full" />
+            <Skeleton className="h-3 w-5/6" />
+            <Skeleton className="h-3 w-4/6" />
+          </div>
+          <p className="text-xs text-text-3 italic">
+            Claude Opus is synthesizing… ~30-60 seconds.
+          </p>
+        </GlassCard>
+      )}
 
       {/* Insight banner */}
       {weeklyInsight && (

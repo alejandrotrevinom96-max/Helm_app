@@ -34,12 +34,14 @@ export function EditScheduledModal({
 }) {
   const [content, setContent] = useState('');
   const [scheduledFor, setScheduledFor] = useState('');
+  const [platform, setPlatform] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!post) return;
     setContent(post.content);
+    setPlatform(post.platform);
     const d = new Date(post.scheduledFor);
     setScheduledFor(toLocalDatetimeInputValue(d));
     setError(null);
@@ -68,6 +70,7 @@ export function EditScheduledModal({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           content,
+          platform,
           scheduledFor: new Date(scheduledFor).toISOString(),
         }),
       });
@@ -102,7 +105,7 @@ export function EditScheduledModal({
         <div className="flex justify-between items-start mb-4 gap-3">
           <div>
             <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-1">
-              {post.platform}
+              Scheduled post
             </div>
             <h2 className="font-display text-2xl font-light">Edit scheduled post</h2>
           </div>
@@ -116,6 +119,22 @@ export function EditScheduledModal({
         </div>
 
         <div className="space-y-4">
+          <div>
+            <label className="block text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2">
+              Platform
+            </label>
+            <select
+              value={platform}
+              onChange={(e) => setPlatform(e.target.value)}
+              className="w-full bg-bg-elev border border-border rounded-lg px-3 py-2 text-sm outline-none focus:border-accent [color-scheme:dark]"
+            >
+              <option value="instagram">Instagram</option>
+              <option value="facebook">Facebook</option>
+              <option value="linkedin">LinkedIn</option>
+              <option value="threads">Threads</option>
+            </select>
+          </div>
+
           <div>
             <label className="block text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2">
               Content

@@ -6,7 +6,11 @@ import { redirect } from 'next/navigation';
 import { getActiveProject } from '@/lib/active-project';
 import { ValidateClient } from './client';
 
-export default async function ValidatePage() {
+export default async function ValidatePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ archived?: string }>;
+}) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
@@ -14,8 +18,11 @@ export default async function ValidatePage() {
   const project = await getActiveProject(user.id);
   if (!project) redirect('/onboarding');
 
-  // Count responses (the new generic table — covers every template, not only
-  // email-bearing signups). LEFT JOIN so pages with zero responses still show.
+  const params = await searchParams;
+  const showArchived = params.archived === 'true';
+
+  // List depends on toggle. We also fetch the archived count so the toggle
+  // link can show "(N)" without a second round-trip.
   const pages = await db
     .select({
       id: waitlistPages.id,
@@ -25,6 +32,7 @@ export default async function ValidatePage() {
       isActive: waitlistPages.isActive,
       createdAt: waitlistPages.createdAt,
       template: waitlistPages.template,
+      templateConfig: waitlistPages.templateConfig,
       responseCount: sql<number>`count(${waitlistResponses.id})::int`,
     })
     .from(waitlistPages)
@@ -35,10 +43,30 @@ export default async function ValidatePage() {
     .where(
       and(
         eq(waitlistPages.projectId, project.id),
-        eq(waitlistPages.isActive, true)
+        eq(waitlistPages.isActive, !showArchived)
       )
     )
     .groupBy(waitlistPages.id);
 
-  return <ValidateClient project={project} pages={pages} />;
+  // Counts for the opposite tab so the toggle link can display "(N)"
+  const [{ archivedCount }] = await db
+    .select({
+      archivedCount: sql<number>`count(*)::int`,
+    })
+    .from(waitlistPages)
+    .where(
+      and(
+        eq(waitlistPages.projectId, project.id),
+        eq(waitlistPages.isActive, false)
+      )
+    );
+
+  return (
+    <ValidateClient
+      project={project}
+      pages={pages}
+      showArchived={showArchived}
+      archivedCount={archivedCount ?? 0}
+    />
+  );
 }

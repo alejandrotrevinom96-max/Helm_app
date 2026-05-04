@@ -187,6 +187,9 @@ export const waitlistPages = pgTable('waitlist_pages', {
     standoutQuotes: { text: string; from?: string; reason: string }[];
     nextActions: string[];
     generatedAt: string;
+    // Number of responses available when this analysis was generated; the
+    // panel uses this to mark itself "Outdated" once new responses arrive.
+    respondedCount?: number;
   }>(),
   templateConfig: jsonb('template_config').$type<{
     subtitle?: string;

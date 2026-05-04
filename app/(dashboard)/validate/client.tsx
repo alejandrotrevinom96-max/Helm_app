@@ -11,10 +11,21 @@ import {
 import { getDefaultConfig, type TemplateConfig } from '@/lib/validate/defaults';
 import { TemplateConfigEditor } from './template-config-editor';
 import { PreviewModal } from './preview-modal';
+import { EditWaitlistModal, type EditableWaitlist } from './edit-waitlist-modal';
 import { Button } from '@/components/ui/button';
 import { broadcastEvent, useBroadcast } from '@/hooks/use-broadcast';
 
-function PageActionsMenu({ pageId, title }: { pageId: string; title: string }) {
+function PageActionsMenu({
+  pageId,
+  title,
+  isArchived,
+  onEdit,
+}: {
+  pageId: string;
+  title: string;
+  isArchived: boolean;
+  onEdit: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -35,6 +46,22 @@ function PageActionsMenu({ pageId, title }: { pageId: string; title: string }) {
       location.reload();
     } else {
       alert('Could not archive');
+    }
+  };
+
+  const restore = async () => {
+    setBusy(true);
+    const res = await fetch(`/api/waitlist-pages?id=${pageId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isActive: true }),
+    });
+    setBusy(false);
+    if (res.ok) {
+      broadcastEvent({ type: 'waitlist-archived' });
+      location.reload();
+    } else {
+      alert('Could not restore');
     }
   };
 
@@ -69,6 +96,17 @@ function PageActionsMenu({ pageId, title }: { pageId: string; title: string }) {
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
           <div className="absolute right-0 mt-1 z-20 glass-elevated rounded-lg py-1 min-w-[140px] shadow-editorial-lg">
+            {!isArchived && (
+              <button
+                onClick={() => {
+                  setOpen(false);
+                  onEdit();
+                }}
+                className="w-full text-left px-3 py-2 text-xs hover:bg-surface-1"
+              >
+                Edit
+              </button>
+            )}
             <button
               onClick={() => {
                 setOpen(false);
@@ -79,16 +117,29 @@ function PageActionsMenu({ pageId, title }: { pageId: string; title: string }) {
             >
               Duplicate
             </button>
-            <button
-              onClick={() => {
-                setOpen(false);
-                archive();
-              }}
-              disabled={busy}
-              className="w-full text-left px-3 py-2 text-xs text-danger hover:bg-surface-1 disabled:opacity-50"
-            >
-              Archive
-            </button>
+            {isArchived ? (
+              <button
+                onClick={() => {
+                  setOpen(false);
+                  restore();
+                }}
+                disabled={busy}
+                className="w-full text-left px-3 py-2 text-xs text-accent hover:bg-surface-1 disabled:opacity-50"
+              >
+                Restore
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  setOpen(false);
+                  archive();
+                }}
+                disabled={busy}
+                className="w-full text-left px-3 py-2 text-xs text-danger hover:bg-surface-1 disabled:opacity-50"
+              >
+                Archive
+              </button>
+            )}
           </div>
         </>
       )}
@@ -104,6 +155,7 @@ interface PageWithCount {
   isActive: boolean | null;
   createdAt: Date | string;
   template: string | null;
+  templateConfig: TemplateConfig | null;
   responseCount: number;
 }
 
@@ -118,9 +170,13 @@ const TEMPLATE_LABEL: Record<string, string> = {
 export function ValidateClient({
   project,
   pages,
+  showArchived,
+  archivedCount,
 }: {
   project: Project;
   pages: PageWithCount[];
+  showArchived: boolean;
+  archivedCount: number;
 }) {
   const [creating, setCreating] = useState(false);
   const [title, setTitle] = useState('');
@@ -133,6 +189,7 @@ export function ValidateClient({
   );
   const [showConfig, setShowConfig] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [editingPage, setEditingPage] = useState<EditableWaitlist | null>(null);
 
   // Reset config when template changes so the editor shows the right defaults
   useEffect(() => {
@@ -299,7 +356,25 @@ export function ValidateClient({
         templateConfig={templateConfig}
       />
 
-      <h2 className="font-display text-xl font-medium mb-4">Your pages</h2>
+      <EditWaitlistModal
+        page={editingPage}
+        onClose={() => setEditingPage(null)}
+        onSaved={() => location.reload()}
+      />
+
+      <div className="flex items-center gap-3 mb-4 flex-wrap">
+        <h2 className="font-display text-xl font-medium">
+          {showArchived ? 'Archived pages' : 'Your pages'}
+        </h2>
+        <Link
+          href={showArchived ? '/validate' : '/validate?archived=true'}
+          className="text-xs text-text-3 hover:text-text-1"
+        >
+          {showArchived
+            ? '← Active pages'
+            : `Show archived (${archivedCount}) →`}
+        </Link>
+      </div>
       {pages.length === 0 ? (
         <p className="text-text-3 text-sm">
           No pages yet. Create your first one above.
@@ -341,7 +416,20 @@ export function ValidateClient({
                 >
                   View →
                 </Link>
-                <PageActionsMenu pageId={p.id} title={p.title} />
+                <PageActionsMenu
+                  pageId={p.id}
+                  title={p.title}
+                  isArchived={showArchived}
+                  onEdit={() =>
+                    setEditingPage({
+                      id: p.id,
+                      title: p.title,
+                      slug: p.slug,
+                      template: p.template ?? 'minimal',
+                      templateConfig: p.templateConfig,
+                    })
+                  }
+                />
               </div>
             </div>
           ))}

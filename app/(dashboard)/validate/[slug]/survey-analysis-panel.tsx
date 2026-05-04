@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { GlassCard } from '@/components/ui/glass-card';
 import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
 import { formatRelativeDate } from '@/lib/utils';
 
 export interface SurveyAnalysis {
@@ -18,6 +19,7 @@ export interface SurveyAnalysis {
   standoutQuotes: { text: string; from?: string; reason: string }[];
   nextActions: string[];
   generatedAt: string;
+  respondedCount?: number;
 }
 
 export function SurveyAnalysisPanel({
@@ -66,6 +68,52 @@ export function SurveyAnalysisPanel({
     );
   }
 
+  // Loading skeleton: shown while Opus is running and we don't have a
+  // previous analysis to display in-place. If we already have one, the
+  // existing render below stays put with the button in "Re-analyzing…" state.
+  if (loading && !analysis) {
+    return (
+      <div className="space-y-4 mb-6" aria-label="Analyzing survey responses">
+        <GlassCard elevated className="p-6">
+          <Skeleton className="h-3 w-24 mb-3" />
+          <Skeleton className="h-6 w-3/4 mb-2" />
+          <Skeleton className="h-6 w-2/3 mb-6" />
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Skeleton className="h-3 w-16 mb-2" />
+              <Skeleton className="h-8 w-24" />
+            </div>
+            <div>
+              <Skeleton className="h-3 w-16 mb-2" />
+              <Skeleton className="h-8 w-24" />
+            </div>
+          </div>
+        </GlassCard>
+        <GlassCard className="p-5">
+          <Skeleton className="h-3 w-32 mb-3" />
+          <div className="flex flex-wrap gap-2">
+            {[1, 2, 3, 4].map((i) => (
+              <Skeleton key={i} className="h-6 w-20" />
+            ))}
+          </div>
+        </GlassCard>
+        <GlassCard className="p-5">
+          <Skeleton className="h-3 w-32 mb-4" />
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="border-l-2 border-border pl-4 mb-5 last:mb-0">
+              <Skeleton className="h-4 w-3/4 mb-2" />
+              <Skeleton className="h-3 w-1/2 mb-2" />
+              <Skeleton className="h-12 w-full" />
+            </div>
+          ))}
+        </GlassCard>
+        <p className="text-xs text-text-3 text-center italic">
+          Claude Opus is analyzing… typically 30-60 seconds.
+        </p>
+      </div>
+    );
+  }
+
   if (!analysis) {
     return (
       <GlassCard className="p-5 md:p-6 mb-6">
@@ -110,14 +158,38 @@ export function SurveyAnalysisPanel({
       <GlassCard elevated className="p-5 md:p-6">
         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3 mb-4">
           <div>
-            <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-accent mb-1">
+            <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-accent mb-1 flex items-center gap-2 flex-wrap">
               AI Synthesis
+              {(() => {
+                const baseline = analysis.respondedCount;
+                if (baseline === undefined) return null;
+                const newCount = responseCount - baseline;
+                if (newCount <= 0) return null;
+                return (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-500 text-[9px] tracking-[0.1em]">
+                    Outdated · {newCount} new {newCount === 1 ? 'response' : 'responses'}
+                  </span>
+                );
+              })()}
             </div>
             <p className="text-xs text-text-3">
               Generated {formatRelativeDate(analysis.generatedAt)} · Claude Opus
+              {analysis.respondedCount !== undefined && (
+                <> · Based on {analysis.respondedCount} {analysis.respondedCount === 1 ? 'response' : 'responses'}</>
+              )}
             </p>
           </div>
-          <Button variant="ghost" size="sm" onClick={analyze} disabled={loading}>
+          <Button
+            variant={
+              analysis.respondedCount !== undefined &&
+              responseCount > analysis.respondedCount
+                ? 'primary'
+                : 'ghost'
+            }
+            size="sm"
+            onClick={analyze}
+            disabled={loading}
+          >
             {loading ? 'Re-analyzing…' : 'Regenerate'}
           </Button>
         </div>

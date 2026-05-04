@@ -5,6 +5,7 @@ import type { Project, GeneratedPost, ScheduledPost } from '@/lib/db/schema';
 import { BrandCard, type BrandContext } from './brand-card';
 import { templates, categories } from '@/lib/marketing/templates';
 import { formatScheduledDate } from '@/lib/utils';
+import { GlassCard } from '@/components/ui/glass-card';
 import { Button } from '@/components/ui/button';
 import { EditScheduledModal, type EditablePost } from './edit-scheduled-modal';
 import { broadcastEvent, useBroadcast } from '@/hooks/use-broadcast';
@@ -13,10 +14,39 @@ const PLATFORMS = [
   { id: 'instagram', label: 'Instagram', color: '#e1306c' },
   { id: 'facebook', label: 'Facebook', color: '#0866ff' },
   { id: 'linkedin', label: 'LinkedIn', color: '#0a66c2' },
-  { id: 'threads', label: 'Threads', color: '#000' },
+  { id: 'threads', label: 'Threads', color: '#666' },
 ] as const;
 
-type ScheduleMode = 'now' | 'later';
+type Platform = (typeof PLATFORMS)[number]['id'];
+
+interface Generation {
+  platform: Platform;
+  content: string;
+  error?: string;
+  scheduledFor: string; // local datetime-local format
+}
+
+// Default: tomorrow 9am local. Returns a YYYY-MM-DDTHH:mm string.
+function defaultScheduleTime(): string {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  d.setHours(9, 0, 0, 0);
+  const tzOffset = d.getTimezoneOffset() * 60000;
+  return new Date(d.getTime() - tzOffset).toISOString().slice(0, 16);
+}
+
+function localMinDatetime(): string {
+  const d = new Date();
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().slice(0, 16);
+}
+
+const PLATFORM_CHAR_LIMIT: Record<Platform, number | null> = {
+  threads: 500,
+  instagram: 2200,
+  facebook: 5000,
+  linkedin: 3000,
+};
 
 export function MarketingClient({
   project,
@@ -27,18 +57,33 @@ export function MarketingClient({
   recentPosts: GeneratedPost[];
   upcoming: ScheduledPost[];
 }) {
-  const [platform, setPlatform] = useState<typeof PLATFORMS[number]['id']>('instagram');
+  // Multi-select platforms; we enforce at least 1 selected at all times.
+  const [platforms, setPlatforms] = useState<Platform[]>(['instagram']);
   const [prompt, setPrompt] = useState('');
-  const [output, setOutput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
-
-  const [scheduleMode, setScheduleMode] = useState<ScheduleMode>('now');
-  const [scheduledFor, setScheduledFor] = useState('');
-  const [scheduleStatus, setScheduleStatus] = useState<string | null>(null);
-  const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [editingPost, setEditingPost] = useState<EditablePost | null>(null);
 
+  // After generation, one entry per platform with its own editable copy
+  // and its own scheduled time. activeTab toggles which one is visible.
+  const [generations, setGenerations] = useState<Generation[]>([]);
+  const [activeTab, setActiveTab] = useState<Platform | null>(null);
+  const [schedulingAll, setSchedulingAll] = useState(false);
+  const [scheduleSummary, setScheduleSummary] = useState<string | null>(null);
+
+  const togglePlatform = (p: Platform) => {
+    setPlatforms((prev) => {
+      if (prev.includes(p)) {
+        if (prev.length === 1) return prev; // never empty
+        return prev.filter((x) => x !== p);
+      }
+      return [...prev, p];
+    });
+  };
+
+  // Pre-fill the prompt with the template hook when the user picks a template,
+  // but only if the prompt is empty so we don't blow away in-progress text.
   useEffect(() => {
     if (!selectedTemplate) return;
     const t = templates.find((tt) => tt.id === selectedTemplate);
@@ -46,56 +91,175 @@ export function MarketingClient({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTemplate]);
 
+  // If selected template no longer applies to ANY of the chosen platforms,
+  // deselect it instead of leaving a stale chip highlighted.
   useEffect(() => {
     if (!selectedTemplate) return;
     const t = templates.find((tt) => tt.id === selectedTemplate);
-    if (t && !t.bestFor.includes(platform)) setSelectedTemplate(null);
+    if (!t) return;
+    const stillUseful = platforms.some((p) =>
+      (t.bestFor as readonly string[]).includes(p)
+    );
+    if (!stillUseful) setSelectedTemplate(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [platform]);
+  }, [platforms]);
+
+  useBroadcast((event) => {
+    if (event.type.startsWith('scheduled-post')) {
+      location.reload();
+    }
+  });
 
   const generate = async () => {
-    if (!prompt.trim()) return;
+    if (!prompt.trim() || platforms.length === 0) return;
     setLoading(true);
-    setOutput('');
+    setError(null);
+    setGenerations([]);
+    setActiveTab(null);
     try {
       const res = await fetch('/api/ai/generate-post', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           projectId: project.id,
-          platform,
+          platforms,
           prompt,
           templateId: selectedTemplate,
         }),
       });
       const data = await res.json();
-      if (data.content) setOutput(data.content);
-      else setOutput('Error generating post. Try again.');
-    } catch (err) {
-      setOutput('Error generating post.');
+      if (!res.ok) {
+        setError(data.error ?? 'Generation failed');
+        return;
+      }
+      const defaultTime = defaultScheduleTime();
+      const next: Generation[] = (
+        data.generations as Array<{ platform: Platform; content?: string; error?: string }>
+      ).map((g) => ({
+        platform: g.platform,
+        content: g.content ?? '',
+        error: g.error,
+        scheduledFor: defaultTime,
+      }));
+      setGenerations(next);
+      setActiveTab(next[0]?.platform ?? null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
   };
 
-  const copyToClipboard = async () => {
-    setScheduleError(null);
+  const updateGeneration = (
+    platform: Platform,
+    patch: Partial<Pick<Generation, 'content' | 'scheduledFor'>>
+  ) => {
+    setGenerations((prev) =>
+      prev.map((g) => (g.platform === platform ? { ...g, ...patch } : g))
+    );
+  };
+
+  const regenerateOne = async (platform: Platform) => {
+    const idx = generations.findIndex((g) => g.platform === platform);
+    if (idx < 0) return;
+    setGenerations((prev) =>
+      prev.map((g) => (g.platform === platform ? { ...g, error: undefined, content: '' } : g))
+    );
     try {
-      await navigator.clipboard.writeText(output);
-      setScheduleStatus('✓ Copied');
-      setTimeout(() => setScheduleStatus(null), 2000);
-    } catch {
-      setScheduleError('Could not copy');
+      const res = await fetch('/api/ai/generate-post', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId: project.id,
+          platforms: [platform],
+          prompt,
+          templateId: selectedTemplate,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        updateGeneration(platform, {});
+        setGenerations((prev) =>
+          prev.map((g) =>
+            g.platform === platform ? { ...g, error: data.error ?? 'Regen failed' } : g
+          )
+        );
+        return;
+      }
+      const newGen = (data.generations as Generation[])[0];
+      if (newGen?.content) {
+        updateGeneration(platform, { content: newGen.content });
+      } else if (newGen?.error) {
+        setGenerations((prev) =>
+          prev.map((g) =>
+            g.platform === platform ? { ...g, error: newGen.error } : g
+          )
+        );
+      }
+    } catch (e) {
+      setGenerations((prev) =>
+        prev.map((g) =>
+          g.platform === platform
+            ? { ...g, error: e instanceof Error ? e.message : String(e) }
+            : g
+        )
+      );
     }
   };
 
-  // Listen for changes from other tabs and refresh when they happen so
-  // upcoming/recent lists don't go stale while the user has multiple tabs open.
-  useBroadcast((event) => {
-    if (event.type.startsWith('scheduled-post')) {
-      location.reload();
+  const applyDateToAll = () => {
+    const first = generations[0]?.scheduledFor;
+    if (!first) return;
+    setGenerations((prev) => prev.map((g) => ({ ...g, scheduledFor: first })));
+  };
+
+  const allReady = generations.length > 0 && generations.every((g) => g.error || (g.content && g.scheduledFor));
+  const schedulableCount = generations.filter((g) => !g.error && g.content && g.scheduledFor).length;
+
+  const scheduleAll = async () => {
+    setSchedulingAll(true);
+    setScheduleSummary(null);
+    try {
+      const results = await Promise.all(
+        generations
+          .filter((g) => !g.error && g.content && g.scheduledFor)
+          .map(async (g) => {
+            const res = await fetch('/api/marketing/schedule', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                projectId: project.id,
+                platform: g.platform,
+                content: g.content,
+                templateId: selectedTemplate,
+                scheduledFor: new Date(g.scheduledFor).toISOString(),
+              }),
+            });
+            return { platform: g.platform, ok: res.ok };
+          })
+      );
+      const failed = results.filter((r) => !r.ok);
+      if (failed.length === 0) {
+        setScheduleSummary(`✓ Scheduled ${results.length}`);
+        broadcastEvent({ type: 'scheduled-post-created' });
+        setTimeout(() => location.reload(), 1500);
+      } else {
+        setScheduleSummary(
+          `${results.length - failed.length} ok, ${failed.length} failed (${failed.map((f) => f.platform).join(', ')})`
+        );
+      }
+    } finally {
+      setSchedulingAll(false);
     }
-  });
+  };
+
+  const copyOne = async (content: string) => {
+    try {
+      await navigator.clipboard.writeText(content);
+    } catch {
+      // ignore
+    }
+  };
 
   const cancelPost = async (id: string) => {
     if (!confirm('Cancel this scheduled post?')) return;
@@ -110,50 +274,18 @@ export function MarketingClient({
     }
   };
 
-  const schedulePost = async () => {
-    if (!output || !scheduledFor) return;
-    setScheduleStatus('scheduling…');
-    setScheduleError(null);
-    try {
-      const res = await fetch('/api/marketing/schedule', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          projectId: project.id,
-          platform,
-          content: output,
-          templateId: selectedTemplate,
-          scheduledFor: new Date(scheduledFor).toISOString(),
-        }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setScheduleStatus('✓ Scheduled');
-        broadcastEvent({ type: 'scheduled-post-created' });
-        setTimeout(() => location.reload(), 1500);
-      } else {
-        setScheduleStatus(null);
-        setScheduleError(data.error ?? 'Failed to schedule');
-      }
-    } catch (e) {
-      setScheduleStatus(null);
-      setScheduleError(e instanceof Error ? e.message : String(e));
-    }
-  };
-
-  // datetime-local needs a YYYY-MM-DDTHH:mm string in local time
-  const minDateTime = (() => {
-    const d = new Date();
-    d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
-    return d.toISOString().slice(0, 16);
-  })();
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const minDateTime = localMinDatetime();
+  const activeGeneration = activeTab
+    ? generations.find((g) => g.platform === activeTab) ?? null
+    : null;
 
   return (
     <div className="p-4 md:p-8">
       <div className="mb-6 md:mb-8">
         <h1 className="font-display text-display-md font-light tracking-tight">Marketing</h1>
         <p className="text-text-2 mt-2 max-w-2xl text-sm">
-          Generate posts tailored to your project
+          Generate posts tailored to your project, optimized per platform.
         </p>
       </div>
 
@@ -164,155 +296,232 @@ export function MarketingClient({
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-4">
-        <div className="glass rounded-2xl p-4 md:p-6">
-          <div className="flex flex-wrap gap-2 mb-4 border-b border-border pb-4">
-            {PLATFORMS.map((p) => (
-              <button
-                key={p.id}
-                onClick={() => setPlatform(p.id)}
-                className={`px-3 py-1.5 rounded-md text-xs flex items-center gap-2 border transition-colors ${
-                  platform === p.id
-                    ? 'border-accent bg-accent-soft text-accent'
-                    : 'border-border bg-bg text-text-2 hover:text-text-1'
-                }`}
-              >
-                <span style={{ color: p.color }}>●</span>
-                {p.label}
-              </button>
-            ))}
-          </div>
-
-          <div className="mb-4">
-            <label className="block text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-3">
-              Choose a template (optional)
-            </label>
-            <div className="space-y-3">
-              {categories.map((cat) => {
-                const inCat = templates.filter(
-                  (t) => t.category === cat && t.bestFor.includes(platform)
-                );
-                if (inCat.length === 0) return null;
-                return (
-                  <div key={cat}>
-                    <div className="text-xs text-text-3 mb-2">{cat}</div>
-                    <div className="flex flex-wrap gap-2">
-                      {inCat.map((t) => {
-                        const active = selectedTemplate === t.id;
-                        return (
-                          <button
-                            key={t.id}
-                            onClick={() => setSelectedTemplate(active ? null : t.id)}
-                            className={`text-left px-3 py-2 rounded-lg border text-xs transition-colors max-w-[260px] ${
-                              active
-                                ? 'border-accent bg-accent-soft text-accent'
-                                : 'border-border hover:border-border-bright text-text-2'
-                            }`}
-                          >
-                            <div className="font-medium">{t.title}</div>
-                            <div className="text-text-3 mt-0.5 line-clamp-2">
-                              {t.description}
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <label className="block text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2">
-            What do you want to post about?
-          </label>
-          <textarea
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder="e.g. We just hit 100 paying customers. Share the journey."
-            className="w-full bg-bg border border-border rounded-lg p-3 text-sm min-h-[100px] outline-none focus:border-accent"
-          />
-
-          <button
-            onClick={generate}
-            disabled={loading || !prompt.trim()}
-            className="mt-4 bg-[image:var(--accent-grad)] text-white px-5 py-2 rounded-lg text-sm font-medium disabled:opacity-50 transition-transform hover:-translate-y-0.5"
-          >
-            {loading ? 'Generating...' : 'Generate with Claude →'}
-          </button>
-
-          {output && (
-            <div className="mt-6 bg-bg border border-border rounded-lg p-4 whitespace-pre-wrap text-sm">
-              {output}
-            </div>
-          )}
-
-          {output && (
-            <div className="mt-4 pt-4 border-t border-border">
-              <label className="block text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-3">
-                When to post
+        <div className="space-y-4">
+          <div className="glass rounded-2xl p-4 md:p-6">
+            <div className="mb-4 border-b border-border pb-4">
+              <label className="block text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2">
+                Platforms
               </label>
-              <div className="flex flex-wrap gap-2 mb-3">
-                <button
-                  onClick={() => setScheduleMode('now')}
-                  className={`text-xs px-3 py-1.5 rounded transition-colors ${
-                    scheduleMode === 'now'
-                      ? 'bg-accent-soft text-accent'
-                      : 'text-text-2 hover:text-text-1'
-                  }`}
-                >
-                  Just copy now
-                </button>
-                <button
-                  onClick={() => setScheduleMode('later')}
-                  className={`text-xs px-3 py-1.5 rounded transition-colors ${
-                    scheduleMode === 'later'
-                      ? 'bg-accent-soft text-accent'
-                      : 'text-text-2 hover:text-text-1'
-                  }`}
-                >
-                  Schedule for later
-                </button>
+              <div className="flex flex-wrap gap-2">
+                {PLATFORMS.map((p) => {
+                  const active = platforms.includes(p.id);
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => togglePlatform(p.id)}
+                      className={`px-3 py-1.5 rounded-md text-xs flex items-center gap-2 border transition-colors ${
+                        active
+                          ? 'border-accent bg-accent-soft text-accent'
+                          : 'border-border bg-bg text-text-2 hover:text-text-1'
+                      }`}
+                    >
+                      <span style={{ color: active ? undefined : p.color }}>●</span>
+                      {p.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-[10px] font-mono text-text-3 mt-2">
+                {platforms.length === 1
+                  ? '1 platform · post will be optimized for it'
+                  : `${platforms.length} platforms · each gets its own optimized version`}
+              </p>
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-3">
+                Choose a template (optional)
+              </label>
+              <div className="space-y-3">
+                {categories.map((cat) => {
+                  const inCat = templates.filter(
+                    (t) =>
+                      t.category === cat &&
+                      platforms.some((p) =>
+                        (t.bestFor as readonly string[]).includes(p)
+                      )
+                  );
+                  if (inCat.length === 0) return null;
+                  return (
+                    <div key={cat}>
+                      <div className="text-xs text-text-3 mb-2">{cat}</div>
+                      <div className="flex flex-wrap gap-2">
+                        {inCat.map((t) => {
+                          const active = selectedTemplate === t.id;
+                          return (
+                            <button
+                              key={t.id}
+                              onClick={() =>
+                                setSelectedTemplate(active ? null : t.id)
+                              }
+                              className={`text-left px-3 py-2 rounded-lg border text-xs transition-colors max-w-[260px] ${
+                                active
+                                  ? 'border-accent bg-accent-soft text-accent'
+                                  : 'border-border hover:border-border-bright text-text-2'
+                              }`}
+                            >
+                              <div className="font-medium">{t.title}</div>
+                              <div className="text-text-3 mt-0.5 line-clamp-2">
+                                {t.description}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <label className="block text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2">
+              What do you want to post about?
+            </label>
+            <textarea
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              placeholder="e.g. We just hit 100 paying customers. Share the journey."
+              className="w-full bg-bg border border-border rounded-lg p-3 text-sm min-h-[100px] outline-none focus:border-accent"
+            />
+
+            <button
+              onClick={generate}
+              disabled={loading || !prompt.trim()}
+              className="mt-4 bg-[image:var(--accent-grad)] text-white px-5 py-2 rounded-lg text-sm font-medium disabled:opacity-50 transition-transform hover:-translate-y-0.5"
+            >
+              {loading
+                ? 'Generating…'
+                : `Generate ${platforms.length > 1 ? `${platforms.length} versions` : ''} with Claude →`}
+            </button>
+            {error && <p className="text-xs text-danger mt-3">{error}</p>}
+          </div>
+
+          {generations.length > 0 && (
+            <GlassCard elevated className="p-4 md:p-5">
+              <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-accent mb-3">
+                Review & schedule
               </div>
 
-              {scheduleMode === 'later' && (
-                <>
-                  <input
-                    type="datetime-local"
-                    value={scheduledFor}
-                    onChange={(e) => setScheduledFor(e.target.value)}
-                    min={minDateTime}
-                    className="bg-bg-elev border border-border rounded-lg px-3 py-2 text-sm text-text-1 [color-scheme:dark]"
-                  />
-                  <p className="text-xs text-text-3 mt-1 mb-3">
-                    Times in your timezone:{' '}
-                    <span className="font-mono">
-                      {Intl.DateTimeFormat().resolvedOptions().timeZone}
-                    </span>
-                  </p>
-                </>
+              <div className="flex flex-wrap gap-1 mb-4 border-b border-border">
+                {generations.map((g) => {
+                  const isActive = activeTab === g.platform;
+                  return (
+                    <button
+                      key={g.platform}
+                      onClick={() => setActiveTab(g.platform)}
+                      className={`px-3 py-2 text-xs flex items-center gap-2 border-b-2 transition-colors ${
+                        isActive
+                          ? 'border-accent text-accent'
+                          : 'border-transparent text-text-2 hover:text-text-1'
+                      }`}
+                    >
+                      <span>●</span>
+                      {PLATFORMS.find((p) => p.id === g.platform)?.label ?? g.platform}
+                      {g.error && <span className="text-danger">⚠</span>}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {activeGeneration && (
+                <div className="space-y-3">
+                  {activeGeneration.error ? (
+                    <div className="text-sm text-danger">
+                      Generation failed: {activeGeneration.error}{' '}
+                      <button
+                        onClick={() => regenerateOne(activeGeneration.platform)}
+                        className="ml-2 underline"
+                      >
+                        Retry
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <textarea
+                        value={activeGeneration.content}
+                        onChange={(e) =>
+                          updateGeneration(activeGeneration.platform, {
+                            content: e.target.value,
+                          })
+                        }
+                        rows={8}
+                        className="w-full bg-bg-elev border border-border rounded-lg px-3 py-2 text-sm outline-none focus:border-accent resize-none"
+                      />
+                      <div className="text-xs text-text-3">
+                        {activeGeneration.content.length} chars
+                        {(() => {
+                          const limit = PLATFORM_CHAR_LIMIT[activeGeneration.platform];
+                          if (limit && activeGeneration.content.length > limit) {
+                            return (
+                              <span className="text-danger ml-2">
+                                ⚠ {PLATFORMS.find((p) => p.id === activeGeneration.platform)?.label} max is {limit}
+                              </span>
+                            );
+                          }
+                          return null;
+                        })()}
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
+                        <div className="flex-1">
+                          <label className="block text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-1">
+                            Schedule for
+                          </label>
+                          <input
+                            type="datetime-local"
+                            value={activeGeneration.scheduledFor}
+                            onChange={(e) =>
+                              updateGeneration(activeGeneration.platform, {
+                                scheduledFor: e.target.value,
+                              })
+                            }
+                            min={minDateTime}
+                            className="bg-bg-elev border border-border rounded-lg px-3 py-2 text-sm text-text-1 [color-scheme:dark]"
+                          />
+                        </div>
+                        <div className="flex gap-2">
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => copyOne(activeGeneration.content)}
+                          >
+                            Copy
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => regenerateOne(activeGeneration.platform)}
+                          >
+                            Regenerate
+                          </Button>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
               )}
 
-              <div className="flex flex-wrap gap-2 items-center">
-                <Button variant="secondary" size="sm" onClick={copyToClipboard}>
-                  Copy to clipboard
+              <div className="flex flex-wrap gap-2 mt-6 pt-4 border-t border-border items-center">
+                <Button variant="ghost" size="sm" onClick={applyDateToAll}>
+                  Apply this date to all
                 </Button>
-                {scheduleMode === 'later' && (
-                  <Button
-                    size="sm"
-                    onClick={schedulePost}
-                    disabled={!scheduledFor || scheduleStatus === 'scheduling…'}
-                  >
-                    {scheduleStatus === 'scheduling…' ? 'Scheduling…' : 'Schedule reminder →'}
-                  </Button>
+                <div className="flex-1" />
+                {scheduleSummary && (
+                  <span className="text-xs text-text-2">{scheduleSummary}</span>
                 )}
-                {scheduleStatus && scheduleStatus !== 'scheduling…' && (
-                  <span className="text-xs text-success">{scheduleStatus}</span>
-                )}
-                {scheduleError && (
-                  <span className="text-xs text-danger">{scheduleError}</span>
-                )}
+                <Button
+                  size="sm"
+                  onClick={scheduleAll}
+                  disabled={!allReady || schedulingAll || schedulableCount === 0}
+                >
+                  {schedulingAll ? 'Scheduling…' : `Schedule all (${schedulableCount})`}
+                </Button>
               </div>
-            </div>
+              <p className="text-xs text-text-3 mt-2">
+                Times in your timezone: <span className="font-mono">{tz}</span>
+              </p>
+            </GlassCard>
           )}
         </div>
 
@@ -369,7 +578,7 @@ export function MarketingClient({
             ))}
           </div>
 
-          <div className="glass rounded-2xl p-5" id="recent-generations">
+          <div className="glass rounded-2xl p-5">
             <div className="font-display text-lg font-light mb-1">Recent generations</div>
             <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-4">
               Last {recentPosts.length}
@@ -378,7 +587,10 @@ export function MarketingClient({
               <p className="text-text-3 text-sm">No posts generated yet.</p>
             )}
             {recentPosts.map((p) => (
-              <div key={p.id} className="bg-bg border border-border rounded-lg p-3 mb-2 last:mb-0 text-xs">
+              <div
+                key={p.id}
+                className="bg-bg border border-border rounded-lg p-3 mb-2 last:mb-0 text-xs"
+              >
                 <div className="text-text-3 font-mono mb-1">{p.platform}</div>
                 <div className="line-clamp-3 text-text-2">{p.content}</div>
               </div>

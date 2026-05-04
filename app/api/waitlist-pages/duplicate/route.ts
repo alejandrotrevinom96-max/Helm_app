@@ -36,7 +36,11 @@ export async function POST(request: Request) {
 
   // Find a free slug: original-slug-copy, -copy-2, -copy-3, ...
   // The slug column is globally unique so we have to query each candidate.
-  const baseSlug = `${original.slug}-copy`;
+  // Strip any existing -copy / -copy-N suffix first so duplicating
+  // "x-copy-2" produces "x-copy-3" rather than "x-copy-2-copy".
+  const stripCopySuffix = (slug: string): string =>
+    slug.replace(/-copy(-\d+)?$/, '');
+  const baseSlug = `${stripCopySuffix(original.slug)}-copy`;
   let newSlug = baseSlug;
   for (let n = 2; n <= SLUG_LIMIT; n++) {
     const exists = await db
