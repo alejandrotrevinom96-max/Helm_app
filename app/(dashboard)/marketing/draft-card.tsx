@@ -16,6 +16,7 @@ export interface Draft {
   visual?: { url: string; prompt: string };
   visualLoading?: boolean;
   visualError?: string;
+  seededByQuote?: string;
 }
 
 interface Props {
@@ -92,9 +93,19 @@ export function DraftCard({
         </button>
       </div>
 
-      <p className="text-[11px] text-text-3 italic mb-3 line-clamp-2">
+      <p className="text-[11px] text-text-3 italic mb-2 line-clamp-2">
         {draft.rationale}
       </p>
+
+      {draft.seededByQuote && (
+        <div
+          className="text-[10px] text-text-3 italic mb-3 pl-2 border-l-2 border-accent line-clamp-2"
+          title={draft.seededByQuote}
+        >
+          Inspired by: &ldquo;{draft.seededByQuote.slice(0, 80)}
+          {draft.seededByQuote.length > 80 ? '…' : ''}&rdquo;
+        </div>
+      )}
 
       {draft.visual && !draft.visualLoading && (
         <div className="mb-3 relative group rounded-lg overflow-hidden">

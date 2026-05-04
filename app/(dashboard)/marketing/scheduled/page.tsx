@@ -26,6 +26,8 @@ export default async function ScheduledPage() {
     status: p.status,
     consistencyScore: p.consistencyScore,
     visualUrl: p.visualUrl,
+    performanceRating: p.performanceRating,
+    performanceNote: p.performanceNote,
   }));
 
   return (

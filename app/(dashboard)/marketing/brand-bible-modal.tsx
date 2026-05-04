@@ -6,8 +6,9 @@ import { GlassCard } from '@/components/ui/glass-card';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { BrandBible } from '@/lib/types/brand';
 import type { BrandProject } from './brand-bible-card';
+import { QuoteVault } from './quote-vault';
 
-type Mode = 'overview' | 'discover' | 'refine';
+type Mode = 'overview' | 'discover' | 'refine' | 'quotes';
 
 interface RefineQuestion {
   id: string;
@@ -150,6 +151,7 @@ export function BrandBibleModal({
             <h2 className="font-display text-2xl font-light">
               {mode === 'discover' && 'Discover your brand'}
               {mode === 'refine' && 'Refine your brand'}
+              {mode === 'quotes' && 'Quote vault'}
               {mode === 'overview' && (bible?.identity?.name || 'Brand bible')}
             </h2>
           </div>
@@ -167,6 +169,7 @@ export function BrandBibleModal({
             bible={bible}
             onDiscover={() => setMode('discover')}
             onRefine={loadRefineQuestions}
+            onQuotes={() => setMode('quotes')}
             onClose={onClose}
           />
         )}
@@ -193,6 +196,18 @@ export function BrandBibleModal({
             onSubmit={submitRefinement}
           />
         )}
+
+        {mode === 'quotes' && (
+          <div>
+            <button
+              onClick={() => setMode('overview')}
+              className="text-xs text-accent mb-4 hover:underline"
+            >
+              ← Back to overview
+            </button>
+            <QuoteVault projectId={project.id} />
+          </div>
+        )}
       </GlassCard>
     </div>
   );
@@ -202,11 +217,13 @@ function OverviewMode({
   bible,
   onDiscover,
   onRefine,
+  onQuotes,
   onClose,
 }: {
   bible: BrandBible | null;
   onDiscover: () => void;
   onRefine: () => void;
+  onQuotes: () => void;
   onClose: () => void;
 }) {
   if (!bible || !bible.meta) {
@@ -296,6 +313,9 @@ function OverviewMode({
         </Button>
         <Button variant="ghost" size="sm" onClick={onRefine}>
           Refine remaining gaps
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onQuotes}>
+          Manage quote vault →
         </Button>
         <div className="flex-1" />
         <Button size="sm" onClick={onClose}>

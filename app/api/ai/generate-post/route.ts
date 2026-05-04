@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { db } from '@/lib/db';
-import { projects, generatedPosts } from '@/lib/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { projects, generatedPosts, brandQuotes } from '@/lib/db/schema';
+import { eq, and, inArray, sql } from 'drizzle-orm';
 import { anthropic } from '@/lib/ai/claude';
 import { getTemplateById } from '@/lib/marketing/templates';
 import {
@@ -55,6 +55,9 @@ interface Draft {
     url: string;
     prompt: string;
   };
+  // First ~80 chars of the founder quote that seeded this draft, surfaced
+  // in the UI so the user can see "this draft was inspired by X".
+  seededByQuote?: string;
 }
 
 interface PlatformResult {
@@ -213,6 +216,17 @@ export async function POST(request: Request) {
   const bible = (project.brandContext as BrandBible | null) ?? null;
   const variantPillars = selectVariantPillars(bible);
 
+  // Fetch up to PILLAR_VARIANTS_COUNT quotes for round-robin seeding,
+  // ordering by `usage_count ASC, random()` so under-used quotes win.
+  // Quotes are optional — if the founder hasn't added any, we just skip
+  // the seeding entirely and the prompt looks identical to before.
+  const seedQuotes = await db
+    .select()
+    .from(brandQuotes)
+    .where(eq(brandQuotes.projectId, projectId))
+    .orderBy(sql`usage_count ASC`, sql`random()`)
+    .limit(PILLAR_VARIANTS_COUNT);
+
   // 4 platforms × 3 drafts × 2 calls (gen + score) = up to 24 parallel
   // Anthropic calls. Promise.all keeps total wallclock bounded by the
   // slowest platform rather than the sum of all platforms.
@@ -220,7 +234,14 @@ export async function POST(request: Request) {
     validatedPlatforms.map(async (p): Promise<PlatformResult> => {
       try {
         const draftPromises = variantPillars.map(async (pillar, idx): Promise<Draft> => {
-          const systemPrompt = buildPillarPrompt(
+          // Round-robin: with 3 drafts and 2 quotes, drafts 0/2 share quote
+          // 0 and draft 1 gets quote 1. Empty quote vault = no seeding.
+          const seedQuote =
+            seedQuotes.length > 0
+              ? seedQuotes[idx % seedQuotes.length]
+              : null;
+
+          let systemPrompt = buildPillarPrompt(
             bible,
             p,
             template?.systemHint ?? null,
@@ -229,6 +250,16 @@ export async function POST(request: Request) {
             pillar,
             idx
           );
+
+          if (seedQuote) {
+            systemPrompt += `\n\n═══════ FOUNDER'S AUTHENTIC VOICE ═══════
+The founder has shared this quote that captures their authentic voice:
+"${seedQuote.content}"
+${seedQuote.source ? `(Source: ${seedQuote.source})` : ''}
+${seedQuote.context ? `Context: ${seedQuote.context}` : ''}
+
+Don't quote this verbatim — instead, channel its spirit, energy, and specific phrasing patterns. Your draft should feel like the SAME PERSON who said this quote also wrote the post. Match cadence, vocabulary range, and worldview.`;
+          }
 
           let content = '';
           try {
@@ -269,6 +300,7 @@ export async function POST(request: Request) {
             scoreBreakdown: score.breakdown,
             violations: score.violations,
             suggestions: score.suggestions,
+            seededByQuote: seedQuote?.content,
           };
         });
 
@@ -333,6 +365,31 @@ export async function POST(request: Request) {
       }
     })
   );
+
+  // Bump usage stats for the quotes we actually consumed. We don't gate on
+  // whether each platform succeeded — even a failed generation still pulled
+  // the quote into a system prompt, so it counts as "used" for round-robin
+  // purposes. Scoped to user.id as a defensive double-check on top of the
+  // projectId query above.
+  if (seedQuotes.length > 0) {
+    const usedQuoteIds = seedQuotes
+      .slice(0, variantPillars.length)
+      .map((q) => q.id);
+    if (usedQuoteIds.length > 0) {
+      await db
+        .update(brandQuotes)
+        .set({
+          usageCount: sql`${brandQuotes.usageCount} + 1`,
+          lastUsedAt: new Date(),
+        })
+        .where(
+          and(
+            inArray(brandQuotes.id, usedQuoteIds),
+            eq(brandQuotes.userId, user.id)
+          )
+        );
+    }
+  }
 
   return NextResponse.json({
     generations: platformResults,

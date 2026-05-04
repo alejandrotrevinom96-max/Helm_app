@@ -13,6 +13,8 @@ interface Post {
   status: string;
   consistencyScore: number | null;
   visualUrl: string | null;
+  performanceRating: string | null;
+  performanceNote: string | null;
 }
 
 const PLATFORMS = ['instagram', 'facebook', 'linkedin', 'threads'];
@@ -57,6 +59,31 @@ export function ScheduledManager({ posts }: { posts: Post[] }) {
     setSelected((prev) => {
       if (prev.size === filtered.length && filtered.length > 0) return new Set();
       return new Set(filtered.map((p) => p.id));
+    });
+  };
+
+  // PATCH the rating; pass null to clear. We reload after success so the
+  // UI reflects the persisted state without us threading optimistic updates
+  // through the post array.
+  const ratePost = async (
+    postId: string,
+    rating: 'worked' | 'flopped' | null
+  ) => {
+    const res = await fetch(`/api/marketing/scheduled/${postId}/rate`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rating }),
+    });
+    if (res.ok) location.reload();
+  };
+
+  const updateNote = async (postId: string, note: string) => {
+    const post = posts.find((p) => p.id === postId);
+    if (!post?.performanceRating) return;
+    await fetch(`/api/marketing/scheduled/${postId}/rate`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rating: post.performanceRating, note }),
     });
   };
 
@@ -318,6 +345,54 @@ export function ScheduledManager({ posts }: { posts: Post[] }) {
                     <p className="text-sm text-text-1 line-clamp-2 whitespace-pre-wrap">
                       {p.content}
                     </p>
+                    {(p.status === 'notified' || p.status === 'posted') && (
+                      <div className="flex items-center gap-2 mt-2 pt-2 border-t border-border flex-wrap">
+                        <span className="text-[10px] font-mono uppercase tracking-[0.1em] text-text-3">
+                          Did it work?
+                        </span>
+                        <button
+                          onClick={() =>
+                            ratePost(
+                              p.id,
+                              p.performanceRating === 'worked' ? null : 'worked'
+                            )
+                          }
+                          className={`text-xs px-2 py-1 rounded-full transition-colors ${
+                            p.performanceRating === 'worked'
+                              ? 'bg-success-soft text-success'
+                              : 'text-text-3 hover:text-text-1'
+                          }`}
+                        >
+                          ✓ Worked
+                        </button>
+                        <button
+                          onClick={() =>
+                            ratePost(
+                              p.id,
+                              p.performanceRating === 'flopped'
+                                ? null
+                                : 'flopped'
+                            )
+                          }
+                          className={`text-xs px-2 py-1 rounded-full transition-colors ${
+                            p.performanceRating === 'flopped'
+                              ? 'bg-amber-500/10 text-amber-500'
+                              : 'text-text-3 hover:text-text-1'
+                          }`}
+                        >
+                          × Flopped
+                        </button>
+                        {p.performanceRating && (
+                          <input
+                            type="text"
+                            placeholder="Add note (optional)…"
+                            defaultValue={p.performanceNote ?? ''}
+                            onBlur={(e) => updateNote(p.id, e.target.value)}
+                            className="flex-1 min-w-[160px] bg-bg-elev border border-border rounded px-2 py-1 text-[11px] outline-none focus:border-accent"
+                          />
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               </GlassCard>

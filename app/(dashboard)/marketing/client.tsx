@@ -12,6 +12,7 @@ import { EditScheduledModal, type EditablePost } from './edit-scheduled-modal';
 import { broadcastEvent, useBroadcast } from '@/hooks/use-broadcast';
 import { DraftCard, type Draft } from './draft-card';
 import { DriftAlert } from './drift-alert';
+import { PerformanceInsights } from './performance-insights';
 
 const PLATFORMS = [
   { id: 'instagram', label: 'Instagram', color: '#e1306c' },
@@ -500,6 +501,8 @@ export function MarketingClient({
       </div>
 
       <DriftAlert projectId={project.id} />
+
+      <PerformanceInsights projectId={project.id} />
 
       <BrandBibleCard
         project={{

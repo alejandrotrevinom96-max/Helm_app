@@ -334,6 +334,34 @@ export const scheduledPosts = pgTable('scheduled_posts', {
   visualUrl: text('visual_url'),
   visualPrompt: text('visual_prompt'),
   visualType: text('visual_type'), // 'image' | 'carousel' | null
+  // Founder feedback after the post went out: 'worked' | 'flopped' | null.
+  // Powers the Performance Memory analysis (PR #13).
+  performanceRating: text('performance_rating'),
+  performanceNote: text('performance_note'),
+  ratedAt: timestamp('rated_at'),
+});
+
+// ===== Brand Quotes =====
+// Founder-curated library of quotes that capture authentic voice. Used by
+// post generation to seed each draft with a real example of how the
+// founder talks. usageCount + lastUsedAt let us round-robin so the same
+// quote doesn't dominate every post.
+export const brandQuotes = pgTable('brand_quotes', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  projectId: uuid('project_id')
+    .notNull()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  content: text('content').notNull(),
+  source: text('source'), // "Podcast X", "Tweet from Y", etc
+  context: text('context'), // founder's own annotation
+  tags: text('tags').array(),
+  usageCount: integer('usage_count').default(0).notNull(),
+  lastUsedAt: timestamp('last_used_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
 // ===== Type exports =====
@@ -347,3 +375,4 @@ export type WaitlistPage = typeof waitlistPages.$inferSelect;
 export type WaitlistResponse = typeof waitlistResponses.$inferSelect;
 export type ScheduledPost = typeof scheduledPosts.$inferSelect;
 export type ResearchConfig = typeof researchConfig.$inferSelect;
+export type BrandQuote = typeof brandQuotes.$inferSelect;
