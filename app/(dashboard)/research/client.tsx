@@ -9,6 +9,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { SimpleMarkdown } from '@/components/ui/simple-markdown';
 import { KeywordChips } from './keyword-chips';
 import { CompetitorComparison } from './competitor-comparison';
+import { AutoConfigSection } from './auto-config-section';
 
 type Sources = {
   reddit: boolean;
@@ -247,6 +248,11 @@ export function ResearchClient({
 
         {configOpen && (
           <div className="mt-4 space-y-5">
+            <AutoConfigSection
+              projectId={project.id}
+              onApplied={() => window.location.reload()}
+            />
+
             <KeywordChips
               label="Keywords"
               values={keywords}

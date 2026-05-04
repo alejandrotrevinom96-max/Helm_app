@@ -4,6 +4,15 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Skeleton } from '@/components/ui/skeleton';
 
+// Direct deep-links to each provider's token page so users don't have to
+// hunt through dashboards. Added in PR #15 — instructions stay (some users
+// prefer reading the path), the link is just a shortcut.
+const TOKEN_DOCS_URLS: Record<string, string> = {
+  vercel: 'https://vercel.com/account/tokens',
+  supabase: 'https://supabase.com/dashboard/account/tokens',
+  meta: 'https://developers.facebook.com/apps',
+};
+
 const INTEGRATIONS = [
   {
     id: 'vercel',
@@ -338,7 +347,17 @@ function CredentialCard({
 
       {showForm && (
         <div className="mt-4 pt-4 border-t border-border">
-          <p className="text-xs text-text-3 mb-3">{integration.instructions}</p>
+          <p className="text-xs text-text-3 mb-2">{integration.instructions}</p>
+          {TOKEN_DOCS_URLS[integration.id] && (
+            <a
+              href={TOKEN_DOCS_URLS[integration.id]}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-accent hover:underline mb-3 inline-flex items-center gap-1"
+            >
+              Get token from {integration.name} ↗
+            </a>
+          )}
           <input
             type="password"
             value={token}

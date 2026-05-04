@@ -13,6 +13,7 @@ import { broadcastEvent, useBroadcast } from '@/hooks/use-broadcast';
 import { DraftCard, type Draft } from './draft-card';
 import { DriftAlert } from './drift-alert';
 import { PerformanceInsights } from './performance-insights';
+import { SmartTemplatesSection } from './smart-templates-section';
 
 const PLATFORMS = [
   { id: 'instagram', label: 'Instagram', color: '#e1306c' },
@@ -549,49 +550,61 @@ export function MarketingClient({
             </div>
 
             <div className="mb-4">
-              <label className="block text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-3">
-                Choose a template (optional)
-              </label>
-              <div className="space-y-3">
-                {categories.map((cat) => {
-                  const inCat = templates.filter(
-                    (t) =>
-                      t.category === cat &&
-                      platforms.some((p) =>
-                        (t.bestFor as readonly string[]).includes(p)
-                      )
-                  );
-                  if (inCat.length === 0) return null;
-                  return (
-                    <div key={cat}>
-                      <div className="text-xs text-text-3 mb-2">{cat}</div>
-                      <div className="flex flex-wrap gap-2">
-                        {inCat.map((t) => {
-                          const active = selectedTemplate === t.id;
-                          return (
-                            <button
-                              key={t.id}
-                              onClick={() =>
-                                setSelectedTemplate(active ? null : t.id)
-                              }
-                              className={`text-left px-3 py-2 rounded-lg border text-xs transition-colors max-w-[260px] ${
-                                active
-                                  ? 'border-accent bg-accent-soft text-accent'
-                                  : 'border-border hover:border-border-bright text-text-2'
-                              }`}
-                            >
-                              <div className="font-medium">{t.title}</div>
-                              <div className="text-text-3 mt-0.5 line-clamp-2">
-                                {t.description}
-                              </div>
-                            </button>
-                          );
-                        })}
-                      </div>
+              <SmartTemplatesSection
+                projectId={project.id}
+                onSelect={(promptStarter) => {
+                  // Smart templates set the prompt directly. We clear
+                  // selectedTemplate (the hardcoded ID) because the smart
+                  // template doesn't map to a server-side systemHint.
+                  setPrompt(promptStarter);
+                  setSelectedTemplate(null);
+                }}
+                fallbackContent={
+                  <div className="space-y-3">
+                    <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3">
+                      Choose a template (optional)
                     </div>
-                  );
-                })}
-              </div>
+                    {categories.map((cat) => {
+                      const inCat = templates.filter(
+                        (t) =>
+                          t.category === cat &&
+                          platforms.some((p) =>
+                            (t.bestFor as readonly string[]).includes(p)
+                          )
+                      );
+                      if (inCat.length === 0) return null;
+                      return (
+                        <div key={cat}>
+                          <div className="text-xs text-text-3 mb-2">{cat}</div>
+                          <div className="flex flex-wrap gap-2">
+                            {inCat.map((t) => {
+                              const active = selectedTemplate === t.id;
+                              return (
+                                <button
+                                  key={t.id}
+                                  onClick={() =>
+                                    setSelectedTemplate(active ? null : t.id)
+                                  }
+                                  className={`text-left px-3 py-2 rounded-lg border text-xs transition-colors max-w-[260px] ${
+                                    active
+                                      ? 'border-accent bg-accent-soft text-accent'
+                                      : 'border-border hover:border-border-bright text-text-2'
+                                  }`}
+                                >
+                                  <div className="font-medium">{t.title}</div>
+                                  <div className="text-text-3 mt-0.5 line-clamp-2">
+                                    {t.description}
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                }
+              />
             </div>
 
             <label className="block text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2">

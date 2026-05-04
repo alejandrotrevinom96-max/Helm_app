@@ -61,6 +61,12 @@ export async function POST(request: Request) {
           30
         );
         if (data && data.totalVisitors !== undefined && data.totalVisitors !== null) {
+          // Snapshot semantics: each (project, source, metric, date) tuple
+          // holds ONE current value, not an append log. UPSERT replaces the
+          // existing value so multiple syncs per day collapse correctly.
+          // Pre-PR-15 this used onConflictDoNothing(), but the table had no
+          // unique constraint so every sync inserted a new row, triple-
+          // counting visitors/signups in /analytics aggregates.
           await db
             .insert(metricSnapshots)
             .values({
@@ -70,7 +76,18 @@ export async function POST(request: Request) {
               value: String(data.totalVisitors),
               date: today,
             })
-            .onConflictDoNothing();
+            .onConflictDoUpdate({
+              target: [
+                metricSnapshots.projectId,
+                metricSnapshots.source,
+                metricSnapshots.metric,
+                metricSnapshots.date,
+              ],
+              set: {
+                value: String(data.totalVisitors),
+                syncedAt: new Date(),
+              },
+            });
           synced.push({
             project: project.name,
             source: 'vercel',
@@ -101,7 +118,18 @@ export async function POST(request: Request) {
             value: String(count),
             date: today,
           })
-          .onConflictDoNothing();
+          .onConflictDoUpdate({
+            target: [
+              metricSnapshots.projectId,
+              metricSnapshots.source,
+              metricSnapshots.metric,
+              metricSnapshots.date,
+            ],
+            set: {
+              value: String(count),
+              syncedAt: new Date(),
+            },
+          });
         synced.push({
           project: project.name,
           source: 'supabase',

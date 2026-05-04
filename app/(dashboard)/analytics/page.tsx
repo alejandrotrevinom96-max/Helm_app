@@ -84,8 +84,16 @@ export default async function AnalyticsPage() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
         <GlassCard className="p-5">
           <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2">
-            Total signups
+            Waitlist signups
           </div>
+          {/*
+            The number is all-time across every Helm waitlist this user
+            owns. The sparkline below is the last 14 days, hence the
+            split label — pre-PR-15 the subtitle said "last 14 days"
+            for the value too, which contradicted the count.
+            This metric is independent of the Supabase Auth user count
+            shown in the per-project metrics section below.
+          */}
           <div className="font-display text-3xl font-light tracking-tight mb-2">
             {dashboard.totalSignups.value}
           </div>
@@ -97,7 +105,9 @@ export default async function AnalyticsPage() {
               ariaLabel="signups trend"
             />
           </div>
-          <div className="text-[10px] text-text-3 mt-1">last 14 days</div>
+          <div className="text-[10px] text-text-3 mt-1">
+            all-time · sparkline 14d
+          </div>
         </GlassCard>
 
         <GlassCard className="p-5">
@@ -133,7 +143,9 @@ export default async function AnalyticsPage() {
               ariaLabel="findings trend"
             />
           </div>
-          <div className="text-[10px] text-text-3 mt-1">last 14 days</div>
+          <div className="text-[10px] text-text-3 mt-1">
+            all-time · sparkline 14d
+          </div>
         </GlassCard>
 
         <GlassCard className="p-5">

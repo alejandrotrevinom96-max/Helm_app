@@ -45,6 +45,7 @@ export async function GET(request: Request) {
           1
         );
         if (data?.totalVisitors !== undefined) {
+          // Same upsert pattern as /api/sync/trigger — see PR #15 fix.
           await db
             .insert(metricSnapshots)
             .values({
@@ -54,7 +55,18 @@ export async function GET(request: Request) {
               value: String(data.totalVisitors),
               date: today,
             })
-            .onConflictDoNothing();
+            .onConflictDoUpdate({
+              target: [
+                metricSnapshots.projectId,
+                metricSnapshots.source,
+                metricSnapshots.metric,
+                metricSnapshots.date,
+              ],
+              set: {
+                value: String(data.totalVisitors),
+                syncedAt: new Date(),
+              },
+            });
           synced++;
         }
       } catch (err) {
@@ -77,7 +89,18 @@ export async function GET(request: Request) {
             value: String(count),
             date: today,
           })
-          .onConflictDoNothing();
+          .onConflictDoUpdate({
+            target: [
+              metricSnapshots.projectId,
+              metricSnapshots.source,
+              metricSnapshots.metric,
+              metricSnapshots.date,
+            ],
+            set: {
+              value: String(count),
+              syncedAt: new Date(),
+            },
+          });
         synced++;
       } catch (err) {
         console.error('Supabase sync failed for project', project.id, err);
@@ -90,13 +113,27 @@ export async function GET(request: Request) {
       try {
         const token = decrypt(meta.encryptedAccessToken);
         const insights = await getAdAccountInsights(token, project.metaAdAccountId, 1);
-        await db.insert(metricSnapshots).values({
-          projectId: project.id,
-          source: 'meta',
-          metric: 'spend',
-          value: String(insights.totalSpend),
-          date: today,
-        });
+        await db
+          .insert(metricSnapshots)
+          .values({
+            projectId: project.id,
+            source: 'meta',
+            metric: 'spend',
+            value: String(insights.totalSpend),
+            date: today,
+          })
+          .onConflictDoUpdate({
+            target: [
+              metricSnapshots.projectId,
+              metricSnapshots.source,
+              metricSnapshots.metric,
+              metricSnapshots.date,
+            ],
+            set: {
+              value: String(insights.totalSpend),
+              syncedAt: new Date(),
+            },
+          });
         synced++;
       } catch (err) {
         console.error('Meta sync failed for project', project.id, err);
