@@ -11,6 +11,7 @@ interface Post {
   content: string;
   scheduledFor: string;
   status: string;
+  consistencyScore: number | null;
 }
 
 const PLATFORMS = ['instagram', 'facebook', 'linkedin', 'threads'];
@@ -20,6 +21,7 @@ export function ScheduledManager({ posts }: { posts: Post[] }) {
   const [search, setSearch] = useState('');
   const [platformFilter, setPlatformFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [scoreFilter, setScoreFilter] = useState<string>('all');
   const [bulkRescheduleOpen, setBulkRescheduleOpen] = useState(false);
   const [newDate, setNewDate] = useState('');
   const [busy, setBusy] = useState(false);
@@ -31,9 +33,15 @@ export function ScheduledManager({ posts }: { posts: Post[] }) {
       if (platformFilter !== 'all' && p.platform !== platformFilter) return false;
       if (statusFilter !== 'all' && p.status !== statusFilter) return false;
       if (q && !p.content.toLowerCase().includes(q)) return false;
+      if (scoreFilter !== 'all') {
+        if (p.consistencyScore == null) return false;
+        if (scoreFilter === 'high' && p.consistencyScore < 85) return false;
+        if (scoreFilter === 'medium' && (p.consistencyScore < 70 || p.consistencyScore >= 85)) return false;
+        if (scoreFilter === 'low' && p.consistencyScore >= 70) return false;
+      }
       return true;
     });
-  }, [posts, search, platformFilter, statusFilter]);
+  }, [posts, search, platformFilter, statusFilter, scoreFilter]);
 
   const toggleSelect = (id: string) => {
     setSelected((prev) => {
@@ -138,6 +146,16 @@ export function ScheduledManager({ posts }: { posts: Post[] }) {
             <option value="notified">Sent reminder</option>
             <option value="posted">Posted</option>
             <option value="cancelled">Cancelled</option>
+          </select>
+          <select
+            value={scoreFilter}
+            onChange={(e) => setScoreFilter(e.target.value)}
+            className="bg-bg-elev border border-border rounded-lg px-3 py-2 text-sm [color-scheme:dark]"
+          >
+            <option value="all">All scores</option>
+            <option value="high">High (85+)</option>
+            <option value="medium">Medium (70-84)</option>
+            <option value="low">Low (&lt;70)</option>
           </select>
           <span className="text-xs text-text-3">
             {filtered.length} of {posts.length}
@@ -271,6 +289,20 @@ export function ScheduledManager({ posts }: { posts: Post[] }) {
                       {p.status === 'posted' && (
                         <span className="text-[10px] px-2 py-0.5 rounded-full bg-success-soft text-success">
                           posted
+                        </span>
+                      )}
+                      {p.consistencyScore != null && (
+                        <span
+                          className={`text-[10px] px-2 py-0.5 rounded-full font-mono ${
+                            p.consistencyScore >= 85
+                              ? 'bg-success-soft text-success'
+                              : p.consistencyScore >= 70
+                                ? 'bg-surface-1 text-text-2'
+                                : 'bg-amber-500/10 text-amber-500'
+                          }`}
+                          title="Brand consistency score"
+                        >
+                          {p.consistencyScore}
                         </span>
                       )}
                     </div>

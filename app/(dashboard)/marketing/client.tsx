@@ -10,6 +10,8 @@ import { GlassCard } from '@/components/ui/glass-card';
 import { Button } from '@/components/ui/button';
 import { EditScheduledModal, type EditablePost } from './edit-scheduled-modal';
 import { broadcastEvent, useBroadcast } from '@/hooks/use-broadcast';
+import { DraftCard, type Draft } from './draft-card';
+import { DriftAlert } from './drift-alert';
 
 const PLATFORMS = [
   { id: 'instagram', label: 'Instagram', color: '#e1306c' },
@@ -22,7 +24,11 @@ type Platform = (typeof PLATFORMS)[number]['id'];
 
 interface Generation {
   platform: Platform;
-  content: string;
+  drafts: Draft[];
+  // Index into drafts[] of the version the user picked. Defaults to 0
+  // (highest pillar) so the user can schedule without selecting if they
+  // accept the first option.
+  selectedDraftIdx: number;
   error?: string;
   scheduledFor: string; // local datetime-local format
 }
@@ -48,6 +54,21 @@ const PLATFORM_CHAR_LIMIT: Record<Platform, number | null> = {
   facebook: 5000,
   linkedin: 3000,
 };
+
+// Default-select the highest-consistency-score draft. Returns 0 when the
+// drafts array is empty so the rendering logic doesn't choke on -1.
+function pickBestDraftIdx(drafts: Draft[]): number {
+  if (drafts.length === 0) return 0;
+  let bestIdx = 0;
+  let bestScore = drafts[0].consistencyScore;
+  for (let i = 1; i < drafts.length; i++) {
+    if (drafts[i].consistencyScore > bestScore) {
+      bestScore = drafts[i].consistencyScore;
+      bestIdx = i;
+    }
+  }
+  return bestIdx;
+}
 
 export function MarketingClient({
   project,
@@ -135,10 +156,17 @@ export function MarketingClient({
       }
       const defaultTime = defaultScheduleTime();
       const next: Generation[] = (
-        data.generations as Array<{ platform: Platform; content?: string; error?: string }>
+        data.generations as Array<{
+          platform: Platform;
+          drafts: Draft[];
+          error?: string;
+        }>
       ).map((g) => ({
         platform: g.platform,
-        content: g.content ?? '',
+        drafts: g.drafts ?? [],
+        // Pick the highest-scoring draft as default — saves the user a click
+        // when the first pillar's output already matches their bible best.
+        selectedDraftIdx: pickBestDraftIdx(g.drafts ?? []),
         error: g.error,
         scheduledFor: defaultTime,
       }));
@@ -151,20 +179,46 @@ export function MarketingClient({
     }
   };
 
-  const updateGeneration = (
+  const updateScheduledFor = (platform: Platform, scheduledFor: string) => {
+    setGenerations((prev) =>
+      prev.map((g) => (g.platform === platform ? { ...g, scheduledFor } : g))
+    );
+  };
+
+  const updateDraftContent = (
     platform: Platform,
-    patch: Partial<Pick<Generation, 'content' | 'scheduledFor'>>
+    draftIdx: number,
+    content: string
   ) => {
     setGenerations((prev) =>
-      prev.map((g) => (g.platform === platform ? { ...g, ...patch } : g))
+      prev.map((g) =>
+        g.platform === platform
+          ? {
+              ...g,
+              drafts: g.drafts.map((d, i) =>
+                i === draftIdx ? { ...d, content } : d
+              ),
+            }
+          : g
+      )
+    );
+  };
+
+  const selectDraft = (platform: Platform, idx: number) => {
+    setGenerations((prev) =>
+      prev.map((g) =>
+        g.platform === platform ? { ...g, selectedDraftIdx: idx } : g
+      )
     );
   };
 
   const regenerateOne = async (platform: Platform) => {
-    const idx = generations.findIndex((g) => g.platform === platform);
-    if (idx < 0) return;
     setGenerations((prev) =>
-      prev.map((g) => (g.platform === platform ? { ...g, error: undefined, content: '' } : g))
+      prev.map((g) =>
+        g.platform === platform
+          ? { ...g, error: undefined, drafts: [] }
+          : g
+      )
     );
     try {
       const res = await fetch('/api/ai/generate-post', {
@@ -179,17 +233,32 @@ export function MarketingClient({
       });
       const data = await res.json();
       if (!res.ok) {
-        updateGeneration(platform, {});
         setGenerations((prev) =>
           prev.map((g) =>
-            g.platform === platform ? { ...g, error: data.error ?? 'Regen failed' } : g
+            g.platform === platform
+              ? { ...g, error: data.error ?? 'Regen failed' }
+              : g
           )
         );
         return;
       }
-      const newGen = (data.generations as Generation[])[0];
-      if (newGen?.content) {
-        updateGeneration(platform, { content: newGen.content });
+      const newGen = (data.generations as Array<{
+        platform: Platform;
+        drafts: Draft[];
+        error?: string;
+      }>)[0];
+      if (newGen?.drafts && newGen.drafts.length > 0) {
+        setGenerations((prev) =>
+          prev.map((g) =>
+            g.platform === platform
+              ? {
+                  ...g,
+                  drafts: newGen.drafts,
+                  selectedDraftIdx: pickBestDraftIdx(newGen.drafts),
+                }
+              : g
+          )
+        );
       } else if (newGen?.error) {
         setGenerations((prev) =>
           prev.map((g) =>
@@ -214,8 +283,25 @@ export function MarketingClient({
     setGenerations((prev) => prev.map((g) => ({ ...g, scheduledFor: first })));
   };
 
-  const allReady = generations.length > 0 && generations.every((g) => g.error || (g.content && g.scheduledFor));
-  const schedulableCount = generations.filter((g) => !g.error && g.content && g.scheduledFor).length;
+  // A generation is schedulable when it has at least one draft and the
+  // selected draft has content + a scheduled time. The "all ready" check
+  // also tolerates platforms that errored out — those are skipped, not
+  // blocked.
+  const getSelectedDraft = (g: Generation): Draft | null => {
+    return g.drafts[g.selectedDraftIdx] ?? null;
+  };
+  const allReady =
+    generations.length > 0 &&
+    generations.every((g) => {
+      if (g.error) return true;
+      const sel = getSelectedDraft(g);
+      return !!sel?.content && !!g.scheduledFor;
+    });
+  const schedulableCount = generations.filter((g) => {
+    if (g.error) return false;
+    const sel = getSelectedDraft(g);
+    return !!sel?.content && !!g.scheduledFor;
+  }).length;
 
   const scheduleAll = async () => {
     setSchedulingAll(true);
@@ -223,17 +309,24 @@ export function MarketingClient({
     try {
       const results = await Promise.all(
         generations
-          .filter((g) => !g.error && g.content && g.scheduledFor)
+          .filter((g) => {
+            if (g.error) return false;
+            const sel = getSelectedDraft(g);
+            return !!sel?.content && !!g.scheduledFor;
+          })
           .map(async (g) => {
+            const sel = getSelectedDraft(g)!;
             const res = await fetch('/api/marketing/schedule', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 projectId: project.id,
                 platform: g.platform,
-                content: g.content,
+                content: sel.content,
                 templateId: selectedTemplate,
                 scheduledFor: new Date(g.scheduledFor).toISOString(),
+                consistencyScore: sel.consistencyScore,
+                scoreBreakdown: sel.scoreBreakdown,
               }),
             });
             return { platform: g.platform, ok: res.ok };
@@ -289,6 +382,8 @@ export function MarketingClient({
           Generate posts tailored to your project, optimized per platform.
         </p>
       </div>
+
+      <DriftAlert projectId={project.id} />
 
       <BrandBibleCard
         project={{
@@ -430,7 +525,7 @@ export function MarketingClient({
               </div>
 
               {activeGeneration && (
-                <div className="space-y-3">
+                <div className="space-y-4">
                   {activeGeneration.error ? (
                     <div className="text-sm text-danger">
                       Generation failed: {activeGeneration.error}{' '}
@@ -441,32 +536,63 @@ export function MarketingClient({
                         Retry
                       </button>
                     </div>
+                  ) : activeGeneration.drafts.length === 0 ? (
+                    <div className="text-sm text-text-3 italic">
+                      No drafts available.
+                    </div>
                   ) : (
                     <>
-                      <textarea
-                        value={activeGeneration.content}
-                        onChange={(e) =>
-                          updateGeneration(activeGeneration.platform, {
-                            content: e.target.value,
-                          })
-                        }
-                        rows={8}
-                        className="w-full bg-bg-elev border border-border rounded-lg px-3 py-2 text-sm outline-none focus:border-accent resize-none"
-                      />
-                      <div className="text-xs text-text-3">
-                        {activeGeneration.content.length} chars
-                        {(() => {
-                          const limit = PLATFORM_CHAR_LIMIT[activeGeneration.platform];
-                          if (limit && activeGeneration.content.length > limit) {
-                            return (
-                              <span className="text-danger ml-2">
-                                ⚠ {PLATFORMS.find((p) => p.id === activeGeneration.platform)?.label} max is {limit}
-                              </span>
-                            );
-                          }
-                          return null;
-                        })()}
+                      <p className="text-xs text-text-3">
+                        3 drafts · each leans into a different brand pillar.
+                        Click a card to select.
+                      </p>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        {activeGeneration.drafts.map((draft, idx) => (
+                          <DraftCard
+                            key={idx}
+                            draft={draft}
+                            isSelected={
+                              activeGeneration.selectedDraftIdx === idx
+                            }
+                            onSelect={() =>
+                              selectDraft(activeGeneration.platform, idx)
+                            }
+                            onContentChange={(content) =>
+                              updateDraftContent(
+                                activeGeneration.platform,
+                                idx,
+                                content
+                              )
+                            }
+                          />
+                        ))}
                       </div>
+
+                      {(() => {
+                        const sel = getSelectedDraft(activeGeneration);
+                        if (!sel) return null;
+                        const limit =
+                          PLATFORM_CHAR_LIMIT[activeGeneration.platform];
+                        const overLimit =
+                          limit && sel.content.length > limit;
+                        return (
+                          <div className="text-xs text-text-3">
+                            Selected · {sel.content.length} chars
+                            {overLimit && (
+                              <span className="text-danger ml-2">
+                                ⚠{' '}
+                                {
+                                  PLATFORMS.find(
+                                    (p) =>
+                                      p.id === activeGeneration.platform
+                                  )?.label
+                                }{' '}
+                                max is {limit}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })()}
 
                       <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
                         <div className="flex-1">
@@ -477,9 +603,10 @@ export function MarketingClient({
                             type="datetime-local"
                             value={activeGeneration.scheduledFor}
                             onChange={(e) =>
-                              updateGeneration(activeGeneration.platform, {
-                                scheduledFor: e.target.value,
-                              })
+                              updateScheduledFor(
+                                activeGeneration.platform,
+                                e.target.value
+                              )
                             }
                             min={minDateTime}
                             className="bg-bg-elev border border-border rounded-lg px-3 py-2 text-sm text-text-1 [color-scheme:dark]"
@@ -489,16 +616,21 @@ export function MarketingClient({
                           <Button
                             variant="secondary"
                             size="sm"
-                            onClick={() => copyOne(activeGeneration.content)}
+                            onClick={() => {
+                              const sel = getSelectedDraft(activeGeneration);
+                              if (sel) copyOne(sel.content);
+                            }}
                           >
-                            Copy
+                            Copy selected
                           </Button>
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => regenerateOne(activeGeneration.platform)}
+                            onClick={() =>
+                              regenerateOne(activeGeneration.platform)
+                            }
                           >
-                            Regenerate
+                            Regenerate all
                           </Button>
                         </div>
                       </div>

@@ -11,8 +11,15 @@ export async function POST(request: Request) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const { projectId, platform, content, templateId, scheduledFor } =
-    await request.json();
+  const {
+    projectId,
+    platform,
+    content,
+    templateId,
+    scheduledFor,
+    consistencyScore,
+    scoreBreakdown,
+  } = await request.json();
 
   if (!projectId || !platform || !content || !scheduledFor) {
     return NextResponse.json(
@@ -43,6 +50,20 @@ export async function POST(request: Request) {
     );
   }
 
+  // Score is stamped here from values the client computed at generate time.
+  // Trusting the client is fine for telemetry — worst case the user inflates
+  // their own score and the drift detector under-warns them.
+  const safeScore =
+    typeof consistencyScore === 'number' &&
+    consistencyScore >= 0 &&
+    consistencyScore <= 100
+      ? Math.round(consistencyScore)
+      : null;
+  const safeBreakdown =
+    scoreBreakdown && typeof scoreBreakdown === 'object'
+      ? (scoreBreakdown as Record<string, number>)
+      : null;
+
   const [scheduled] = await db
     .insert(scheduledPosts)
     .values({
@@ -52,6 +73,8 @@ export async function POST(request: Request) {
       content,
       templateUsed: templateId || null,
       scheduledFor: date,
+      consistencyScore: safeScore,
+      scoreBreakdown: safeBreakdown as never,
     })
     .returning();
 

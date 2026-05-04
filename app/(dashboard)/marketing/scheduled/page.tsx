@@ -24,6 +24,7 @@ export default async function ScheduledPage() {
     content: p.content,
     scheduledFor: p.scheduledFor.toISOString(),
     status: p.status,
+    consistencyScore: p.consistencyScore,
   }));
 
   return (

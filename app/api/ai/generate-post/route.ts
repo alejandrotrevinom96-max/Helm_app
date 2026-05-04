@@ -2,23 +2,157 @@ import { createClient } from '@/lib/supabase/server';
 import { db } from '@/lib/db';
 import { projects, generatedPosts } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
-import { generatePost } from '@/lib/ai/claude';
-import type { BrandBible } from '@/lib/types/brand';
+import { anthropic } from '@/lib/ai/claude';
 import { getTemplateById } from '@/lib/marketing/templates';
+import {
+  computeConsistencyScore,
+  type ScoreBreakdown,
+} from '@/lib/ai/consistency-score';
 import { NextResponse } from 'next/server';
+import type { BrandBible, BrandPillar } from '@/lib/types/brand';
 
 const VALID_PLATFORMS = ['instagram', 'facebook', 'linkedin', 'threads'] as const;
 type Platform = (typeof VALID_PLATFORMS)[number];
-const VALID_PLATFORM_SET = new Set(VALID_PLATFORMS);
+const VALID_PLATFORM_SET = new Set<Platform>(VALID_PLATFORMS);
 
 function isPlatform(p: unknown): p is Platform {
   return typeof p === 'string' && VALID_PLATFORM_SET.has(p as Platform);
 }
 
-interface Generation {
-  platform: Platform;
-  content?: string;
+const PILLAR_VARIANTS_COUNT = 3;
+
+const PLATFORM_GUIDANCE: Record<Platform, string> = {
+  instagram:
+    'Visual-first, casual tone, 100-150 words, use 2-3 relevant emojis, end with a question or CTA. Use line breaks for readability.',
+  facebook:
+    'Conversational, 80-120 words, can be slightly longer. Personal storytelling works well.',
+  linkedin:
+    'Professional but human. 100-200 words. Lead with a hook. Use "I learned X" framing. No more than 1 emoji.',
+  threads:
+    'Punchy, 50-80 words max. Conversational, like a tweet but slightly longer. No hashtags.',
+};
+
+interface Draft {
+  content: string;
+  pillar: string;
+  rationale: string;
+  consistencyScore: number;
+  scoreBreakdown: ScoreBreakdown;
+  violations: string[];
+  suggestions: string[];
   error?: string;
+}
+
+interface PlatformResult {
+  platform: Platform;
+  drafts: Draft[];
+  error?: string;
+}
+
+// When the bible doesn't have 3+ pillars, pad with generic angles so we
+// still produce 3 distinguishable drafts. Better than returning fewer
+// options — the user always sees the multi-draft layout.
+function selectVariantPillars(bible: BrandBible | null): BrandPillar[] {
+  const pillars = bible?.pillars ?? [];
+  if (pillars.length >= PILLAR_VARIANTS_COUNT) {
+    return pillars.slice(0, PILLAR_VARIANTS_COUNT);
+  }
+  const generic: BrandPillar[] = [
+    { name: 'general', description: 'general approach', weight: 50 },
+    { name: 'pragmatic', description: 'practical, no fluff', weight: 50 },
+    { name: 'human', description: 'authentic and personal', weight: 50 },
+  ];
+  return [...pillars, ...generic].slice(0, PILLAR_VARIANTS_COUNT);
+}
+
+// Pillar-focused system prompt: takes the brand bible's main system prompt
+// and amends it with explicit instructions to lean into ONE pillar so the
+// 3 drafts are demonstrably different.
+function buildPillarPrompt(
+  bible: BrandBible | null,
+  platform: Platform,
+  templateHint: string | null,
+  projectName: string,
+  projectDescription: string,
+  pillar: BrandPillar,
+  draftIdx: number
+): string {
+  const guidelines = PLATFORM_GUIDANCE[platform];
+  const pillarSection = `\n\nIMPORTANT: This is draft ${draftIdx + 1} of ${PILLAR_VARIANTS_COUNT}. Lean SPECIFICALLY into the pillar "${pillar.name}: ${pillar.description}". Make this draft demonstrably different from drafts that lean into other pillars.`;
+
+  if (!bible || !bible.identity) {
+    return `You are a marketing assistant for "${projectName}".
+
+${projectDescription ? `Project description: ${projectDescription}` : ''}
+${templateHint ? `Template guidance: ${templateHint}` : ''}
+
+Platform: ${platform}
+Platform guidance: ${guidelines}
+
+Rules:
+- Write in first person as the founder
+- Be authentic, not salesy
+- No "Are you tired of..." openings
+- No empty hype or buzzwords
+- Output ONLY the post text, no preamble or explanation${pillarSection}`;
+  }
+
+  const pillarsList = (bible.pillars ?? [])
+    .map((p) => `- ${p.name}: ${p.description}`)
+    .join('\n');
+  const banned = (bible.vocabulary?.bannedTerms ?? [])
+    .map((t) => `- "${t.term}"${t.reason ? ` — ${t.reason}` : ''}`)
+    .join('\n');
+  const nonNeg = (bible.nonNegotiables ?? []).map((n) => `- ${n}`).join('\n');
+  const pains = (bible.audience?.primary?.painPoints ?? [])
+    .slice(0, 3)
+    .map((p) => `- ${p.pain} (intensity ${p.intensity}/5)`)
+    .join('\n');
+
+  return `You are writing a social post for ${platform}. Follow the platform guidelines AND the brand bible STRICTLY.
+
+═══════ BRAND BIBLE ═══════
+
+IDENTITY: ${bible.identity?.name ?? projectName}
+TAGLINE: ${bible.identity?.tagline ?? ''}
+
+ARCHETYPE: ${bible.archetype?.primary ?? 'unknown'}
+
+PILLARS:
+${pillarsList || '- (none specified)'}
+
+VOICE CALIBRATION (0=left, 10=right):
+- Casual ↔ Formal: ${bible.voice?.formal ?? 5}/10
+- Playful ↔ Serious: ${bible.voice?.serious ?? 5}/10
+- Reserved ↔ Bold: ${bible.voice?.bold ?? 5}/10
+- Traditional ↔ Innovative: ${bible.voice?.innovative ?? 5}/10
+- Exclusive ↔ Approachable: ${bible.voice?.approachable ?? 5}/10
+
+BANNED TERMS (NEVER use):
+${banned || '- (none specified)'}
+
+EMOJI POLICY: ${bible.vocabulary?.emojiPolicy ?? 'tasteful'}
+HASHTAG POLICY: ${bible.vocabulary?.hashtagPolicy ?? 'minimal'}
+
+NON-NEGOTIABLES (NEVER violate):
+${nonNeg || '- (none specified)'}
+
+═══════ AUDIENCE ═══════
+
+PRIMARY: ${bible.audience?.primary?.description ?? '(unspecified)'}
+
+THEY FEEL THESE PAINS:
+${pains || '- (none specified)'}
+
+═══════ PLATFORM ═══════
+
+${platform.toUpperCase()} GUIDELINES:
+${guidelines}
+${templateHint ? `\nTemplate guidance: ${templateHint}` : ''}
+
+═══════ TASK ═══════
+
+Write ONE post for ${platform}. Output ONLY the post text. No preamble, no quotes, no markdown fences.${pillarSection}`;
 }
 
 export async function POST(request: Request) {
@@ -62,56 +196,98 @@ export async function POST(request: Request) {
   if (!project) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   const template = getTemplateById(templateId);
-  const brandContext = (project.brandContext as BrandBible | null) ?? null;
+  const bible = (project.brandContext as BrandBible | null) ?? null;
+  const variantPillars = selectVariantPillars(bible);
 
-  // Generate one post per platform in parallel. Each settles independently
-  // so a single platform failure doesn't poison the rest.
-  const generations: Generation[] = await Promise.all(
-    validatedPlatforms.map(async (p): Promise<Generation> => {
+  // 4 platforms × 3 drafts × 2 calls (gen + score) = up to 24 parallel
+  // Anthropic calls. Promise.all keeps total wallclock bounded by the
+  // slowest platform rather than the sum of all platforms.
+  const platformResults: PlatformResult[] = await Promise.all(
+    validatedPlatforms.map(async (p): Promise<PlatformResult> => {
       try {
-        const content = await generatePost({
-          platform: p,
-          prompt,
-          context: {
-            name: project.name,
-            description: prompt,
-            brandContext,
-            templateHint: template?.systemHint ?? null,
-          },
+        const draftPromises = variantPillars.map(async (pillar, idx): Promise<Draft> => {
+          const systemPrompt = buildPillarPrompt(
+            bible,
+            p,
+            template?.systemHint ?? null,
+            project.name,
+            prompt,
+            pillar,
+            idx
+          );
+
+          let content = '';
+          try {
+            const response = await anthropic.messages.create({
+              model: 'claude-haiku-4-5-20251001',
+              max_tokens: 1500,
+              system: systemPrompt,
+              messages: [{ role: 'user', content: prompt }],
+            });
+            const textBlock = response.content.find((b) => b.type === 'text');
+            content = textBlock?.type === 'text' ? textBlock.text.trim() : '';
+          } catch (err) {
+            return {
+              content: '',
+              pillar: pillar.name,
+              rationale: `Generation failed for pillar "${pillar.name}"`,
+              consistencyScore: 0,
+              scoreBreakdown: {
+                voice: 0,
+                vocabulary: 0,
+                nonNegotiables: 0,
+                pillarAlignment: 0,
+                audienceResonance: 0,
+              },
+              violations: [],
+              suggestions: [],
+              error: err instanceof Error ? err.message : String(err),
+            };
+          }
+
+          const score = await computeConsistencyScore(content, bible, pillar.name);
+
+          return {
+            content,
+            pillar: pillar.name,
+            rationale: `Leans into "${pillar.name}" — ${pillar.description}`,
+            consistencyScore: score.total,
+            scoreBreakdown: score.breakdown,
+            violations: score.violations,
+            suggestions: score.suggestions,
+          };
         });
 
-        await db.insert(generatedPosts).values({
-          projectId: project.id,
-          platform: p,
-          content,
-          prompt,
-        });
+        const drafts = await Promise.all(draftPromises);
 
-        return { platform: p, content };
+        // Persist only the highest-scoring non-error draft per platform so
+        // the "Recent generations" list stays meaningful (not 3× cluttered).
+        const best = drafts
+          .filter((d) => !d.error && d.content)
+          .sort((a, b) => b.consistencyScore - a.consistencyScore)[0];
+        if (best) {
+          await db.insert(generatedPosts).values({
+            projectId: project.id,
+            platform: p,
+            content: best.content,
+            prompt,
+          });
+        }
+
+        return { platform: p, drafts };
       } catch (err) {
         console.error(`[GENERATE POST] failed for ${p}`, err);
         return {
           platform: p,
+          drafts: [],
           error: err instanceof Error ? err.message : String(err),
         };
       }
     })
   );
 
-  // Backward-compat: old single-platform callers expected `{ content }`.
-  // We keep that shape when there's exactly one generation and it succeeded.
-  const single = generations.length === 1 ? generations[0] : null;
-  const responseBody: {
-    generations: Generation[];
-    templateUsed: string | null;
-    content?: string;
-  } = {
-    generations,
+  return NextResponse.json({
+    generations: platformResults,
     templateUsed: template?.id ?? null,
-  };
-  if (single?.content) {
-    responseBody.content = single.content;
-  }
-
-  return NextResponse.json(responseBody);
+  });
 }

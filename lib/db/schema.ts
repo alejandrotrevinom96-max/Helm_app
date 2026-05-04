@@ -11,6 +11,7 @@ import {
   unique,
 } from 'drizzle-orm/pg-core';
 import type { BrandBible } from '@/lib/types/brand';
+import type { ScoreBreakdown } from '@/lib/ai/consistency-score';
 
 // ===== Users =====
 // Synced from Supabase auth.users via trigger
@@ -320,6 +321,11 @@ export const scheduledPosts = pgTable('scheduled_posts', {
   notifiedAt: timestamp('notified_at'),
   postedAt: timestamp('posted_at'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
+  // Brand consistency score computed at schedule time. Null on rows from
+  // before PR #11. The breakdown is stored separately so we can analyze
+  // dimension drift without re-evaluating posts.
+  consistencyScore: integer('consistency_score'),
+  scoreBreakdown: jsonb('score_breakdown').$type<ScoreBreakdown>(),
 });
 
 // ===== Type exports =====
