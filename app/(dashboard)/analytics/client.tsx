@@ -23,6 +23,7 @@ export function AnalyticsClient({
   hasMeta,
   lastSyncAt,
   hasMappings,
+  embedded = false,
 }: {
   project: Project;
   snapshots: MetricSnapshot[];
@@ -31,6 +32,10 @@ export function AnalyticsClient({
   hasMeta: boolean;
   lastSyncAt: Date | null;
   hasMappings: boolean;
+  // When rendered inside the new dashboard, suppress the page-level h1 and
+  // outer padding (the parent already supplies them) so we don't end up with
+  // two "Analytics" headings stacked.
+  embedded?: boolean;
 }) {
   const router = useRouter();
 
@@ -61,23 +66,36 @@ export function AnalyticsClient({
     .join(', ');
 
   return (
-    <div className="p-4 md:p-8">
-      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end gap-4 mb-6 md:mb-8">
-        <div>
-          <h1 className="font-display text-display-md font-light tracking-tight">
-            Analytics
-          </h1>
-          <p className="text-text-2 mt-2 max-w-2xl text-sm">
-            Cross-referenced metrics from {sources || 'no integrations yet'}
-          </p>
+    <div className={embedded ? '' : 'p-4 md:p-8'}>
+      {!embedded && (
+        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end gap-4 mb-6 md:mb-8">
+          <div>
+            <h1 className="font-display text-display-md font-light tracking-tight">
+              Analytics
+            </h1>
+            <p className="text-text-2 mt-2 max-w-2xl text-sm">
+              Cross-referenced metrics from {sources || 'no integrations yet'}
+            </p>
+          </div>
+          <div className="flex items-center gap-3 flex-wrap">
+            <SyncButton lastSyncAt={lastSyncAt} />
+            <a href="/integrations" className="text-sm text-accent hover:underline">
+              Manage →
+            </a>
+          </div>
         </div>
-        <div className="flex items-center gap-3 flex-wrap">
+      )}
+      {embedded && (
+        <div className="flex items-center justify-end gap-3 mb-4 flex-wrap">
+          <span className="text-xs text-text-3">
+            Sources: {sources || 'none connected'}
+          </span>
           <SyncButton lastSyncAt={lastSyncAt} />
-          <a href="/integrations" className="text-sm text-accent hover:underline">
+          <a href="/integrations" className="text-xs text-accent hover:underline">
             Manage →
           </a>
         </div>
-      </div>
+      )}
 
       {missingIntegrations.length > 0 && hasMappings && (
         <GlassCard className="mb-6 p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">

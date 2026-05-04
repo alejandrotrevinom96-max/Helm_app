@@ -576,6 +576,12 @@ export function MarketingClient({
                 </div>
               </div>
             ))}
+            <a
+              href="/marketing/scheduled"
+              className="text-xs text-accent hover:underline mt-3 block"
+            >
+              View all scheduled →
+            </a>
           </div>
 
           <div className="glass rounded-2xl p-5">

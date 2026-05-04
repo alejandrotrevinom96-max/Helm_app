@@ -3,64 +3,189 @@ import { db } from '@/lib/db';
 import { integrations, metricSnapshots } from '@/lib/db/schema';
 import { eq, and, gte, desc } from 'drizzle-orm';
 import { redirect } from 'next/navigation';
+import Link from 'next/link';
 import { getActiveProject } from '@/lib/active-project';
 import { AnalyticsClient } from './client';
+import { getDashboardData } from '@/lib/analytics/dashboard';
+import { GlassCard } from '@/components/ui/glass-card';
+import { Sparkline } from '@/components/ui/sparkline';
 
 export default async function AnalyticsPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
+  const dashboard = await getDashboardData();
+  if ('error' in dashboard) redirect('/login');
+
   const project = await getActiveProject(user.id);
-  if (!project) redirect('/onboarding');
 
-  // Last 30 days of metrics
-  const thirtyDaysAgo = new Date();
-  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+  // Optional: per-project metrics block (Vercel/Supabase/Meta) renders
+  // below the KPI dashboard. We only fetch its data when there's an
+  // active project — analytics is now useful even without one mapped.
+  let snapshots: typeof metricSnapshots.$inferSelect[] = [];
+  let hasVercel = false;
+  let hasSupabase = false;
+  let hasMeta = false;
+  let lastSyncAt: Date | null = null;
+  let hasMappings = false;
 
-  const snapshots = await db
-    .select()
-    .from(metricSnapshots)
-    .where(
-      and(
-        eq(metricSnapshots.projectId, project.id),
-        gte(metricSnapshots.date, thirtyDaysAgo.toISOString().split('T')[0])
+  if (project) {
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    snapshots = await db
+      .select()
+      .from(metricSnapshots)
+      .where(
+        and(
+          eq(metricSnapshots.projectId, project.id),
+          gte(metricSnapshots.date, thirtyDaysAgo.toISOString().split('T')[0])
+        )
       )
-    )
-    .orderBy(desc(metricSnapshots.date));
+      .orderBy(desc(metricSnapshots.date));
 
-  // Check which integrations are connected
-  const connectedIntegrations = await db
-    .select({ provider: integrations.provider })
-    .from(integrations)
-    .where(eq(integrations.userId, user.id));
+    const connectedIntegrations = await db
+      .select({ provider: integrations.provider })
+      .from(integrations)
+      .where(eq(integrations.userId, user.id));
+    const connected = new Set(connectedIntegrations.map((i) => i.provider));
+    hasVercel = connected.has('vercel');
+    hasSupabase = connected.has('supabase');
+    hasMeta = connected.has('meta');
 
-  const connected = new Set(connectedIntegrations.map((i) => i.provider));
+    const [latestSync] = await db
+      .select({ syncedAt: metricSnapshots.syncedAt })
+      .from(metricSnapshots)
+      .where(eq(metricSnapshots.projectId, project.id))
+      .orderBy(desc(metricSnapshots.syncedAt))
+      .limit(1);
+    lastSyncAt = latestSync?.syncedAt ?? null;
 
-  // Last sync timestamp across all sources for this project
-  const [latestSync] = await db
-    .select({ syncedAt: metricSnapshots.syncedAt })
-    .from(metricSnapshots)
-    .where(eq(metricSnapshots.projectId, project.id))
-    .orderBy(desc(metricSnapshots.syncedAt))
-    .limit(1);
+    hasMappings = !!(
+      project.vercelProjectId ||
+      project.supabaseProjectRef ||
+      project.metaAdAccountId
+    );
+  }
 
-  // Whether the active project still has any remote mapped
-  const hasMappings = !!(
-    project.vercelProjectId ||
-    project.supabaseProjectRef ||
-    project.metaAdAccountId
-  );
+  const allZero =
+    dashboard.totalSignups.value === 0 &&
+    dashboard.postsPublished.value === 0 &&
+    dashboard.researchInsights.value === 0;
 
   return (
-    <AnalyticsClient
-      project={project}
-      snapshots={snapshots}
-      hasVercel={connected.has('vercel')}
-      hasSupabase={connected.has('supabase')}
-      hasMeta={connected.has('meta')}
-      lastSyncAt={latestSync?.syncedAt ?? null}
-      hasMappings={hasMappings}
-    />
+    <div className="p-6 md:p-10 max-w-6xl">
+      <h1 className="font-display text-display-lg font-light tracking-tight mb-2">
+        Analytics
+      </h1>
+      <p className="text-text-2 mb-8">Your business at a glance.</p>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+        <GlassCard className="p-5">
+          <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2">
+            Total signups
+          </div>
+          <div className="font-display text-3xl font-light tracking-tight mb-2">
+            {dashboard.totalSignups.value}
+          </div>
+          <div className="text-accent">
+            <Sparkline
+              data={dashboard.totalSignups.sparkline}
+              width={100}
+              height={24}
+              ariaLabel="signups trend"
+            />
+          </div>
+          <div className="text-[10px] text-text-3 mt-1">last 14 days</div>
+        </GlassCard>
+
+        <GlassCard className="p-5">
+          <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2">
+            Posts published
+          </div>
+          <div className="font-display text-3xl font-light tracking-tight mb-2">
+            {dashboard.postsPublished.value}
+          </div>
+          <div className="text-accent">
+            <Sparkline
+              data={dashboard.postsPublished.sparkline}
+              width={100}
+              height={24}
+              ariaLabel="posts trend"
+            />
+          </div>
+          <div className="text-[10px] text-text-3 mt-1">last 30 days</div>
+        </GlassCard>
+
+        <GlassCard className="p-5">
+          <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2">
+            Research findings
+          </div>
+          <div className="font-display text-3xl font-light tracking-tight mb-2">
+            {dashboard.researchInsights.value}
+          </div>
+          <div className="text-accent">
+            <Sparkline
+              data={dashboard.researchInsights.sparkline}
+              width={100}
+              height={24}
+              ariaLabel="findings trend"
+            />
+          </div>
+          <div className="text-[10px] text-text-3 mt-1">last 14 days</div>
+        </GlassCard>
+
+        <GlassCard className="p-5">
+          <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2">
+            Avg responses per page
+          </div>
+          <div className="font-display text-3xl font-light tracking-tight mb-2">
+            {dashboard.validateResponseRate.value}
+          </div>
+          <div className="text-[10px] text-text-3 mt-2">
+            {dashboard.validateResponseRate.total} total ·{' '}
+            {dashboard.validateResponseRate.activePages} pages
+          </div>
+        </GlassCard>
+      </div>
+
+      {allZero && (
+        <GlassCard className="p-8 text-center mb-8">
+          <p className="text-text-2 mb-4">
+            No data yet. Start by creating a waitlist or scheduling a post.
+          </p>
+          <div className="flex gap-4 justify-center text-sm">
+            <Link href="/marketing" className="text-accent hover:underline">
+              → Marketing
+            </Link>
+            <Link href="/validate" className="text-accent hover:underline">
+              → Validate
+            </Link>
+            <Link href="/research" className="text-accent hover:underline">
+              → Research
+            </Link>
+          </div>
+        </GlassCard>
+      )}
+
+      {project && (
+        <div className="border-t border-border pt-8">
+          <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-3">
+            Project metrics — {project.name}
+          </div>
+          <AnalyticsClient
+            project={project}
+            snapshots={snapshots}
+            hasVercel={hasVercel}
+            hasSupabase={hasSupabase}
+            hasMeta={hasMeta}
+            lastSyncAt={lastSyncAt}
+            hasMappings={hasMappings}
+            embedded
+          />
+        </div>
+      )}
+    </div>
   );
 }

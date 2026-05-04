@@ -23,6 +23,11 @@ export const users = pgTable('users', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
   // Helm-specific
   hasCompletedOnboarding: boolean('has_completed_onboarding').default(false),
+  // Granular wizard progress: 0 = not started, 1-4 = on step N, 99 = completed/skipped.
+  // Distinct from hasCompletedOnboarding (which gates the legacy GitHub-repo
+  // scan flow): this tracks the 4-step in-app wizard shown over the dashboard.
+  onboardingStep: integer('onboarding_step').default(0).notNull(),
+  onboardingCompletedAt: timestamp('onboarding_completed_at'),
 });
 
 // ===== Integrations =====

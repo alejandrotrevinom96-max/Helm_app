@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { db } from '@/lib/db';
-import { projects } from '@/lib/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { projects, users } from '@/lib/db/schema';
+import { eq, and, sql } from 'drizzle-orm';
 import { anthropic } from '@/lib/ai/claude';
 import { NextResponse } from 'next/server';
 
@@ -147,6 +147,13 @@ export async function POST(request: Request) {
       brandContext,
     })
     .where(eq(projects.id, projectId));
+
+  // Configuring brand context = wizard step 3 done. Bump past it (but never
+  // demote if they're already at 99/completed).
+  await db
+    .update(users)
+    .set({ onboardingStep: sql`GREATEST(${users.onboardingStep}, 4)` })
+    .where(eq(users.id, user.id));
 
   return NextResponse.json({ brandContext });
 }

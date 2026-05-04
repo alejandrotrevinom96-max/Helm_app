@@ -73,6 +73,15 @@ export async function GET(request: NextRequest) {
     .where(eq(users.id, user.id))
     .limit(1);
 
+  // Connecting GitHub satisfies wizard step 1 — bump them past it without
+  // demoting if they're already further along.
+  if (providerToken && (dbUser?.onboardingStep ?? 0) < 2) {
+    await db
+      .update(users)
+      .set({ onboardingStep: 2 })
+      .where(eq(users.id, user.id));
+  }
+
   if (dbUser?.hasCompletedOnboarding) {
     return redirect('/analytics');
   }

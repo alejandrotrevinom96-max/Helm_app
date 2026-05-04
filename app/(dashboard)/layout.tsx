@@ -1,11 +1,12 @@
 import { createClient } from '@/lib/supabase/server';
 import { db } from '@/lib/db';
-import { users } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
+import { users, integrations, projects } from '@/lib/db/schema';
+import { eq, and, isNotNull } from 'drizzle-orm';
 import { redirect } from 'next/navigation';
 import { headers } from 'next/headers';
 import { Sidebar } from '@/components/dashboard/sidebar';
 import { getActiveProject, getAllUserProjects } from '@/lib/active-project';
+import { OnboardingClientWrapper } from '@/components/onboarding/wrapper';
 
 export default async function DashboardLayout({
   children,
@@ -32,6 +33,33 @@ export default async function DashboardLayout({
     redirect('/onboarding');
   }
 
+  // Wizard state: only fetched/shown once the user has at least one project
+  // and is past the legacy GitHub-scan flow. Otherwise we'd double-render
+  // a modal on top of /onboarding which is itself an onboarding screen.
+  const onboardingStep = dbUser?.onboardingStep ?? 0;
+  const showWizard =
+    allProjects.length > 0 &&
+    onboardingStep < 99 &&
+    !pathname.startsWith('/onboarding');
+
+  let hasGitHubToken = false;
+  let hasBrandContext = false;
+  if (showWizard) {
+    const [gh] = await db
+      .select({ id: integrations.id })
+      .from(integrations)
+      .where(and(eq(integrations.userId, user.id), eq(integrations.provider, 'github')))
+      .limit(1);
+    hasGitHubToken = !!gh;
+
+    const [brand] = await db
+      .select({ id: projects.id })
+      .from(projects)
+      .where(and(eq(projects.userId, user.id), isNotNull(projects.brandContext)))
+      .limit(1);
+    hasBrandContext = !!brand;
+  }
+
   return (
     <div className="min-h-screen md:grid md:grid-cols-[240px_1fr]">
       <Sidebar
@@ -44,6 +72,14 @@ export default async function DashboardLayout({
         }}
       />
       <main className="overflow-y-auto">{children}</main>
+      {showWizard && (
+        <OnboardingClientWrapper
+          initialStep={onboardingStep}
+          hasGitHubToken={hasGitHubToken}
+          hasBrandContext={hasBrandContext}
+          hasAnyProject={allProjects.length > 0}
+        />
+      )}
     </div>
   );
 }

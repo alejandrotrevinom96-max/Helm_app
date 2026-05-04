@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { db } from '@/lib/db';
 import { projects, scheduledPosts } from '@/lib/db/schema';
-import { eq, and, asc } from 'drizzle-orm';
+import { eq, and, asc, inArray } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 
 const VALID_PLATFORMS = new Set(['instagram', 'facebook', 'linkedin', 'threads']);
@@ -130,8 +130,10 @@ export async function PATCH(request: Request) {
   return NextResponse.json({ ok: true });
 }
 
-// Soft-delete a scheduled post (sets status='cancelled' so we keep history).
-// Only the owner can cancel; we double-check with eq(userId, user.id).
+// Soft-delete one or many scheduled posts (sets status='cancelled' so we
+// keep history). Single mode: ?id=...  ·  Bulk mode: body { ids: [...] }.
+// Both are owner-scoped; bulk is also gated to status='scheduled' so we
+// don't accidentally cancel a post the cron already notified on.
 export async function DELETE(request: Request) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -139,21 +141,97 @@ export async function DELETE(request: Request) {
 
   const { searchParams } = new URL(request.url);
   const id = searchParams.get('id');
-  if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 });
 
-  const [post] = await db
-    .select({ id: scheduledPosts.id })
-    .from(scheduledPosts)
-    .where(and(eq(scheduledPosts.id, id), eq(scheduledPosts.userId, user.id)))
-    .limit(1);
-  if (!post) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  if (id) {
+    const [post] = await db
+      .select({ id: scheduledPosts.id })
+      .from(scheduledPosts)
+      .where(and(eq(scheduledPosts.id, id), eq(scheduledPosts.userId, user.id)))
+      .limit(1);
+    if (!post) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+
+    await db
+      .update(scheduledPosts)
+      .set({ status: 'cancelled' })
+      .where(eq(scheduledPosts.id, id));
+
+    return NextResponse.json({ ok: true });
+  }
+
+  // Bulk mode: parse body for ids array.
+  const body = await request.json().catch(() => ({}));
+  const { ids } = body as { ids?: unknown };
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return NextResponse.json({ error: 'ids array required' }, { status: 400 });
+  }
+  if (ids.length > 100) {
+    return NextResponse.json({ error: 'Max 100 ids per request' }, { status: 400 });
+  }
+  const safeIds = ids.filter((x): x is string => typeof x === 'string');
+  if (safeIds.length === 0) {
+    return NextResponse.json({ error: 'No valid ids' }, { status: 400 });
+  }
 
   await db
     .update(scheduledPosts)
     .set({ status: 'cancelled' })
-    .where(eq(scheduledPosts.id, id));
+    .where(
+      and(
+        inArray(scheduledPosts.id, safeIds),
+        eq(scheduledPosts.userId, user.id),
+        eq(scheduledPosts.status, 'scheduled')
+      )
+    );
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, count: safeIds.length });
+}
+
+// Bulk reschedule: PUT { ids: [...], scheduledFor: ISO }. Single edits keep
+// using PATCH above. We only move posts that are still 'scheduled'.
+export async function PUT(request: Request) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const body = await request.json().catch(() => ({}));
+  const { ids, scheduledFor } = body as {
+    ids?: unknown;
+    scheduledFor?: unknown;
+  };
+
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return NextResponse.json({ error: 'ids array required' }, { status: 400 });
+  }
+  if (ids.length > 100) {
+    return NextResponse.json({ error: 'Max 100 ids per request' }, { status: 400 });
+  }
+  if (typeof scheduledFor !== 'string') {
+    return NextResponse.json({ error: 'scheduledFor required' }, { status: 400 });
+  }
+  const date = new Date(scheduledFor);
+  if (isNaN(date.getTime()) || date.getTime() <= Date.now()) {
+    return NextResponse.json(
+      { error: 'scheduledFor must be a valid future date' },
+      { status: 400 }
+    );
+  }
+  const safeIds = ids.filter((x): x is string => typeof x === 'string');
+  if (safeIds.length === 0) {
+    return NextResponse.json({ error: 'No valid ids' }, { status: 400 });
+  }
+
+  await db
+    .update(scheduledPosts)
+    .set({ scheduledFor: date })
+    .where(
+      and(
+        inArray(scheduledPosts.id, safeIds),
+        eq(scheduledPosts.userId, user.id),
+        eq(scheduledPosts.status, 'scheduled')
+      )
+    );
+
+  return NextResponse.json({ ok: true, count: safeIds.length });
 }
 
 export async function GET(request: Request) {
