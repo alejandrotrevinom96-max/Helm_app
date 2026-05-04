@@ -160,11 +160,30 @@ export async function POST(request: Request) {
         })
       : all;
 
-  // Project description for the scoring step
+  // Project description for the per-finding scoring step. Pre-PR-16 this
+  // hardcoded "a SaaS using Next.js" which biased scoring against non-tech
+  // projects. Now we lead with the brand bible (tagline + industry +
+  // audience) and only fall back to detectedStack when the bible is empty.
   const stack = (project.detectedStack as DetectedStack | null) ?? {};
-  const description = `${project.name} — a SaaS using ${stack.framework || 'Next.js'}${
-    stack.hasSupabase ? ' + Supabase' : ''
-  }${stack.hasStripe ? ' + Stripe' : ''}. Keywords: ${keywords.join(', ')}.`;
+  const bible = project.brandContext as
+    | { identity?: { tagline?: string; industry?: string }; audience?: { primary?: { description?: string } } }
+    | null;
+  const tagline = bible?.identity?.tagline;
+  const industry = bible?.identity?.industry;
+  const audienceDesc = bible?.audience?.primary?.description;
+  const descriptionParts: string[] = [`${project.name}`];
+  if (tagline) descriptionParts.push(`— ${tagline}`);
+  if (industry) descriptionParts.push(`(${industry})`);
+  if (audienceDesc) descriptionParts.push(`for ${audienceDesc}`);
+  if (!tagline && !industry && !audienceDesc) {
+    // No bible: lean on detected stack, but stop calling it a "SaaS" by
+    // default — that biases scoring toward generic indie-hacker findings.
+    descriptionParts.push(
+      `built with ${stack.framework || 'Next.js'}${stack.hasSupabase ? ' + Supabase' : ''}${stack.hasStripe ? ' + Stripe' : ''}`
+    );
+  }
+  descriptionParts.push(`Keywords: ${keywords.join(', ')}.`);
+  const description = descriptionParts.join(' ');
 
   // Dedup: skip findings that are already in the DB before paying for scoring.
   let inserted = 0;

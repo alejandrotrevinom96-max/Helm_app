@@ -3,6 +3,11 @@ import { db } from '@/lib/db';
 import { projects, researchConfig } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
+import {
+  getDefaultSources,
+  type SourcesConfig,
+} from '@/lib/research/source-defaults';
+import type { BrandBible } from '@/lib/types/brand';
 
 interface DetectedStack {
   framework?: string;
@@ -53,16 +58,23 @@ export async function GET(request: Request) {
 
   if (existing) return NextResponse.json(existing);
 
-  // Create with stack-derived defaults so the user has something to scan with
-  // immediately rather than an empty form.
+  // Create with stack-derived keywords + audience-aware sources so the
+  // user has something to scan with immediately rather than an empty form.
+  // Audience-aware sources matter for non-tech projects: a travel app
+  // shouldn't have Hacker News on by default, that just feeds it dev-tool
+  // posts that have to be filtered out later.
   const defaultKeywords = extractKeywordsFromStack(
     project.detectedStack as DetectedStack | null
+  );
+  const defaultSources = getDefaultSources(
+    project.brandContext as BrandBible | null
   );
   const [created] = await db
     .insert(researchConfig)
     .values({
       projectId,
       keywords: defaultKeywords,
+      sources: defaultSources,
     })
     .returning();
   return NextResponse.json(created);
@@ -79,7 +91,7 @@ export async function PATCH(request: Request) {
     keywords?: string[];
     competitors?: string[];
     excludeWords?: string[];
-    sources?: typeof DEFAULT_SOURCES;
+    sources?: SourcesConfig;
   };
 
   if (!projectId) {
