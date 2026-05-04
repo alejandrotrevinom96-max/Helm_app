@@ -28,6 +28,10 @@ export const users = pgTable('users', {
   // scan flow): this tracks the 4-step in-app wizard shown over the dashboard.
   onboardingStep: integer('onboarding_step').default(0).notNull(),
   onboardingCompletedAt: timestamp('onboarding_completed_at'),
+  // Outbound webhook for scheduled-post events. Optional; null = no delivery.
+  // The secret signs payloads with HMAC-SHA256 — receiver MUST verify it.
+  webhookUrl: text('webhook_url'),
+  webhookSecret: text('webhook_secret'),
 });
 
 // ===== Integrations =====
@@ -151,6 +155,9 @@ export const researchFindings = pgTable('research_findings', {
   postedAt: timestamp('posted_at'),
   foundAt: timestamp('found_at').defaultNow().notNull(),
   isHidden: boolean('is_hidden').default(false),
+  // Set by the scoring step when the finding mentions a known competitor.
+  // Null for findings that are about the user's own product / niche only.
+  competitor: text('competitor'),
 });
 
 // ===== Waitlist Pages =====
@@ -211,6 +218,10 @@ export const waitlistPages = pgTable('waitlist_pages', {
     discountPct?: number;
     questions?: string[];
   }>(),
+  // Auto-increments on every PATCH that touches templateConfig. Responses
+  // record this number when submitted, so an A/B test can attribute each
+  // response to the exact config the visitor saw.
+  templateVersion: integer('template_version').default(1).notNull(),
 });
 
 // ===== Waitlist Signups =====
@@ -243,6 +254,11 @@ export const waitlistResponses = pgTable('waitlist_responses', {
   ipHash: text('ip_hash'), // sha256(ip + slug) for dedup
   userAgent: text('user_agent'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
+  // Snapshot of waitlistPages.templateConfig at the moment this response
+  // was submitted. Lets the responses page show "Saw price $19" even after
+  // the user re-edits the config later.
+  templateConfigSnapshot: jsonb('template_config_snapshot'),
+  templateVersion: integer('template_version').default(1).notNull(),
 });
 
 // ===== Helm waitlist =====

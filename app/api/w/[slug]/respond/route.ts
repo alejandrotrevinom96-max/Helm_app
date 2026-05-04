@@ -72,6 +72,8 @@ export async function POST(
     responses: responses ?? {},
     ipHash,
     userAgent: request.headers.get('user-agent') ?? '',
+    templateConfigSnapshot: page.templateConfig ?? null,
+    templateVersion: page.templateVersion,
   });
 
   // Backward-compat: keep populating the legacy waitlistSignups table when

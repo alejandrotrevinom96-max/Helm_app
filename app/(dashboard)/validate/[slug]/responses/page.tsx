@@ -31,6 +31,7 @@ export default async function ResponsesPage({
       template: waitlistPages.template,
       templateConfig: waitlistPages.templateConfig,
       surveyAnalysis: waitlistPages.surveyAnalysis,
+      templateVersion: waitlistPages.templateVersion,
       projectUserId: projects.userId,
     })
     .from(waitlistPages)
@@ -53,6 +54,7 @@ export default async function ResponsesPage({
       title={page.title}
       template={page.template ?? 'minimal'}
       templateConfig={(page.templateConfig as TemplateConfig | null) ?? null}
+      pageTemplateVersion={page.templateVersion}
       surveyAnalysis={
         (page.surveyAnalysis as SurveyAnalysis | null) ?? null
       }
@@ -61,6 +63,9 @@ export default async function ResponsesPage({
         email: r.email,
         responses: r.responses as Record<string, unknown> | null,
         createdAt: r.createdAt,
+        templateVersion: r.templateVersion,
+        templateConfigSnapshot:
+          (r.templateConfigSnapshot as TemplateConfig | null) ?? null,
       }))}
     />
   );

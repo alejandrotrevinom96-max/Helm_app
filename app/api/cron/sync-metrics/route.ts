@@ -5,6 +5,7 @@ import {
   metricSnapshots,
   scheduledPosts,
   researchConfig,
+  users,
 } from '@/lib/db/schema';
 import { eq, and, lte, lt, isNull, or } from 'drizzle-orm';
 import { decrypt } from '@/lib/crypto';
@@ -12,6 +13,7 @@ import { getVercelAnalytics } from '@/lib/integrations/vercel';
 import { getAuthUsersCount } from '@/lib/integrations/supabase-mgmt';
 import { getAdAccountInsights } from '@/lib/integrations/meta';
 import { generateWeeklyInsight } from '@/lib/research/generate-insight';
+import { sendWebhook } from '@/lib/webhooks/send';
 import { NextResponse } from 'next/server';
 
 export async function GET(request: Request) {
@@ -103,6 +105,8 @@ export async function GET(request: Request) {
   }
 
   // Mark scheduled posts that are due so the user knows it's time to post.
+  // If the user has a webhook configured, fire that too — fire-and-forget,
+  // so a slow/dead receiver doesn't block notification of other due posts.
   // TODO: when Resend (or similar) is wired up, send an email here with the
   // ready-to-paste content instead of just flipping the status flag.
   const due = await db
@@ -115,7 +119,49 @@ export async function GET(request: Request) {
       )
     );
 
+  // Cache webhook config per user so multiple due posts from the same user
+  // don't trigger redundant DB reads.
+  const webhookCache = new Map<
+    string,
+    { url: string | null; secret: string | null }
+  >();
+  let webhooksDelivered = 0;
+  let webhooksFailed = 0;
+
   for (const post of due) {
+    let cfg = webhookCache.get(post.userId);
+    if (!cfg) {
+      const [row] = await db
+        .select({ url: users.webhookUrl, secret: users.webhookSecret })
+        .from(users)
+        .where(eq(users.id, post.userId))
+        .limit(1);
+      cfg = { url: row?.url ?? null, secret: row?.secret ?? null };
+      webhookCache.set(post.userId, cfg);
+    }
+
+    if (cfg.url) {
+      const result = await sendWebhook(cfg.url, cfg.secret, {
+        event: 'scheduled_post.due',
+        timestamp: new Date().toISOString(),
+        data: {
+          id: post.id,
+          platform: post.platform,
+          content: post.content,
+          scheduledFor: post.scheduledFor.toISOString(),
+        },
+      });
+      if (result.ok) {
+        webhooksDelivered++;
+      } else {
+        webhooksFailed++;
+        console.error(
+          `[CRON] webhook failed for user ${post.userId}:`,
+          result.error ?? `HTTP ${result.status}`
+        );
+      }
+    }
+
     await db
       .update(scheduledPosts)
       .set({ status: 'notified', notifiedAt: new Date() })
@@ -163,6 +209,8 @@ export async function GET(request: Request) {
     synced,
     projects: allProjects.length,
     notifiedPosts: due.length,
+    webhooksDelivered,
+    webhooksFailed,
     insightsGenerated,
     insightsDeferred: Math.max(0, stale.length - MAX_INSIGHTS_PER_RUN),
   });

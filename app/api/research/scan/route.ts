@@ -67,6 +67,7 @@ export async function POST(request: Request) {
   const excludeWords = ((config.excludeWords as string[] | null) ?? []).map((w) =>
     w.toLowerCase()
   );
+  const competitors = (config.competitors as string[] | null) ?? [];
 
   if (keywords.length === 0) {
     return NextResponse.json(
@@ -183,10 +184,11 @@ export async function POST(request: Request) {
         .limit(1);
       if (existing) continue;
 
-      const matchScore = await scoreResearchMatch({
+      const { matchScore, competitor } = await scoreResearchMatch({
         projectDescription: description,
         postTitle: f.title,
         postContent: f.snippet,
+        competitors,
       });
       scored++;
       if (matchScore < 30) continue;
@@ -204,6 +206,7 @@ export async function POST(request: Request) {
           upvotes: f.upvotes ?? null,
           comments: f.comments ?? null,
           postedAt: f.postedAt ?? null,
+          competitor,
         });
       inserted++;
     } catch (e) {

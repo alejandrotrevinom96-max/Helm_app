@@ -14,6 +14,8 @@ interface ResponseRow {
   email: string | null;
   responses: Record<string, unknown> | null;
   createdAt: Date | string;
+  templateVersion: number;
+  templateConfigSnapshot: TemplateConfig | null;
 }
 
 export function ResponsesClient({
@@ -21,6 +23,7 @@ export function ResponsesClient({
   title,
   template,
   templateConfig,
+  pageTemplateVersion,
   surveyAnalysis,
   responses,
 }: {
@@ -28,9 +31,18 @@ export function ResponsesClient({
   title: string;
   template: string;
   templateConfig: TemplateConfig | null;
+  pageTemplateVersion: number;
   surveyAnalysis: SurveyAnalysis | null;
   responses: ResponseRow[];
 }) {
+  // Bucket responses by version so we can surface "v1 had 3 responses, v2
+  // has 5" — useful for pricing-test where the user iterated mid-test.
+  const versionCounts = new Map<number, number>();
+  for (const r of responses) {
+    const v = r.templateVersion ?? 1;
+    versionCounts.set(v, (versionCounts.get(v) ?? 0) + 1);
+  }
+  const totalVersions = versionCounts.size;
   return (
     <div className="p-4 md:p-8">
       <div className="mb-6 md:mb-8">
@@ -54,6 +66,30 @@ export function ResponsesClient({
           </a>
         </p>
       </div>
+
+      {totalVersions > 1 && (
+        <GlassCard className="p-4 mb-4">
+          <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2">
+            Template versions · current v{pageTemplateVersion}
+          </div>
+          <div className="flex flex-wrap gap-4">
+            {[...versionCounts.entries()]
+              .sort((a, b) => b[0] - a[0])
+              .map(([v, c]) => (
+                <div key={v} className="flex items-baseline gap-2">
+                  <span className="font-display text-2xl font-light">v{v}</span>
+                  <span className="text-xs text-text-3">
+                    {c} response{c === 1 ? '' : 's'}
+                  </span>
+                </div>
+              ))}
+          </div>
+          <p className="text-xs text-text-3 mt-3">
+            Each response is preserved with the template config that was active
+            when it was submitted.
+          </p>
+        </GlassCard>
+      )}
 
       {template === 'survey-5q' && (
         <SurveyAnalysisPanel
@@ -96,6 +132,59 @@ export function ResponsesClient({
   );
 }
 
+// Renders a small "v2" pill next to a response. We always show it (even
+// when the page only has v1) so power users can spot version drift quickly.
+function VersionBadge({ v }: { v: number }) {
+  return (
+    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-surface-1 text-text-3">
+      v{v}
+    </span>
+  );
+}
+
+// Template-specific snapshot of what the responder actually saw at submit
+// time. Returns null when the template doesn't have a per-version detail
+// worth surfacing (minimal/survey-5q) or when the snapshot is missing.
+function SnapshotDetail({
+  template,
+  snapshot,
+  version,
+}: {
+  template: string;
+  snapshot: TemplateConfig | null;
+  version: number;
+}) {
+  if (!snapshot) return null;
+  if (template === 'pricing-test') {
+    const price = snapshot.pricePerMonth;
+    const discount = snapshot.discountPct;
+    if (price == null) return null;
+    return (
+      <div className="text-[11px] text-text-3 mb-2 italic">
+        Saw price ${price}
+        {discount ? ` (${discount}% off)` : ''}
+      </div>
+    );
+  }
+  if (template === 'feature-vote') {
+    const features = snapshot.features ?? [];
+    if (features.length === 0) return null;
+    return (
+      <details className="text-[11px] text-text-3 mt-2">
+        <summary className="cursor-pointer hover:text-text-2">
+          Features available at v{version}
+        </summary>
+        <ul className="mt-1 ml-4 list-disc space-y-0.5">
+          {features.map((f) => (
+            <li key={f.id}>{f.title}</li>
+          ))}
+        </ul>
+      </details>
+    );
+  }
+  return null;
+}
+
 function MinimalResponses({ responses }: { responses: ResponseRow[] }) {
   return (
     <GlassCard className="p-0 overflow-hidden">
@@ -113,7 +202,12 @@ function MinimalResponses({ responses }: { responses: ResponseRow[] }) {
         <tbody>
           {responses.map((r) => (
             <tr key={r.id} className="border-b border-border last:border-0">
-              <td className="p-4 break-all">{r.email ?? '—'}</td>
+              <td className="p-4 break-all">
+                <span className="inline-flex items-center gap-2 flex-wrap">
+                  <span>{r.email ?? '—'}</span>
+                  <VersionBadge v={r.templateVersion} />
+                </span>
+              </td>
               <td className="p-4 text-right text-text-3 font-mono whitespace-nowrap">
                 {timeAgo(r.createdAt)}
               </td>
@@ -138,7 +232,10 @@ function BetaTesterResponses({
       {responses.map((r) => (
         <GlassCard key={r.id} className="p-4 md:p-5">
           <div className="flex justify-between items-start mb-3 gap-3 flex-wrap">
-            <div className="font-medium break-all">{r.email ?? '—'}</div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-medium break-all">{r.email ?? '—'}</span>
+              <VersionBadge v={r.templateVersion} />
+            </div>
             <div className="text-[11px] font-mono text-text-3">
               {timeAgo(r.createdAt)}
             </div>
@@ -217,19 +314,26 @@ function FeatureVoteAnalysis({
           {responses.map((r) => {
             const votes = (r.responses?.votes as string[] | undefined) ?? [];
             return (
-              <div
-                key={r.id}
-                className="border border-border rounded-lg p-3 text-xs flex justify-between items-center gap-3"
-              >
-                <div className="flex-1 min-w-0">
-                  <div className="break-all">{r.email ?? '—'}</div>
-                  <div className="text-text-3 mt-1">
-                    Voted: {votes.join(', ') || '—'}
+              <div key={r.id} className="border border-border rounded-lg p-3 text-xs">
+                <div className="flex justify-between items-center gap-3 flex-wrap">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="break-all">{r.email ?? '—'}</span>
+                      <VersionBadge v={r.templateVersion} />
+                    </div>
+                    <div className="text-text-3 mt-1">
+                      Voted: {votes.join(', ') || '—'}
+                    </div>
+                  </div>
+                  <div className="text-text-3 font-mono whitespace-nowrap">
+                    {timeAgo(r.createdAt)}
                   </div>
                 </div>
-                <div className="text-text-3 font-mono whitespace-nowrap">
-                  {timeAgo(r.createdAt)}
-                </div>
+                <SnapshotDetail
+                  template="feature-vote"
+                  snapshot={r.templateConfigSnapshot}
+                  version={r.templateVersion}
+                />
               </div>
             );
           })}
@@ -283,12 +387,22 @@ function PricingTestAnalysis({ responses }: { responses: ResponseRow[] }) {
           {commits.map((r) => (
             <div
               key={r.id}
-              className="border border-border rounded-lg p-3 text-xs flex justify-between items-center gap-3"
+              className="border border-border rounded-lg p-3 text-xs"
             >
-              <span className="break-all">{r.email ?? '—'}</span>
-              <span className="text-text-3 font-mono whitespace-nowrap">
-                {timeAgo(r.createdAt)}
-              </span>
+              <div className="flex justify-between items-center gap-3 flex-wrap">
+                <div className="flex items-center gap-2 flex-wrap min-w-0">
+                  <span className="break-all">{r.email ?? '—'}</span>
+                  <VersionBadge v={r.templateVersion} />
+                </div>
+                <span className="text-text-3 font-mono whitespace-nowrap">
+                  {timeAgo(r.createdAt)}
+                </span>
+              </div>
+              <SnapshotDetail
+                template="pricing-test"
+                snapshot={r.templateConfigSnapshot}
+                version={r.templateVersion}
+              />
             </div>
           ))}
         </div>
@@ -310,8 +424,11 @@ function SurveyResponses({
       {responses.map((r) => (
         <GlassCard key={r.id} className="p-4 md:p-5">
           <div className="flex justify-between items-start mb-3 gap-3 flex-wrap">
-            <div className="font-medium break-all">
-              {r.email ?? <span className="text-text-3 italic">anonymous</span>}
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-medium break-all">
+                {r.email ?? <span className="text-text-3 italic">anonymous</span>}
+              </span>
+              <VersionBadge v={r.templateVersion} />
             </div>
             <div className="text-[11px] font-mono text-text-3">
               {timeAgo(r.createdAt)}

@@ -33,6 +33,7 @@ export default async function ValidatePage({
       createdAt: waitlistPages.createdAt,
       template: waitlistPages.template,
       templateConfig: waitlistPages.templateConfig,
+      templateVersion: waitlistPages.templateVersion,
       responseCount: sql<number>`count(${waitlistResponses.id})::int`,
     })
     .from(waitlistPages)

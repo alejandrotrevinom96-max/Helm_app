@@ -12,6 +12,8 @@ export interface EditableWaitlist {
   slug: string;
   template: string;
   templateConfig: TemplateConfig | null;
+  templateVersion?: number;
+  responseCount?: number;
 }
 
 export function EditWaitlistModal({
@@ -100,6 +102,24 @@ export function EditWaitlistModal({
         </div>
 
         <div className="space-y-5">
+          {page.responseCount !== undefined && page.responseCount > 0 && (
+            <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+              <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-amber-500 mb-1">
+                Heads up
+              </div>
+              <p className="text-xs text-text-1">
+                This page has{' '}
+                <strong>
+                  {page.responseCount} response
+                  {page.responseCount === 1 ? '' : 's'}
+                </strong>
+                . Saving creates v{(page.templateVersion ?? 1) + 1}. Existing
+                responses keep their original config; only future responses see
+                the new version.
+              </p>
+            </div>
+          )}
+
           <div>
             <label className="block text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2">
               Page title

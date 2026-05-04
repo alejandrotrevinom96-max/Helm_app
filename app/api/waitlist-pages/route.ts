@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { db } from '@/lib/db';
 import { projects, waitlistPages } from '@/lib/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { getDefaultConfig } from '@/lib/validate/defaults';
 import { NextResponse } from 'next/server';
 
@@ -127,6 +127,9 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: 'templateConfig must be object' }, { status: 400 });
     }
     updates.templateConfig = templateConfig;
+    // Atomically bump version so concurrent edits can't race to the same
+    // number. Future submits then snapshot the new version + config.
+    updates.templateVersion = sql`${waitlistPages.templateVersion} + 1`;
   }
   if (isActive !== undefined) {
     updates.isActive = !!isActive;

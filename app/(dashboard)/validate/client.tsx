@@ -156,6 +156,7 @@ interface PageWithCount {
   createdAt: Date | string;
   template: string | null;
   templateConfig: TemplateConfig | null;
+  templateVersion: number;
   responseCount: number;
 }
 
@@ -427,6 +428,8 @@ export function ValidateClient({
                       slug: p.slug,
                       template: p.template ?? 'minimal',
                       templateConfig: p.templateConfig,
+                      templateVersion: p.templateVersion,
+                      responseCount: p.responseCount,
                     })
                   }
                 />

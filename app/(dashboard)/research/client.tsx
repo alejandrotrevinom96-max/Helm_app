@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { SimpleMarkdown } from '@/components/ui/simple-markdown';
 import { KeywordChips } from './keyword-chips';
+import { CompetitorComparison } from './competitor-comparison';
 
 type Sources = {
   reddit: boolean;
@@ -57,6 +58,7 @@ export function ResearchClient({
 
   const [configOpen, setConfigOpen] = useState(initialConfig.keywords.length === 0);
   const [filter, setFilter] = useState<Filter>('all');
+  const [activeTab, setActiveTab] = useState<'all' | 'competitors'>('all');
 
   const [scanLoading, setScanLoading] = useState(false);
   const [scanStatus, setScanStatus] = useState<string | null>(null);
@@ -358,53 +360,88 @@ export function ResearchClient({
         </GlassCard>
       )}
 
-      {/* Source filter chips */}
-      <div className="flex flex-wrap gap-2 mb-4">
-        {(['all', 'reddit', 'hackernews', 'indiehackers'] as const).map((s) => (
-          <button
-            key={s}
-            onClick={() => setFilter(s)}
-            className={`text-[10px] font-mono uppercase tracking-[0.1em] px-3 py-1.5 rounded transition-colors ${
-              filter === s
-                ? 'bg-accent-soft text-accent'
-                : 'text-text-3 hover:text-text-1'
-            }`}
-          >
-            {s === 'all'
-              ? `All (${counts.all})`
-              : `${SOURCE_LABELS[s as keyof Sources]} (${counts[s]})`}
-          </button>
-        ))}
+      {/* Tab navigation */}
+      <div className="flex gap-1 border-b border-border mb-4">
+        <button
+          onClick={() => setActiveTab('all')}
+          className={`px-4 py-2 text-xs border-b-2 -mb-px transition-colors ${
+            activeTab === 'all'
+              ? 'border-accent text-accent'
+              : 'border-transparent text-text-2 hover:text-text-1'
+          }`}
+        >
+          All findings
+        </button>
+        <button
+          onClick={() => setActiveTab('competitors')}
+          className={`px-4 py-2 text-xs border-b-2 -mb-px transition-colors ${
+            activeTab === 'competitors'
+              ? 'border-accent text-accent'
+              : 'border-transparent text-text-2 hover:text-text-1'
+          }`}
+        >
+          Competitive landscape
+          {competitors.length > 0 && (
+            <span className="ml-1.5 text-[10px] text-text-3">
+              ({competitors.length})
+            </span>
+          )}
+        </button>
       </div>
 
-      {visibleFindings.length === 0 && findings.length === 0 && (
-        <GlassCard className="p-8 md:p-12 text-center">
-          <p className="font-display text-2xl mb-2">No findings yet</p>
-          <p className="text-text-2 text-sm">
-            Add keywords above and click <em className="text-text-1">Scan now</em>{' '}
-            to search Reddit, HN, and Indie Hackers for matching posts.
-          </p>
-        </GlassCard>
-      )}
+      {activeTab === 'all' ? (
+        <>
+          {/* Source filter chips */}
+          <div className="flex flex-wrap gap-2 mb-4">
+            {(['all', 'reddit', 'hackernews', 'indiehackers'] as const).map((s) => (
+              <button
+                key={s}
+                onClick={() => setFilter(s)}
+                className={`text-[10px] font-mono uppercase tracking-[0.1em] px-3 py-1.5 rounded transition-colors ${
+                  filter === s
+                    ? 'bg-accent-soft text-accent'
+                    : 'text-text-3 hover:text-text-1'
+                }`}
+              >
+                {s === 'all'
+                  ? `All (${counts.all})`
+                  : `${SOURCE_LABELS[s as keyof Sources]} (${counts[s]})`}
+              </button>
+            ))}
+          </div>
 
-      {visibleFindings.length === 0 && findings.length > 0 && (
-        <p className="text-text-3 text-sm">
-          No findings from {filter}. Try a different filter or scan again.
-        </p>
-      )}
+          {visibleFindings.length === 0 && findings.length === 0 && (
+            <GlassCard className="p-8 md:p-12 text-center">
+              <p className="font-display text-2xl mb-2">No findings yet</p>
+              <p className="text-text-2 text-sm">
+                Add keywords above and click <em className="text-text-1">Scan now</em>{' '}
+                to search Reddit, HN, and Indie Hackers for matching posts.
+              </p>
+            </GlassCard>
+          )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
-        {visibleFindings.map((f) => (
-          <FindingCard key={f.id} finding={f} />
-        ))}
-      </div>
+          {visibleFindings.length === 0 && findings.length > 0 && (
+            <p className="text-text-3 text-sm">
+              No findings from {filter}. Try a different filter or scan again.
+            </p>
+          )}
 
-      {hasMore && allFindings.length > 0 && (
-        <div className="flex justify-center mt-6">
-          <Button variant="ghost" onClick={loadMore} disabled={loadingMore}>
-            {loadingMore ? 'Loading…' : 'Load more findings'}
-          </Button>
-        </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
+            {visibleFindings.map((f) => (
+              <FindingCard key={f.id} finding={f} />
+            ))}
+          </div>
+
+          {hasMore && allFindings.length > 0 && (
+            <div className="flex justify-center mt-6">
+              <Button variant="ghost" onClick={loadMore} disabled={loadingMore}>
+                {loadingMore ? 'Loading…' : 'Load more findings'}
+              </Button>
+            </div>
+          )}
+        </>
+      ) : (
+        <CompetitorComparison projectId={project.id} />
       )}
     </div>
   );

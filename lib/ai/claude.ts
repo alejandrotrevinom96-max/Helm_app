@@ -109,20 +109,57 @@ Rules:
 }
 
 /**
- * Score how well a Reddit/HN post matches a project's niche (0-100).
+ * Score how well a Reddit/HN post matches a project's niche (0-100), and
+ * detect whether the post mentions one of a known list of competitors.
+ *
+ * If `competitors` is empty, the function returns `competitor: null` and
+ * uses a cheaper number-only prompt (back-compat with the original signature).
  */
 export async function scoreResearchMatch(params: {
   projectDescription: string;
   postTitle: string;
   postContent: string;
-}): Promise<number> {
-  const { projectDescription, postTitle, postContent } = params;
+  competitors?: string[];
+}): Promise<{ matchScore: number; competitor: string | null }> {
+  const { projectDescription, postTitle, postContent, competitors = [] } = params;
 
+  // Fast path when no competitors configured — keep original number-only
+  // contract so we don't pay for JSON parsing when not needed.
+  if (competitors.length === 0) {
+    const response = await anthropic.messages.create({
+      model: HAIKU_MODEL,
+      max_tokens: 50,
+      system:
+        'You score how relevant a post is to a SaaS project. Output ONLY a number 0-100, nothing else. 100 = perfect match (user describing the exact problem the SaaS solves), 0 = totally unrelated.',
+      messages: [
+        {
+          role: 'user',
+          content: `Project: ${projectDescription}\n\nPost title: ${postTitle}\n\nPost: ${postContent.slice(0, 500)}`,
+        },
+      ],
+    });
+    const textBlock = response.content.find((b) => b.type === 'text');
+    const text = textBlock?.type === 'text' ? textBlock.text.trim() : '0';
+    const num = parseInt(text, 10);
+    return {
+      matchScore: isNaN(num) ? 0 : Math.min(100, Math.max(0, num)),
+      competitor: null,
+    };
+  }
+
+  const competitorList = competitors.map((c) => c.toLowerCase());
   const response = await anthropic.messages.create({
     model: HAIKU_MODEL,
-    max_tokens: 50,
-    system:
-      'You score how relevant a post is to a SaaS project. Output ONLY a number 0-100, nothing else. 100 = perfect match (user describing the exact problem the SaaS solves), 0 = totally unrelated.',
+    max_tokens: 80,
+    system: `You score how relevant a post is to a SaaS project AND detect competitor mentions.
+
+Output ONLY valid JSON, no preamble. Format:
+{"matchScore": 0-100, "competitor": "name" | null}
+
+- matchScore: 100 = perfect match (user describing the exact problem the SaaS solves), 0 = totally unrelated
+- competitor: must be exactly one of [${competitorList.join(', ')}] if explicitly mentioned (case-insensitive substring match in title or post body), otherwise null
+
+Match competitor names exactly as listed. Do not invent names.`,
     messages: [
       {
         role: 'user',
@@ -132,9 +169,25 @@ export async function scoreResearchMatch(params: {
   });
 
   const textBlock = response.content.find((b) => b.type === 'text');
-  const text = textBlock?.type === 'text' ? textBlock.text.trim() : '0';
-  const num = parseInt(text, 10);
-  return isNaN(num) ? 0 : Math.min(100, Math.max(0, num));
+  const text = textBlock?.type === 'text' ? textBlock.text.trim() : '{}';
+  const cleaned = text.replace(/^```(?:json)?\s*|\s*```$/g, '').trim();
+  try {
+    const parsed = JSON.parse(cleaned) as {
+      matchScore?: unknown;
+      competitor?: unknown;
+    };
+    const raw = typeof parsed.matchScore === 'number' ? parsed.matchScore : 0;
+    const matchScore = Math.min(100, Math.max(0, raw));
+    const comp =
+      typeof parsed.competitor === 'string'
+        ? parsed.competitor.toLowerCase()
+        : null;
+    // Reject hallucinated competitor names.
+    const competitor = comp && competitorList.includes(comp) ? comp : null;
+    return { matchScore, competitor };
+  } catch {
+    return { matchScore: 0, competitor: null };
+  }
 }
 
 /**
