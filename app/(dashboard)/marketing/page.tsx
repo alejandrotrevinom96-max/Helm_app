@@ -33,11 +33,17 @@ export default async function MarketingPage() {
     .orderBy(asc(scheduledPosts.scheduledFor))
     .limit(10);
 
+  // Server-side check: only show "Add visual" buttons / show loading
+  // states / etc. when fal.ai is wired up. Avoids the user clicking and
+  // getting a 503 they can't act on.
+  const visualsAvailable = !!process.env.FAL_API_KEY;
+
   return (
     <MarketingClient
       project={project}
       recentPosts={recentPosts}
       upcoming={upcoming}
+      visualsAvailable={visualsAvailable}
     />
   );
 }

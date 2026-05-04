@@ -12,6 +12,7 @@ interface Post {
   scheduledFor: string;
   status: string;
   consistencyScore: number | null;
+  visualUrl: string | null;
 }
 
 const PLATFORMS = ['instagram', 'facebook', 'linkedin', 'threads'];
@@ -268,6 +269,14 @@ export function ScheduledManager({ posts }: { posts: Post[] }) {
                     className="mt-1 cursor-pointer"
                     aria-label={`Select ${p.platform} post`}
                   />
+                  {p.visualUrl && (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img
+                      src={p.visualUrl}
+                      alt="Post visual"
+                      className="w-16 h-16 rounded-lg object-cover flex-shrink-0"
+                    />
+                  )}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1 flex-wrap">
                       <span className="text-[10px] font-mono uppercase tracking-[0.1em] text-accent">

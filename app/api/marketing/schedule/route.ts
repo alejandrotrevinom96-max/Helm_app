@@ -19,6 +19,8 @@ export async function POST(request: Request) {
     scheduledFor,
     consistencyScore,
     scoreBreakdown,
+    visualUrl,
+    visualPrompt,
   } = await request.json();
 
   if (!projectId || !platform || !content || !scheduledFor) {
@@ -64,6 +66,13 @@ export async function POST(request: Request) {
       ? (scoreBreakdown as Record<string, number>)
       : null;
 
+  const safeVisualUrl =
+    typeof visualUrl === 'string' && visualUrl.length > 0 ? visualUrl : null;
+  const safeVisualPrompt =
+    typeof visualPrompt === 'string' && visualPrompt.length > 0
+      ? visualPrompt
+      : null;
+
   const [scheduled] = await db
     .insert(scheduledPosts)
     .values({
@@ -75,6 +84,9 @@ export async function POST(request: Request) {
       scheduledFor: date,
       consistencyScore: safeScore,
       scoreBreakdown: safeBreakdown as never,
+      visualUrl: safeVisualUrl,
+      visualPrompt: safeVisualPrompt,
+      visualType: safeVisualUrl ? 'image' : null,
     })
     .returning();
 

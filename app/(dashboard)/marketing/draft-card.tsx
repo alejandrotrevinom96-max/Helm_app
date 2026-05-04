@@ -13,6 +13,9 @@ export interface Draft {
   violations: string[];
   suggestions: string[];
   error?: string;
+  visual?: { url: string; prompt: string };
+  visualLoading?: boolean;
+  visualError?: string;
 }
 
 interface Props {
@@ -20,6 +23,11 @@ interface Props {
   isSelected: boolean;
   onSelect: () => void;
   onContentChange: (content: string) => void;
+  onGenerateVisual?: () => void;
+  onRegenerateVisual?: () => void;
+  visualsAvailable?: boolean;
+  showCarouselButton?: boolean;
+  onGenerateCarousel?: () => void;
 }
 
 const SCORE_WEIGHTS: Record<keyof ScoreBreakdown, number> = {
@@ -43,6 +51,11 @@ export function DraftCard({
   isSelected,
   onSelect,
   onContentChange,
+  onGenerateVisual,
+  onRegenerateVisual,
+  visualsAvailable = false,
+  showCarouselButton = false,
+  onGenerateCarousel,
 }: Props) {
   const [showBreakdown, setShowBreakdown] = useState(false);
 
@@ -82,6 +95,59 @@ export function DraftCard({
       <p className="text-[11px] text-text-3 italic mb-3 line-clamp-2">
         {draft.rationale}
       </p>
+
+      {draft.visual && !draft.visualLoading && (
+        <div className="mb-3 relative group rounded-lg overflow-hidden">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={draft.visual.url}
+            alt="Generated visual"
+            className="w-full h-48 object-cover"
+          />
+          <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+            {onRegenerateVisual && (
+              <button
+                onClick={onRegenerateVisual}
+                className="text-xs bg-white/10 backdrop-blur px-3 py-1.5 rounded-full text-white hover:bg-white/20"
+              >
+                ↻ Regenerate
+              </button>
+            )}
+            <a
+              href={draft.visual.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs bg-white/10 backdrop-blur px-3 py-1.5 rounded-full text-white hover:bg-white/20"
+            >
+              Open ↗
+            </a>
+          </div>
+        </div>
+      )}
+
+      {draft.visualLoading && (
+        <div className="mb-3 h-48 rounded-lg bg-bg-elev flex items-center justify-center">
+          <div className="text-center">
+            <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2">
+              Generating…
+            </div>
+            <p className="text-[10px] text-text-3">Flux Pro · ~8 seconds</p>
+          </div>
+        </div>
+      )}
+
+      {!draft.visual && !draft.visualLoading && visualsAvailable && onGenerateVisual && (
+        <button
+          onClick={onGenerateVisual}
+          className="mb-3 w-full text-xs py-3 border border-dashed border-border rounded-lg text-text-3 hover:border-accent hover:text-accent transition-colors"
+        >
+          + Add visual ($0.05)
+        </button>
+      )}
+
+      {draft.visualError && (
+        <p className="text-[11px] text-danger mb-2">⚠ {draft.visualError}</p>
+      )}
 
       <textarea
         value={draft.content}
@@ -160,6 +226,15 @@ export function DraftCard({
       >
         {isSelected ? '✓ Selected' : 'Use this draft'}
       </button>
+
+      {showCarouselButton && onGenerateCarousel && (
+        <button
+          onClick={onGenerateCarousel}
+          className="mt-2 w-full text-xs py-2 border border-dashed border-border rounded-lg text-text-3 hover:border-accent hover:text-accent transition-colors"
+        >
+          Convert to 5-slide carousel
+        </button>
+      )}
     </GlassCard>
   );
 }

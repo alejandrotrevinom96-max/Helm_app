@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { WebhooksConfig } from './webhooks-config';
+import { VisualsStatus } from './visuals-status';
 
 export default async function SettingsPage() {
   const supabase = await createClient();
@@ -16,6 +17,7 @@ export default async function SettingsPage() {
 
       <div className="space-y-6">
         <WebhooksConfig />
+        <VisualsStatus />
       </div>
     </div>
   );

@@ -74,10 +74,12 @@ export function MarketingClient({
   project,
   recentPosts,
   upcoming,
+  visualsAvailable,
 }: {
   project: Project;
   recentPosts: GeneratedPost[];
   upcoming: ScheduledPost[];
+  visualsAvailable: boolean;
 }) {
   // Multi-select platforms; we enforce at least 1 selected at all times.
   const [platforms, setPlatforms] = useState<Platform[]>(['instagram']);
@@ -212,6 +214,118 @@ export function MarketingClient({
     );
   };
 
+  // Update one draft inside one platform without losing the rest of the
+  // tree. Used by both visual and carousel handlers below.
+  const patchDraft = (
+    platform: Platform,
+    draftIdx: number,
+    patch: Partial<Draft>
+  ) => {
+    setGenerations((prev) =>
+      prev.map((g) =>
+        g.platform === platform
+          ? {
+              ...g,
+              drafts: g.drafts.map((d, i) =>
+                i === draftIdx ? { ...d, ...patch } : d
+              ),
+            }
+          : g
+      )
+    );
+  };
+
+  const handleGenerateVisual = async (
+    platform: Platform,
+    draftIdx: number
+  ) => {
+    const gen = generations.find((g) => g.platform === platform);
+    const draft = gen?.drafts[draftIdx];
+    if (!draft || !draft.content) return;
+
+    patchDraft(platform, draftIdx, {
+      visualLoading: true,
+      visualError: undefined,
+    });
+
+    try {
+      const res = await fetch('/api/visuals/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId: project.id,
+          platform,
+          postContent: draft.content,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok && data.visual) {
+        patchDraft(platform, draftIdx, {
+          visual: { url: data.visual.url, prompt: data.visual.prompt },
+          visualLoading: false,
+        });
+      } else {
+        patchDraft(platform, draftIdx, {
+          visualLoading: false,
+          visualError: data.hint ?? data.error ?? 'Visual generation failed',
+        });
+      }
+    } catch (e) {
+      patchDraft(platform, draftIdx, {
+        visualLoading: false,
+        visualError: e instanceof Error ? e.message : 'Network error',
+      });
+    }
+  };
+
+  const handleGenerateCarousel = async (
+    platform: Platform,
+    draftIdx: number
+  ) => {
+    const gen = generations.find((g) => g.platform === platform);
+    const draft = gen?.drafts[draftIdx];
+    if (!draft || !draft.content) return;
+
+    patchDraft(platform, draftIdx, {
+      visualLoading: true,
+      visualError: undefined,
+    });
+
+    try {
+      const res = await fetch('/api/visuals/carousel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId: project.id,
+          postContent: draft.content,
+          template: 'educational',
+        }),
+      });
+      const data = await res.json();
+      if (data.ok && data.carousel?.slides?.[0]) {
+        // Use slide 0 as the preview thumbnail; the full carousel still
+        // lives in data.carousel for whatever ships it later.
+        patchDraft(platform, draftIdx, {
+          visual: {
+            url: data.carousel.slides[0].url,
+            prompt: 'Carousel slide 1 of ' + data.carousel.totalSlides,
+          },
+          visualLoading: false,
+        });
+      } else {
+        patchDraft(platform, draftIdx, {
+          visualLoading: false,
+          visualError: data.hint ?? data.error ?? 'Carousel generation failed',
+        });
+      }
+    } catch (e) {
+      patchDraft(platform, draftIdx, {
+        visualLoading: false,
+        visualError: e instanceof Error ? e.message : 'Network error',
+      });
+    }
+  };
+
   const regenerateOne = async (platform: Platform) => {
     setGenerations((prev) =>
       prev.map((g) =>
@@ -327,6 +441,8 @@ export function MarketingClient({
                 scheduledFor: new Date(g.scheduledFor).toISOString(),
                 consistencyScore: sel.consistencyScore,
                 scoreBreakdown: sel.scoreBreakdown,
+                visualUrl: sel.visual?.url ?? null,
+                visualPrompt: sel.visual?.prompt ?? null,
               }),
             });
             return { platform: g.platform, ok: res.ok };
@@ -547,25 +663,42 @@ export function MarketingClient({
                         Click a card to select.
                       </p>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                        {activeGeneration.drafts.map((draft, idx) => (
-                          <DraftCard
-                            key={idx}
-                            draft={draft}
-                            isSelected={
-                              activeGeneration.selectedDraftIdx === idx
-                            }
-                            onSelect={() =>
-                              selectDraft(activeGeneration.platform, idx)
-                            }
-                            onContentChange={(content) =>
-                              updateDraftContent(
-                                activeGeneration.platform,
-                                idx,
-                                content
-                              )
-                            }
-                          />
-                        ))}
+                        {activeGeneration.drafts.map((draft, idx) => {
+                          const platform = activeGeneration.platform;
+                          const supportsCarousel =
+                            platform === 'instagram' || platform === 'linkedin';
+                          return (
+                            <DraftCard
+                              key={idx}
+                              draft={draft}
+                              isSelected={
+                                activeGeneration.selectedDraftIdx === idx
+                              }
+                              onSelect={() => selectDraft(platform, idx)}
+                              onContentChange={(content) =>
+                                updateDraftContent(platform, idx, content)
+                              }
+                              visualsAvailable={visualsAvailable}
+                              onGenerateVisual={
+                                visualsAvailable
+                                  ? () => handleGenerateVisual(platform, idx)
+                                  : undefined
+                              }
+                              onRegenerateVisual={
+                                visualsAvailable
+                                  ? () => handleGenerateVisual(platform, idx)
+                                  : undefined
+                              }
+                              showCarouselButton={
+                                supportsCarousel &&
+                                draft.content.length > 200
+                              }
+                              onGenerateCarousel={() =>
+                                handleGenerateCarousel(platform, idx)
+                              }
+                            />
+                          );
+                        })}
                       </div>
 
                       {(() => {

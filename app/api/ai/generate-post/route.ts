@@ -8,8 +8,15 @@ import {
   computeConsistencyScore,
   type ScoreBreakdown,
 } from '@/lib/ai/consistency-score';
+import { generateVisual } from '@/lib/visuals/generate';
+import { uploadVisualFromUrl } from '@/lib/visuals/storage';
 import { NextResponse } from 'next/server';
 import type { BrandBible, BrandPillar } from '@/lib/types/brand';
+
+// Bumped to 90s because we now (optionally) wait on fal.ai for the
+// best-draft visual before responding. Generation without visual still
+// finishes in ~10s; with visual usually ~15-20s end-to-end.
+export const maxDuration = 90;
 
 const VALID_PLATFORMS = ['instagram', 'facebook', 'linkedin', 'threads'] as const;
 type Platform = (typeof VALID_PLATFORMS)[number];
@@ -41,6 +48,13 @@ interface Draft {
   violations: string[];
   suggestions: string[];
   error?: string;
+  // Set on the highest-scoring draft per platform when FAL_API_KEY is
+  // configured. Lower-scoring drafts get a visual lazily via
+  // /api/visuals/generate when the user picks them.
+  visual?: {
+    url: string;
+    prompt: string;
+  };
 }
 
 interface PlatformResult {
@@ -262,9 +276,10 @@ export async function POST(request: Request) {
 
         // Persist only the highest-scoring non-error draft per platform so
         // the "Recent generations" list stays meaningful (not 3× cluttered).
-        const best = drafts
+        const sortedNonError = drafts
           .filter((d) => !d.error && d.content)
-          .sort((a, b) => b.consistencyScore - a.consistencyScore)[0];
+          .sort((a, b) => b.consistencyScore - a.consistencyScore);
+        const best = sortedNonError[0];
         if (best) {
           await db.insert(generatedPosts).values({
             projectId: project.id,
@@ -272,6 +287,39 @@ export async function POST(request: Request) {
             content: best.content,
             prompt,
           });
+        }
+
+        // Auto-generate a visual for the best draft only. Other drafts get
+        // visuals lazily if the user selects them. Cost-cap: $0.05 × N
+        // platforms instead of $0.05 × N × 3. Fail-soft: if fal.ai/Storage
+        // fails, the draft just ships without a visual.
+        if (best && process.env.FAL_API_KEY) {
+          try {
+            const visual = await generateVisual({
+              platform: p,
+              postContent: best.content,
+              brandBible: bible,
+            });
+            if (visual) {
+              const uploaded = await uploadVisualFromUrl(
+                visual.url,
+                user.id,
+                `draft-${p}-${Date.now()}`
+              );
+              const bestIdxInDrafts = drafts.indexOf(best);
+              if (bestIdxInDrafts >= 0) {
+                drafts[bestIdxInDrafts].visual = {
+                  url: uploaded?.publicUrl ?? visual.url,
+                  prompt: visual.prompt,
+                };
+              }
+            }
+          } catch (visualErr) {
+            console.error(
+              `[GENERATE POST] visual gen failed for ${p}`,
+              visualErr
+            );
+          }
         }
 
         return { platform: p, drafts };

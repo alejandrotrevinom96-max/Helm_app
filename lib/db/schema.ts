@@ -326,6 +326,14 @@ export const scheduledPosts = pgTable('scheduled_posts', {
   // dimension drift without re-evaluating posts.
   consistencyScore: integer('consistency_score'),
   scoreBreakdown: jsonb('score_breakdown').$type<ScoreBreakdown>(),
+  // Visual asset attached to the post. `visualUrl` points to a Supabase
+  // Storage public URL when persistence succeeded, or to fal.ai's
+  // transient CDN URL when it didn't. `visualType` differentiates plain
+  // images from carousel slides (carousel URLs are stored in a slides
+  // jsonb when implemented; for now the field is just for identification).
+  visualUrl: text('visual_url'),
+  visualPrompt: text('visual_prompt'),
+  visualType: text('visual_type'), // 'image' | 'carousel' | null
 });
 
 // ===== Type exports =====

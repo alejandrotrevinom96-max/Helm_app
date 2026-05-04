@@ -13,7 +13,9 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
+    "@fal-ai/client": "^1.10.0",
     "@octokit/rest": "^21.0.2",
+    "@sparticuz/chromium": "^148.0.0",
     "@supabase/ssr": "^0.5.2",
     "@supabase/supabase-js": "^2.46.1",
     "@vercel/analytics": "^2.0.1",
@@ -25,6 +27,7 @@
     "google-trends-api": "^4.9.2",
     "lucide-react": "^0.460.0",
     "next": "^15.5.15",
+    "playwright-core": "^1.59.1",
     "postgres": "^3.4.5",
     "react": "19.0.0-rc-66855b96-20241106",
     "react-dom": "19.0.0-rc-66855b96-20241106",
