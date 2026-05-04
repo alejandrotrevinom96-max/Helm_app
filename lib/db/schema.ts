@@ -10,6 +10,7 @@ import {
   boolean,
   unique,
 } from 'drizzle-orm/pg-core';
+import type { BrandBible } from '@/lib/types/brand';
 
 // ===== Users =====
 // Synced from Supabase auth.users via trigger
@@ -93,16 +94,13 @@ export const projects = pgTable(
     domain: text('domain'),
     isActive: boolean('is_active').default(true),
     createdAt: timestamp('created_at').defaultNow().notNull(),
-    // Brand context (for the marketing tab)
+    // Brand context for the marketing tab. Originally stored a flat shape
+    // from PR #2 (voice/tone/audience as plain strings). PR #10 expands it
+    // into a full BrandBible — see lib/types/brand.ts. The migration script
+    // (scripts/migrate-brand-context.ts) maps legacy rows into the new shape
+    // and preserves the original under `_legacyOriginal`.
     brandUrl: text('brand_url'),
-    brandContext: jsonb('brand_context').$type<{
-      voice?: string;
-      tone?: string[];
-      audience?: string;
-      keyPhrases?: string[];
-      productFocus?: string;
-      extractedAt?: string;
-    }>(),
+    brandContext: jsonb('brand_context').$type<BrandBible>(),
   },
   (t) => ({
     uniqueUserRepo: unique().on(t.userId, t.githubRepoId),

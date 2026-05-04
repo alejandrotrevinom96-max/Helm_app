@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
+import type { BrandBible } from '@/lib/types/brand';
 
 export const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY!,
@@ -9,6 +10,8 @@ const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
 // Use Opus for nuanced tasks (research synthesis, qualitative analysis)
 const OPUS_MODEL = 'claude-opus-4-7';
 
+// Legacy shape from PR #2. Kept for the deprecated /api/brand/analyze route
+// and any older callers that haven't migrated to the BrandBible path yet.
 export interface BrandContext {
   voice?: string;
   tone?: string[];
@@ -23,7 +26,7 @@ interface ProjectContext {
   description?: string;
   recentSignups?: number;
   recentFeatures?: string[];
-  brandContext?: BrandContext | null;
+  brandContext?: BrandBible | null;
   templateHint?: string | null;
 }
 
@@ -35,6 +38,146 @@ interface ProjectContext {
  * (when present) steers the structure of the post (e.g. milestone with
  * 3 bullets, hot take with strong opener + counter-arguments).
  */
+const PLATFORM_GUIDANCE: Record<
+  'instagram' | 'facebook' | 'linkedin' | 'threads',
+  string
+> = {
+  instagram:
+    'Visual-first, casual tone, 100-150 words, use 2-3 relevant emojis, end with a question or CTA. Use line breaks for readability.',
+  facebook:
+    'Conversational, 80-120 words, can be slightly longer. Personal storytelling works well.',
+  linkedin:
+    'Professional but human. 100-200 words. Lead with a hook. Use "I learned X" framing. No more than 1 emoji.',
+  threads:
+    'Punchy, 50-80 words max. Conversational, like a tweet but slightly longer. No hashtags.',
+};
+
+// Build the structured brand-aware system prompt. Each section is included
+// only when the bible has data for it — empty sections would drown the
+// real signal. The platform guidance is appended last so platform rules
+// never get truncated by a long brand section.
+function buildBrandPrompt(
+  bible: BrandBible | null | undefined,
+  platform: 'instagram' | 'facebook' | 'linkedin' | 'threads',
+  templateHint: string | null,
+  projectName: string,
+  projectDescription?: string
+): string {
+  const guidelines = PLATFORM_GUIDANCE[platform];
+
+  if (!bible || !bible.identity) {
+    // No bible: fall back to a minimal prompt. Still honest, still platform-aware.
+    return `You are a marketing assistant for "${projectName}".
+
+${projectDescription ? `Project description: ${projectDescription}` : ''}
+${templateHint ? `Template guidance: ${templateHint}` : ''}
+
+Platform: ${platform}
+Platform guidance: ${guidelines}
+
+Rules:
+- Write in first person as the founder
+- Be authentic, not salesy
+- No "Are you tired of..." openings
+- No empty hype or buzzwords
+- Output ONLY the post text, no preamble or explanation`;
+  }
+
+  const pillars = (bible.pillars ?? [])
+    .map((p) => `- ${p.name}: ${p.description}`)
+    .join('\n');
+  const preferred = (bible.vocabulary?.preferredTerms ?? [])
+    .map(
+      (t) =>
+        `- "${t.term}"${t.instead_of ? ` (instead of "${t.instead_of}")` : ''}`
+    )
+    .join('\n');
+  const banned = (bible.vocabulary?.bannedTerms ?? [])
+    .map((t) => `- "${t.term}"${t.reason ? ` — ${t.reason}` : ''}`)
+    .join('\n');
+  const nonNeg = (bible.nonNegotiables ?? []).map((n) => `- ${n}`).join('\n');
+  const pains = (bible.audience?.primary?.painPoints ?? [])
+    .slice(0, 3)
+    .map((p) => `- ${p.pain} (intensity ${p.intensity}/5)`)
+    .join('\n');
+  const valueProps = (bible.messaging?.valueProps ?? [])
+    .map((vp, i) => `${i + 1}. [${vp.pillar}] ${vp.proposition}`)
+    .join('\n');
+  const antiPos = (bible.messaging?.antiPositioning ?? [])
+    .map((a) => `- ${a}`)
+    .join('\n');
+
+  return `You are writing a social post for ${platform}. Follow the platform guidelines AND the brand bible STRICTLY.
+
+═══════ BRAND BIBLE ═══════
+
+IDENTITY: ${bible.identity?.name ?? projectName}
+TAGLINE: ${bible.identity?.tagline ?? ''}
+${bible.identity?.mission ? `MISSION: ${bible.identity.mission}` : ''}
+
+ARCHETYPE: ${bible.archetype?.primary ?? 'unknown'}
+${bible.archetype?.rationale ? `Why: ${bible.archetype.rationale}` : ''}
+
+PILLARS (these must show up in the post):
+${pillars || '- (none specified)'}
+
+VOICE CALIBRATION (0=left, 10=right):
+- Casual ↔ Formal: ${bible.voice?.formal ?? 5}/10
+- Playful ↔ Serious: ${bible.voice?.serious ?? 5}/10
+- Reserved ↔ Bold: ${bible.voice?.bold ?? 5}/10
+- Traditional ↔ Innovative: ${bible.voice?.innovative ?? 5}/10
+- Exclusive ↔ Approachable: ${bible.voice?.approachable ?? 5}/10
+
+VOCABULARY:
+Preferred terms (use these):
+${preferred || '- (none specified)'}
+
+BANNED TERMS (NEVER use):
+${banned || '- (none specified)'}
+
+EMOJI POLICY: ${bible.vocabulary?.emojiPolicy ?? 'tasteful'}
+HASHTAG POLICY: ${bible.vocabulary?.hashtagPolicy ?? 'minimal'}
+
+NON-NEGOTIABLES (NEVER violate):
+${nonNeg || '- (none specified)'}
+
+═══════ AUDIENCE ═══════
+
+PRIMARY: ${bible.audience?.primary?.description ?? '(unspecified)'}
+
+THEY FEEL THESE PAINS:
+${pains || '- (none specified)'}
+
+THEY ARE NOT: ${bible.audience?.antiPersona?.description ?? '(unspecified)'}
+
+═══════ MESSAGING ═══════
+
+VALUE PROPS RANKED:
+${valueProps || '- (none specified)'}
+
+ANTI-POSITIONING (we are NOT):
+${antiPos || '- (none specified)'}
+
+═══════ PLATFORM ═══════
+
+${platform.toUpperCase()} GUIDELINES:
+${guidelines}
+${templateHint ? `\nTemplate guidance: ${templateHint}` : ''}
+
+═══════ TASK ═══════
+
+Write ONE post for ${platform} based on the user's prompt. The post MUST:
+1. Sound like the brand archetype (${bible.archetype?.primary ?? 'unknown'})
+2. Embody at least 1-2 of the pillars
+3. Match the voice calibration EXACTLY
+4. Speak to a specific audience pain (where appropriate)
+5. Use NONE of the banned terms
+6. Respect the emoji and hashtag policies
+7. Not violate any non-negotiables
+
+Output ONLY the post text. No preamble, no quotes, no markdown fences.`;
+}
+
 export async function generatePost(params: {
   platform: 'instagram' | 'facebook' | 'linkedin' | 'threads';
   prompt: string;
@@ -42,64 +185,17 @@ export async function generatePost(params: {
 }): Promise<string> {
   const { platform, prompt, context } = params;
 
-  const platformGuidance = {
-    instagram:
-      'Visual-first, casual tone, 100-150 words, use 2-3 relevant emojis, end with a question or CTA. Use line breaks for readability.',
-    facebook:
-      'Conversational, 80-120 words, can be slightly longer. Personal storytelling works well.',
-    linkedin:
-      'Professional but human. 100-200 words. Lead with a hook. Use "I learned X" framing. No more than 1 emoji.',
-    threads:
-      'Punchy, 50-80 words max. Conversational, like a tweet but slightly longer. No hashtags.',
-  };
-
-  const brandSection = context.brandContext
-    ? [
-        '',
-        'Brand voice (match this exactly):',
-        context.brandContext.voice && `- Voice: ${context.brandContext.voice}`,
-        context.brandContext.tone?.length &&
-          `- Tone: ${context.brandContext.tone.join(', ')}`,
-        context.brandContext.audience &&
-          `- Audience: ${context.brandContext.audience}`,
-        context.brandContext.keyPhrases?.length &&
-          `- Phrases the brand uses: ${context.brandContext.keyPhrases.join(', ')}`,
-        context.brandContext.productFocus &&
-          `- Product focus: ${context.brandContext.productFocus}`,
-      ]
-        .filter(Boolean)
-        .join('\n')
-    : '';
-
-  const templateSection = context.templateHint
-    ? `\nTemplate guidance: ${context.templateHint}`
-    : '';
-
-  // Hype-word ban only applies when the brand tone is restrained.
-  const tone = context.brandContext?.tone ?? [];
-  const allowsHype = tone.includes('playful') || tone.includes('bold');
-
-  const systemPrompt = `You are a marketing assistant for "${context.name}".
-
-Project context:
-${context.description ? `- Description: ${context.description}` : ''}
-${context.recentSignups ? `- Recent signups: ${context.recentSignups}` : ''}
-${context.recentFeatures?.length ? `- Recent features: ${context.recentFeatures.join(', ')}` : ''}
-${brandSection}
-
-Platform: ${platform}
-Platform guidance: ${platformGuidance[platform]}
-${templateSection}
-
-Rules:
-- Write in first person as the founder
-- Be authentic, not salesy
-- No "Are you tired of..." openings${allowsHype ? '' : '\n- No empty hype or buzzwords'}
-- Output ONLY the post text, no preamble or explanation`;
+  const systemPrompt = buildBrandPrompt(
+    context.brandContext,
+    platform,
+    context.templateHint ?? null,
+    context.name,
+    context.description
+  );
 
   const response = await anthropic.messages.create({
     model: HAIKU_MODEL,
-    max_tokens: 600,
+    max_tokens: 1500,
     system: systemPrompt,
     messages: [{ role: 'user', content: prompt }],
   });

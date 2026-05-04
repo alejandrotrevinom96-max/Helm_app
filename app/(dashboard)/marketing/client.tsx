@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import type { Project, GeneratedPost, ScheduledPost } from '@/lib/db/schema';
-import { BrandCard, type BrandContext } from './brand-card';
+import { BrandBibleCard } from './brand-bible-card';
+import type { BrandBible } from '@/lib/types/brand';
 import { templates, categories } from '@/lib/marketing/templates';
 import { formatScheduledDate } from '@/lib/utils';
 import { GlassCard } from '@/components/ui/glass-card';
@@ -289,10 +290,14 @@ export function MarketingClient({
         </p>
       </div>
 
-      <BrandCard
-        projectId={project.id}
-        initialContext={(project.brandContext as BrandContext | null) ?? null}
-        initialUrl={project.brandUrl}
+      <BrandBibleCard
+        project={{
+          id: project.id,
+          name: project.name,
+          brandUrl: project.brandUrl,
+          brandContext:
+            (project.brandContext as BrandBible | null) ?? null,
+        }}
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-4">

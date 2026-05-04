@@ -140,11 +140,16 @@ export async function POST(request: Request) {
     extractedAt: new Date().toISOString(),
   };
 
+  // DEPRECATED: this legacy endpoint stored a flat brand context shape
+  // (PR #2). PR #10 supersedes it with /api/brand/discover, which produces
+  // the full BrandBible. We keep this endpoint working for any inflight
+  // callers; the cast bypasses the BrandBible type because the migration
+  // script (scripts/migrate-brand-context.ts) takes care of upgrading rows.
   await db
     .update(projects)
     .set({
       brandUrl: url || null,
-      brandContext,
+      brandContext: brandContext as unknown as never,
     })
     .where(eq(projects.id, projectId));
 

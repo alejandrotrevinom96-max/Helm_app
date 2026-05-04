@@ -2,7 +2,8 @@ import { createClient } from '@/lib/supabase/server';
 import { db } from '@/lib/db';
 import { projects, generatedPosts } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
-import { generatePost, type BrandContext } from '@/lib/ai/claude';
+import { generatePost } from '@/lib/ai/claude';
+import type { BrandBible } from '@/lib/types/brand';
 import { getTemplateById } from '@/lib/marketing/templates';
 import { NextResponse } from 'next/server';
 
@@ -61,7 +62,7 @@ export async function POST(request: Request) {
   if (!project) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   const template = getTemplateById(templateId);
-  const brandContext = (project.brandContext as BrandContext | null) ?? null;
+  const brandContext = (project.brandContext as BrandBible | null) ?? null;
 
   // Generate one post per platform in parallel. Each settles independently
   // so a single platform failure doesn't poison the rest.
