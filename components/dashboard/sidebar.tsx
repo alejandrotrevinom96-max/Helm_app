@@ -11,6 +11,7 @@ const navItems = [
   { href: '/analytics', label: 'Analytics', icon: AnalyticsIcon },
   { href: '/marketing', label: 'Marketing', icon: MarketingIcon },
   { href: '/research', label: 'Research', icon: ResearchIcon },
+  { href: '/compass', label: 'Compass', icon: CompassIcon },
   { href: '/validate', label: 'Validate', icon: ValidateIcon },
   { href: '/integrations', label: 'Integrations', icon: IntegrationsIcon },
   { href: '/settings', label: 'Settings', icon: SettingsIcon },
@@ -262,6 +263,15 @@ function IntegrationsIcon() {
   return (
     <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
       <path d="M14 5l7 7m0 0l-7 7m7-7H3" />
+    </svg>
+  );
+}
+
+function CompassIcon() {
+  return (
+    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+      <circle cx="12" cy="12" r="10" />
+      <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" />
     </svg>
   );
 }

@@ -364,6 +364,36 @@ export const brandQuotes = pgTable('brand_quotes', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
+// ===== Compass Readings =====
+// PR #14 — VC-style scorecard 0-100 across 5 dimensions. Each row is a
+// snapshot computed at a moment in time. We persist every recompute so
+// founders can see their score evolve.
+export const compassReadings = pgTable('compass_readings', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  projectId: uuid('project_id')
+    .notNull()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  totalScore: integer('total_score').notNull(),
+  // 'strong' | 'clear' | 'steady' | 'uncertain' | 'off-course'
+  band: text('band').notNull(),
+  // Full dimension breakdown — typed loosely here so the row is portable;
+  // strict types live in lib/types/compass.ts.
+  dimensions: jsonb('dimensions').notNull().$type<unknown>(),
+  redFlags: jsonb('red_flags').$type<unknown>(),
+  bullCase: jsonb('bull_case').$type<unknown>(),
+  bearCase: jsonb('bear_case').$type<unknown>(),
+  dueDiligenceQuestion: text('due_diligence_question'),
+  recommendations: jsonb('recommendations').$type<unknown>(),
+  // Snapshot of the form answers so we can pre-fill the wizard next time.
+  formData: jsonb('form_data').$type<Record<string, unknown>>(),
+  computedBy: text('computed_by').notNull().default('manual'),
+  dataQuality: integer('data_quality').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
 // ===== Type exports =====
 export type User = typeof users.$inferSelect;
 export type Project = typeof projects.$inferSelect;
@@ -376,3 +406,4 @@ export type WaitlistResponse = typeof waitlistResponses.$inferSelect;
 export type ScheduledPost = typeof scheduledPosts.$inferSelect;
 export type ResearchConfig = typeof researchConfig.$inferSelect;
 export type BrandQuote = typeof brandQuotes.$inferSelect;
+export type CompassReadingRow = typeof compassReadings.$inferSelect;
