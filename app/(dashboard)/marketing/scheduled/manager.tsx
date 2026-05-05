@@ -17,7 +17,7 @@ interface Post {
   performanceNote: string | null;
 }
 
-const PLATFORMS = ['instagram', 'facebook', 'linkedin', 'threads'];
+const PLATFORMS = ['instagram', 'facebook', 'linkedin', 'threads', 'reddit'];
 
 export function ScheduledManager({ posts }: { posts: Post[] }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());

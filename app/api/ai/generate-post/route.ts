@@ -18,7 +18,13 @@ import type { BrandBible, BrandPillar } from '@/lib/types/brand';
 // finishes in ~10s; with visual usually ~15-20s end-to-end.
 export const maxDuration = 90;
 
-const VALID_PLATFORMS = ['instagram', 'facebook', 'linkedin', 'threads'] as const;
+const VALID_PLATFORMS = [
+  'instagram',
+  'facebook',
+  'linkedin',
+  'threads',
+  'reddit',
+] as const;
 type Platform = (typeof VALID_PLATFORMS)[number];
 const VALID_PLATFORM_SET = new Set<Platform>(VALID_PLATFORMS);
 
@@ -37,6 +43,8 @@ const PLATFORM_GUIDANCE: Record<Platform, string> = {
     'Professional but human. 100-200 words. Lead with a hook. Use "I learned X" framing. No more than 1 emoji.',
   threads:
     'Punchy, 50-80 words max. Conversational, like a tweet but slightly longer. No hashtags.',
+  reddit:
+    'Humble, story-driven, conversational. 200-1500 chars. Hook (1-2 lines) → context → specific story with numbers/dates → lesson → genuine question to community. NO emojis (except ironic 🤡). NO hashtags. NO buzzwords like "disrupting" or "game-changer". Mention your project as context, not as a pitch. Match subreddit tone if user names one (r/SaaS, r/SideProject, r/IndieHackers, r/Entrepreneur).',
 };
 
 interface Draft {

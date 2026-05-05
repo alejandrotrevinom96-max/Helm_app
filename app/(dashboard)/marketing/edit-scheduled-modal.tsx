@@ -132,6 +132,7 @@ export function EditScheduledModal({
               <option value="facebook">Facebook</option>
               <option value="linkedin">LinkedIn</option>
               <option value="threads">Threads</option>
+              <option value="reddit">Reddit</option>
             </select>
           </div>
 

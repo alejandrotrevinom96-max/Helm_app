@@ -11,7 +11,7 @@ if (process.env.FAL_API_KEY) {
 export type AspectRatio = 'square' | 'portrait' | 'landscape';
 
 export interface VisualPrompt {
-  platform: 'instagram' | 'facebook' | 'linkedin' | 'threads';
+  platform: 'instagram' | 'facebook' | 'linkedin' | 'threads' | 'reddit';
   postContent: string;
   brandBible: BrandBible | null;
   style?: ImageStyle;
@@ -55,6 +55,9 @@ const PLATFORM_DEFAULT_ASPECT: Record<
   facebook: 'landscape',
   linkedin: 'landscape',
   threads: 'square',
+  // Reddit posts most often render in feed at landscape; old.reddit
+  // and image-heavy subreddits both handle 1.91:1 well.
+  reddit: 'landscape',
 };
 
 export async function generateVisual(

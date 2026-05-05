@@ -39,7 +39,7 @@ interface ProjectContext {
  * 3 bullets, hot take with strong opener + counter-arguments).
  */
 const PLATFORM_GUIDANCE: Record<
-  'instagram' | 'facebook' | 'linkedin' | 'threads',
+  'instagram' | 'facebook' | 'linkedin' | 'threads' | 'reddit',
   string
 > = {
   instagram:
@@ -50,6 +50,12 @@ const PLATFORM_GUIDANCE: Record<
     'Professional but human. 100-200 words. Lead with a hook. Use "I learned X" framing. No more than 1 emoji.',
   threads:
     'Punchy, 50-80 words max. Conversational, like a tweet but slightly longer. No hashtags.',
+  // Reddit hates self-promo. Posts must read peer-to-peer, not brand-
+  // to-audience. Subreddit culture varies (r/SaaS is technical, r/SideProject
+  // is show-and-tell), but the universal rules: no emojis except ironic,
+  // no marketing buzzwords, story-driven hook, end with a question.
+  reddit:
+    'Humble, story-driven, conversational. 200-1500 chars. Hook (1-2 lines) → context → specific story with numbers/dates → lesson → genuine question to community. NO emojis (except ironic 🤡). NO hashtags. NO buzzwords like "disrupting" or "game-changer". Mention your project as context, not as a pitch. Match subreddit tone if user names one (r/SaaS, r/SideProject, r/IndieHackers, r/Entrepreneur).',
 };
 
 // Build the structured brand-aware system prompt. Each section is included
@@ -58,7 +64,7 @@ const PLATFORM_GUIDANCE: Record<
 // never get truncated by a long brand section.
 function buildBrandPrompt(
   bible: BrandBible | null | undefined,
-  platform: 'instagram' | 'facebook' | 'linkedin' | 'threads',
+  platform: 'instagram' | 'facebook' | 'linkedin' | 'threads' | 'reddit',
   templateHint: string | null,
   projectName: string,
   projectDescription?: string
@@ -179,7 +185,7 @@ Output ONLY the post text. No preamble, no quotes, no markdown fences.`;
 }
 
 export async function generatePost(params: {
-  platform: 'instagram' | 'facebook' | 'linkedin' | 'threads';
+  platform: 'instagram' | 'facebook' | 'linkedin' | 'threads' | 'reddit';
   prompt: string;
   context: ProjectContext;
 }): Promise<string> {

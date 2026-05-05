@@ -4,7 +4,13 @@ import { projects, scheduledPosts } from '@/lib/db/schema';
 import { eq, and, asc, inArray } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 
-const VALID_PLATFORMS = new Set(['instagram', 'facebook', 'linkedin', 'threads']);
+const VALID_PLATFORMS = new Set([
+  'instagram',
+  'facebook',
+  'linkedin',
+  'threads',
+  'reddit',
+]);
 
 export async function POST(request: Request) {
   const supabase = await createClient();

@@ -5,7 +5,7 @@ export interface PostTemplate {
   description: string;
   hook: string; // Pre-written, editable
   systemHint: string; // Injected into Claude's system prompt
-  bestFor: Array<'instagram' | 'facebook' | 'linkedin' | 'threads'>;
+  bestFor: Array<'instagram' | 'facebook' | 'linkedin' | 'threads' | 'reddit'>;
 }
 
 export const templates: PostTemplate[] = [

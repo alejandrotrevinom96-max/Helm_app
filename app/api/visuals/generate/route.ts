@@ -20,6 +20,7 @@ const VALID_PLATFORMS = new Set([
   'facebook',
   'linkedin',
   'threads',
+  'reddit',
 ]);
 const VALID_ASPECT: Set<AspectRatio> = new Set<AspectRatio>([
   'square',
@@ -90,7 +91,7 @@ export async function POST(request: Request) {
   }
 
   const result = await generateVisual({
-    platform: platform as 'instagram' | 'facebook' | 'linkedin' | 'threads',
+    platform: platform as 'instagram' | 'facebook' | 'linkedin' | 'threads' | 'reddit',
     postContent,
     brandBible: (project.brandContext as BrandBible | null) ?? null,
     style,

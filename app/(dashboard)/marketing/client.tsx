@@ -20,6 +20,7 @@ const PLATFORMS = [
   { id: 'facebook', label: 'Facebook', color: '#0866ff' },
   { id: 'linkedin', label: 'LinkedIn', color: '#0a66c2' },
   { id: 'threads', label: 'Threads', color: '#666' },
+  { id: 'reddit', label: 'Reddit', color: '#FF4500' },
 ] as const;
 
 type Platform = (typeof PLATFORMS)[number]['id'];
@@ -55,6 +56,10 @@ const PLATFORM_CHAR_LIMIT: Record<Platform, number | null> = {
   instagram: 2200,
   facebook: 5000,
   linkedin: 3000,
+  // Reddit's hard ceiling is 40k for body text but anything past ~1500
+  // typically buries the lede. We warn at 1500 — same UX pattern as
+  // threads (warn before max so the user gets to edit, not hard-block).
+  reddit: 1500,
 };
 
 // Default-select the highest-consistency-score draft. Returns 0 when the

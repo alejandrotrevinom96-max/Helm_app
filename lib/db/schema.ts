@@ -137,7 +137,7 @@ export const generatedPosts = pgTable('generated_posts', {
   projectId: uuid('project_id')
     .notNull()
     .references(() => projects.id, { onDelete: 'cascade' }),
-  platform: text('platform').notNull(), // 'instagram' | 'facebook' | 'linkedin' | 'threads'
+  platform: text('platform').notNull(), // 'instagram' | 'facebook' | 'linkedin' | 'threads' | 'reddit'
   content: text('content').notNull(),
   prompt: text('prompt'), // What the user asked for
   status: text('status').notNull().default('draft'), // 'draft' | 'copied' | 'published'
