@@ -20,14 +20,14 @@ const FEATURES: Feature[] = [
     num: '02',
     title: 'Marketing',
     headline: 'Brand-aware content that sounds like you',
-    body: 'Multi-draft posts scored 0-100 against your brand bible. 12 archetypes, voice spectrum, quote vault. Schedule to Instagram, Facebook, LinkedIn, Threads. Drift detection alerts when your brand starts wandering.',
+    body: 'Multi-draft posts scored 0-100 against your brand bible. 12 archetypes, voice spectrum, quote vault. Schedule to Instagram, Facebook, LinkedIn, Threads, and Reddit — each one gets brand-tuned copy. Drift detection alerts when your brand starts wandering.',
     tags: ['brand-bible', 'consistency-score', 'quote-vault'],
   },
   {
     num: '03',
     title: 'Research',
     headline: 'Find pain. Find users.',
-    body: 'Scans Reddit, IndieHackers, Hacker News, and Product Hunt for signals matching your niche. Auto-configures sources based on your brand bible. Get pinged when someone describes the problem you solve.',
+    body: 'Scans Reddit, Hacker News, Indie Hackers, and Google Trends for signals matching your niche. Auto-configures sources based on your brand bible. Get pinged when someone describes the problem you solve.',
     tags: ['reddit-api', 'hn-api', 'opus-synthesis'],
   },
   {
