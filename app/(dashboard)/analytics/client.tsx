@@ -78,14 +78,19 @@ export function AnalyticsClient({
   const visitors = aggregate('visitors');
   const spend = aggregate('spend');
 
-  // PR #19: each Supabase metric is now a separate snapshot per
-  // tracked table (e.g. auth.users / profiles / waitlist). Build the
-  // widget list dynamically: one card per metric the user actually
-  // has data for. The legacy 'signups' metric stays in the list so
-  // pre-PR-19 snapshots still render until the user runs Sync now.
+  // PR #19: each Supabase metric is now a separate snapshot per tracked
+  // table (e.g. auth.users / profiles / waitlist). The mini-PR after
+  // hides the legacy `signups` metric — those rows remain in BD from
+  // pre-PR-19 syncs but they're meaningless now (the table they came
+  // from isn't tracked). Filter them out at the UI layer so users don't
+  // see a phantom "Signups (legacy)" widget. Persistent cleanup is
+  // available via scripts/cleanup-old-supabase-snapshots.ts.
+  const LEGACY_SUPABASE_METRICS = new Set(['signups']);
   const supabaseMetricsSet = new Set<string>();
   for (const s of snapshots) {
-    if (s.source === 'supabase') supabaseMetricsSet.add(s.metric);
+    if (s.source !== 'supabase') continue;
+    if (LEGACY_SUPABASE_METRICS.has(s.metric)) continue;
+    supabaseMetricsSet.add(s.metric);
   }
   const supabaseMetrics = Array.from(supabaseMetricsSet).sort();
   // For CAC we want total Supabase rows. If the user picked multiple
@@ -100,7 +105,6 @@ export function AnalyticsClient({
 
   const labelForMetric = (metric: string): string => {
     if (metric === 'auth.users') return 'Auth users';
-    if (metric === 'signups') return 'Signups (legacy)';
     return metric.charAt(0).toUpperCase() + metric.slice(1);
   };
 
