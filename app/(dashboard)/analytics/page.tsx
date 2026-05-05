@@ -8,7 +8,7 @@ import { getActiveProject } from '@/lib/active-project';
 import { AnalyticsClient } from './client';
 import { getDashboardData } from '@/lib/analytics/dashboard';
 import { GlassCard } from '@/components/ui/glass-card';
-import { Sparkline } from '@/components/ui/sparkline';
+import { HelmActivitySection } from './helm-activity-section';
 import type { MetricSnapshot } from '@/lib/db/schema';
 
 type Scope = 'project' | 'global';
@@ -144,7 +144,9 @@ export default async function AnalyticsPage({
           <h1 className="font-display text-display-lg font-light tracking-tight mb-2">
             Analytics
           </h1>
-          <p className="text-text-2">Your business at a glance.</p>
+          <p className="text-text-2">
+            Track your real metrics + your Helm workspace activity.
+          </p>
         </div>
 
         {/* Scope toggle: simple two-button segmented control. We use
@@ -177,103 +179,22 @@ export default async function AnalyticsPage({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-        <GlassCard className="p-5">
-          <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2">
-            Waitlist signups
+      {/*
+        Section 1 — YOUR BUSINESS. Real product metrics from connected
+        integrations (Vercel visitors, Supabase tables, Meta spend).
+        Always visible: this is the answer the user usually wants.
+      */}
+      {(scope === 'project' ? !!project : snapshots.length > 0) ? (
+        <section>
+          <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-accent mb-1">
+            Your business
           </div>
-          <div className="font-display text-3xl font-light tracking-tight mb-2">
-            {dashboard.totalSignups.value}
-          </div>
-          <div className="text-accent">
-            <Sparkline
-              data={dashboard.totalSignups.sparkline}
-              width={100}
-              height={24}
-              ariaLabel="signups trend"
-            />
-          </div>
-          <div className="text-[10px] text-text-3 mt-1">
-            all-time · sparkline 14d
-          </div>
-        </GlassCard>
-
-        <GlassCard className="p-5">
-          <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2">
-            Posts published
-          </div>
-          <div className="font-display text-3xl font-light tracking-tight mb-2">
-            {dashboard.postsPublished.value}
-          </div>
-          <div className="text-accent">
-            <Sparkline
-              data={dashboard.postsPublished.sparkline}
-              width={100}
-              height={24}
-              ariaLabel="posts trend"
-            />
-          </div>
-          <div className="text-[10px] text-text-3 mt-1">last 30 days</div>
-        </GlassCard>
-
-        <GlassCard className="p-5">
-          <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2">
-            Research findings
-          </div>
-          <div className="font-display text-3xl font-light tracking-tight mb-2">
-            {dashboard.researchInsights.value}
-          </div>
-          <div className="text-accent">
-            <Sparkline
-              data={dashboard.researchInsights.sparkline}
-              width={100}
-              height={24}
-              ariaLabel="findings trend"
-            />
-          </div>
-          <div className="text-[10px] text-text-3 mt-1">
-            all-time · sparkline 14d
-          </div>
-        </GlassCard>
-
-        <GlassCard className="p-5">
-          <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2">
-            Avg responses per page
-          </div>
-          <div className="font-display text-3xl font-light tracking-tight mb-2">
-            {dashboard.validateResponseRate.value}
-          </div>
-          <div className="text-[10px] text-text-3 mt-2">
-            {dashboard.validateResponseRate.total} total ·{' '}
-            {dashboard.validateResponseRate.activePages} pages
-          </div>
-        </GlassCard>
-      </div>
-
-      {allZero && (
-        <GlassCard className="p-8 text-center mb-8">
-          <p className="text-text-2 mb-4">
-            No data yet. Start by creating a waitlist or scheduling a post.
+          <h2 className="font-display text-2xl font-light mb-1">
+            What your product is doing
+          </h2>
+          <p className="text-sm text-text-2 mb-6">
+            {projectScopeLabel} · live data from your connected sources.
           </p>
-          <div className="flex gap-4 justify-center text-sm">
-            <Link href="/marketing" className="text-accent hover:underline">
-              → Marketing
-            </Link>
-            <Link href="/validate" className="text-accent hover:underline">
-              → Validate
-            </Link>
-            <Link href="/research" className="text-accent hover:underline">
-              → Research
-            </Link>
-          </div>
-        </GlassCard>
-      )}
-
-      {(scope === 'project' ? !!project : snapshots.length > 0) && (
-        <div className="border-t border-border pt-8">
-          <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-3">
-            {projectScopeLabel}
-          </div>
           <AnalyticsClient
             project={
               scope === 'project' && project
@@ -289,7 +210,51 @@ export default async function AnalyticsPage({
             embedded
             scope={scope}
           />
-        </div>
+        </section>
+      ) : (
+        <GlassCard className="p-8 text-center mb-8">
+          <p className="text-text-2 mb-2">
+            No connected sources yet.
+          </p>
+          <p className="text-xs text-text-3 mb-4">
+            Map a Supabase or Vercel project in Integrations to see your real metrics here.
+          </p>
+          <Link href="/integrations" className="text-accent hover:underline text-sm">
+            Open Integrations →
+          </Link>
+        </GlassCard>
+      )}
+
+      {/*
+        Section 2 — HELM ACTIVITY (collapsible, default closed).
+        Helm-internal counters: waitlists you've created here, posts
+        scheduled, research findings stored, etc. Useful for debugging
+        your workspace but rarely the primary signal.
+      */}
+      <HelmActivitySection
+        totalSignups={dashboard.totalSignups}
+        postsPublished={dashboard.postsPublished}
+        researchInsights={dashboard.researchInsights}
+        validateResponseRate={dashboard.validateResponseRate}
+      />
+
+      {allZero && (scope === 'project' ? !project : snapshots.length === 0) && (
+        <GlassCard className="p-8 text-center mt-8">
+          <p className="text-text-2 mb-4">
+            No Helm activity yet either. Start by creating a waitlist or scheduling a post.
+          </p>
+          <div className="flex gap-4 justify-center text-sm">
+            <Link href="/marketing" className="text-accent hover:underline">
+              → Marketing
+            </Link>
+            <Link href="/validate" className="text-accent hover:underline">
+              → Validate
+            </Link>
+            <Link href="/research" className="text-accent hover:underline">
+              → Research
+            </Link>
+          </div>
+        </GlassCard>
       )}
     </div>
   );
