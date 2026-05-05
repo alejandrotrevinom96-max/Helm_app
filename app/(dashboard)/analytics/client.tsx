@@ -24,8 +24,9 @@ export function AnalyticsClient({
   lastSyncAt,
   hasMappings,
   embedded = false,
+  scope = 'project',
 }: {
-  project: Project;
+  project: Project | { id: string; name: string };
   snapshots: MetricSnapshot[];
   hasVercel: boolean;
   hasSupabase: boolean;
@@ -36,18 +37,47 @@ export function AnalyticsClient({
   // outer padding (the parent already supplies them) so we don't end up with
   // two "Analytics" headings stacked.
   embedded?: boolean;
+  // 'project' = single project filter (snapshots are pre-filtered server-side).
+  // 'global'  = snapshots span every project; we sum the latest value of each
+  // (project, source, metric) tuple to get the cross-project total.
+  scope?: 'project' | 'global';
 }) {
   const router = useRouter();
 
-  const visitors = snapshots
-    .filter((s) => s.metric === 'visitors')
-    .reduce((sum, s) => sum + Number(s.value), 0);
-  const signups = snapshots
-    .filter((s) => s.metric === 'signups')
-    .reduce((sum, s) => sum + Number(s.value), 0);
-  const spend = snapshots
-    .filter((s) => s.metric === 'spend')
-    .reduce((sum, s) => sum + Number(s.value), 0);
+  // Each metric snapshot stores the ABSOLUTE value at sync time
+  // (e.g. "auth users count = 7"), not a delta. Pre-PR-18 the dashboard
+  // summed every snapshot in the 30-day window, so a project with 7 real
+  // users that had been synced 5 times displayed 35 and grew on every
+  // sync.
+  //
+  // Project scope: snapshots arrive pre-ordered by date desc, so the first
+  // row per metric is the most recent.
+  // Global scope: snapshots include every project. We need the latest per
+  // (projectId, source, metric) and then sum across projects so a metric
+  // like "Visitors" totals up correctly without double-counting older
+  // dailies of the same project.
+  const aggregate = (metric: string): number => {
+    if (scope === 'project') {
+      const row = snapshots.find((s) => s.metric === metric);
+      return row ? Number(row.value) : 0;
+    }
+    // Global: dedup by (projectId, source) within metric. snapshots are
+    // already sorted by date desc, so the first hit per key is latest.
+    const latestPerKey = new Map<string, number>();
+    for (const s of snapshots) {
+      if (s.metric !== metric) continue;
+      const key = `${s.projectId}:${s.source}`;
+      if (!latestPerKey.has(key)) {
+        latestPerKey.set(key, Number(s.value));
+      }
+    }
+    let total = 0;
+    for (const v of latestPerKey.values()) total += v;
+    return total;
+  };
+  const visitors = aggregate('visitors');
+  const signups = aggregate('signups');
+  const spend = aggregate('spend');
   const cac = signups > 0 ? spend / signups : 0;
 
   const noData = snapshots.length === 0;
@@ -123,7 +153,7 @@ export function AnalyticsClient({
         <KPI label="Ad Spend" value={spend > 0 ? formatCurrency(spend) : '—'} source="meta" />
       </div>
 
-      {noData && !hasMappings && (
+      {noData && !hasMappings && scope === 'project' && (
         <GlassCard className="p-8 md:p-12 text-center">
           <SetupIllustration className="w-32 mx-auto mb-6 opacity-80" />
           <h2 className="font-display text-2xl md:text-3xl font-light mb-3">
@@ -139,6 +169,18 @@ export function AnalyticsClient({
               Map projects →
             </Button>
           </div>
+        </GlassCard>
+      )}
+      {noData && scope === 'global' && (
+        <GlassCard className="p-8 md:p-12 text-center">
+          <p className="font-display text-2xl mb-2">No data across projects</p>
+          <p className="text-text-2 text-sm mb-6 max-w-md mx-auto">
+            None of your projects have synced metrics yet. Switch to a single
+            project view to map integrations, or visit Integrations.
+          </p>
+          <Button onClick={() => router.push('/integrations')}>
+            Open Integrations →
+          </Button>
         </GlassCard>
       )}
 

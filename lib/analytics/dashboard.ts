@@ -41,21 +41,32 @@ function dailyToSparkline(
   return result;
 }
 
-// Aggregated KPIs across every project the user owns. Used both by the
-// /analytics page (server-rendered) and the /api/analytics/dashboard route
-// (for any client-side polling/refresh in the future).
-export async function getDashboardData(): Promise<
-  DashboardData | { error: string; status: number }
-> {
+// Aggregated KPIs across the user's projects. PR #18 added scope support:
+//   - scope='global' (default): query every project the user owns, like
+//     before. The /analytics page passes this when its toggle is "All
+//     projects".
+//   - scope='project': filter to a single projectId. The /analytics page
+//     passes this when the toggle is "This project".
+// The /api/analytics/dashboard route still calls without args (= global).
+export async function getDashboardData(
+  options: { scope?: 'global' | 'project'; projectId?: string } = {}
+): Promise<DashboardData | { error: string; status: number }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: 'Unauthorized', status: 401 };
 
+  // Decide which projects to aggregate over. In scope=project we still
+  // verify ownership by joining the user's project list.
   const userProjects = await db
     .select({ id: projects.id })
     .from(projects)
     .where(eq(projects.userId, user.id));
-  const projectIds = userProjects.map((p) => p.id);
+  const allProjectIds = userProjects.map((p) => p.id);
+
+  const projectIds =
+    options.scope === 'project' && options.projectId
+      ? allProjectIds.filter((id) => id === options.projectId)
+      : allProjectIds;
 
   const empty: DashboardData = {
     totalSignups: { value: 0, sparkline: [] },
