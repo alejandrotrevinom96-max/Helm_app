@@ -28,6 +28,7 @@ export default async function IntegrationsPage() {
         vercelProjectId: p.vercelProjectId,
         vercelTeamId: p.vercelTeamId,
         supabaseProjectRef: p.supabaseProjectRef,
+        supabaseTables: (p.supabaseTables as { tableName: string; metricLabel: string }[] | null) ?? null,
         metaAdAccountId: p.metaAdAccountId,
       }))}
     />

@@ -76,9 +76,33 @@ export function AnalyticsClient({
     return total;
   };
   const visitors = aggregate('visitors');
-  const signups = aggregate('signups');
   const spend = aggregate('spend');
+
+  // PR #19: each Supabase metric is now a separate snapshot per
+  // tracked table (e.g. auth.users / profiles / waitlist). Build the
+  // widget list dynamically: one card per metric the user actually
+  // has data for. The legacy 'signups' metric stays in the list so
+  // pre-PR-19 snapshots still render until the user runs Sync now.
+  const supabaseMetricsSet = new Set<string>();
+  for (const s of snapshots) {
+    if (s.source === 'supabase') supabaseMetricsSet.add(s.metric);
+  }
+  const supabaseMetrics = Array.from(supabaseMetricsSet).sort();
+  // For CAC we want total Supabase rows. If the user picked multiple
+  // tables we sum them, which gives a fuzzy-but-useful "total tracked"
+  // denominator. This is a best-effort number — CAC against a custom
+  // table count isn't formally correct but it's better than 0.
+  const signups = supabaseMetrics.reduce(
+    (sum, m) => sum + aggregate(m),
+    0
+  );
   const cac = signups > 0 ? spend / signups : 0;
+
+  const labelForMetric = (metric: string): string => {
+    if (metric === 'auth.users') return 'Auth users';
+    if (metric === 'signups') return 'Signups (legacy)';
+    return metric.charAt(0).toUpperCase() + metric.slice(1);
+  };
 
   const noData = snapshots.length === 0;
   const missingIntegrations = [
@@ -148,7 +172,22 @@ export function AnalyticsClient({
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-6">
         <KPI label="Visitors" value={formatNumber(visitors)} source="vercel" />
-        <KPI label="Signups" value={formatNumber(signups)} source="supabase" />
+        {/* One card per tracked Supabase table. Most projects pick a
+            single table so this typically renders 1 KPI; users with both
+            profiles + waitlist will see 2. Falls back to a neutral
+            "Signups: 0" placeholder when no Supabase metrics exist yet. */}
+        {supabaseMetrics.length === 0 ? (
+          <KPI label="Signups" value="0" source="supabase" />
+        ) : (
+          supabaseMetrics.map((metric) => (
+            <KPI
+              key={metric}
+              label={labelForMetric(metric)}
+              value={formatNumber(aggregate(metric))}
+              source="supabase"
+            />
+          ))
+        )}
         <KPI label="CAC" value={cac > 0 ? formatCurrency(cac) : '—'} source="computed" />
         <KPI label="Ad Spend" value={spend > 0 ? formatCurrency(spend) : '—'} source="meta" />
       </div>

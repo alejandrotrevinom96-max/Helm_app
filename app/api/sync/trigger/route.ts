@@ -4,8 +4,19 @@ import { projects, integrations, metricSnapshots } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { decrypt } from '@/lib/crypto';
 import { getVercelAnalytics } from '@/lib/integrations/vercel';
-import { getAuthUsersCount } from '@/lib/integrations/supabase-mgmt';
+import { getTableCount } from '@/lib/integrations/supabase-mgmt';
 import { NextResponse } from 'next/server';
+
+interface SupabaseTableConfig {
+  tableName: string;
+  metricLabel: string;
+}
+
+// Default tracked tables when the user hasn't configured any. Mirrors
+// PR #1 behaviour for projects that pre-date the picker.
+const DEFAULT_SUPABASE_TABLES: SupabaseTableConfig[] = [
+  { tableName: 'auth.users', metricLabel: 'Signups' },
+];
 
 type SyncedItem = {
   project: string;
@@ -108,32 +119,50 @@ export async function POST(request: Request) {
     if (project.supabaseProjectRef && intsByProvider['supabase']) {
       try {
         const token = decrypt(intsByProvider['supabase'].encryptedAccessToken);
-        const count = await getAuthUsersCount(token, project.supabaseProjectRef);
-        await db
-          .insert(metricSnapshots)
-          .values({
-            projectId: project.id,
-            source: 'supabase',
-            metric: 'signups',
-            value: String(count),
-            date: today,
-          })
-          .onConflictDoUpdate({
-            target: [
-              metricSnapshots.projectId,
-              metricSnapshots.source,
-              metricSnapshots.metric,
-              metricSnapshots.date,
-            ],
-            set: {
+        // PR #19: each configured table gets its own snapshot. The
+        // metric column stores the table name (or 'auth.users' for the
+        // legacy default) so the dashboard can render one widget per
+        // tracked table.
+        const tables =
+          (project.supabaseTables as SupabaseTableConfig[] | null) &&
+          (project.supabaseTables as SupabaseTableConfig[]).length > 0
+            ? (project.supabaseTables as SupabaseTableConfig[])
+            : DEFAULT_SUPABASE_TABLES;
+
+        let totalForActivity = 0;
+        for (const t of tables) {
+          const count = await getTableCount(
+            token,
+            project.supabaseProjectRef,
+            t.tableName
+          );
+          totalForActivity += count;
+          await db
+            .insert(metricSnapshots)
+            .values({
+              projectId: project.id,
+              source: 'supabase',
+              metric: t.tableName,
               value: String(count),
-              syncedAt: new Date(),
-            },
-          });
+              date: today,
+            })
+            .onConflictDoUpdate({
+              target: [
+                metricSnapshots.projectId,
+                metricSnapshots.source,
+                metricSnapshots.metric,
+                metricSnapshots.date,
+              ],
+              set: {
+                value: String(count),
+                syncedAt: new Date(),
+              },
+            });
+        }
         synced.push({
           project: project.name,
           source: 'supabase',
-          signups: count,
+          signups: totalForActivity,
         });
       } catch (e) {
         errors.push(

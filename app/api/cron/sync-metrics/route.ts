@@ -10,7 +10,7 @@ import {
 import { eq, and, lte, lt, isNull, or } from 'drizzle-orm';
 import { decrypt } from '@/lib/crypto';
 import { getVercelAnalytics } from '@/lib/integrations/vercel';
-import { getAuthUsersCount } from '@/lib/integrations/supabase-mgmt';
+import { getTableCount } from '@/lib/integrations/supabase-mgmt';
 import { getAdAccountInsights } from '@/lib/integrations/meta';
 import { generateWeeklyInsight } from '@/lib/research/generate-insight';
 import { sendWebhook } from '@/lib/webhooks/send';
@@ -74,33 +74,47 @@ export async function GET(request: Request) {
       }
     }
 
-    // Supabase sync
+    // Supabase sync — PR #19: iterate per-project supabase_tables config.
     const supabase = userIntegrations.find((i) => i.provider === 'supabase');
     if (supabase && project.supabaseProjectRef) {
       try {
         const token = decrypt(supabase.encryptedAccessToken);
-        const count = await getAuthUsersCount(token, project.supabaseProjectRef, 1);
-        await db
-          .insert(metricSnapshots)
-          .values({
-            projectId: project.id,
-            source: 'supabase',
-            metric: 'signups',
-            value: String(count),
-            date: today,
-          })
-          .onConflictDoUpdate({
-            target: [
-              metricSnapshots.projectId,
-              metricSnapshots.source,
-              metricSnapshots.metric,
-              metricSnapshots.date,
-            ],
-            set: {
+        const configured = project.supabaseTables as
+          | Array<{ tableName: string; metricLabel: string }>
+          | null;
+        const tables =
+          configured && configured.length > 0
+            ? configured
+            : [{ tableName: 'auth.users', metricLabel: 'Signups' }];
+
+        for (const t of tables) {
+          const count = await getTableCount(
+            token,
+            project.supabaseProjectRef,
+            t.tableName
+          );
+          await db
+            .insert(metricSnapshots)
+            .values({
+              projectId: project.id,
+              source: 'supabase',
+              metric: t.tableName,
               value: String(count),
-              syncedAt: new Date(),
-            },
-          });
+              date: today,
+            })
+            .onConflictDoUpdate({
+              target: [
+                metricSnapshots.projectId,
+                metricSnapshots.source,
+                metricSnapshots.metric,
+                metricSnapshots.date,
+              ],
+              set: {
+                value: String(count),
+                syncedAt: new Date(),
+              },
+            });
+        }
         synced++;
       } catch (err) {
         console.error('Supabase sync failed for project', project.id, err);

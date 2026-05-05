@@ -83,6 +83,14 @@ export const projects = pgTable(
     vercelTeamId: text('vercel_team_id'),
     // Supabase
     supabaseProjectRef: text('supabase_project_ref'),
+    // Tables to count for the metrics widget. Each entry becomes a row
+    // in metric_snapshots with metric=<tableName>. When this is empty
+    // we fall back to `auth.users` (PR #1 behaviour). PR #19 lets users
+    // pick custom public tables (e.g. `profiles`, `waitlist`) so projects
+    // without auth-based signups still get a meaningful count.
+    supabaseTables: jsonb('supabase_tables').$type<
+      Array<{ tableName: string; metricLabel: string }>
+    >(),
     // Meta Ads
     metaAdAccountId: text('meta_ad_account_id'),
     // Detected stack

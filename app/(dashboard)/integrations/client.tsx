@@ -42,6 +42,8 @@ const INTEGRATIONS = [
 
 type ProviderId = 'vercel' | 'supabase' | 'meta';
 
+type SupabaseTable = { tableName: string; metricLabel: string };
+
 type ProjectRow = {
   id: string;
   name: string;
@@ -49,6 +51,7 @@ type ProjectRow = {
   vercelProjectId: string | null;
   vercelTeamId: string | null;
   supabaseProjectRef: string | null;
+  supabaseTables: SupabaseTable[] | null;
   metaAdAccountId: string | null;
 };
 
@@ -397,13 +400,24 @@ function ProjectMappingCard({
   const [vercel, setVercel] = useState(project.vercelProjectId ?? '');
   const [supabase, setSupabase] = useState(project.supabaseProjectRef ?? '');
   const [meta, setMeta] = useState(project.metaAdAccountId ?? '');
+  const [supabaseTables, setSupabaseTables] = useState<SupabaseTable[]>(
+    project.supabaseTables ?? []
+  );
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+
+  // tablesDirty compares by serialized JSON since the array contents
+  // matter (toggling one checkbox should mark dirty, toggling back
+  // shouldn't).
+  const tablesDirty =
+    JSON.stringify(supabaseTables ?? []) !==
+    JSON.stringify(project.supabaseTables ?? []);
 
   const dirty =
     vercel !== (project.vercelProjectId ?? '') ||
     supabase !== (project.supabaseProjectRef ?? '') ||
-    meta !== (project.metaAdAccountId ?? '');
+    meta !== (project.metaAdAccountId ?? '') ||
+    tablesDirty;
 
   const save = async () => {
     setSaving(true);
@@ -414,6 +428,9 @@ function ProjectMappingCard({
         projectId: project.id,
         vercelProjectId: connected.has('vercel') ? vercel || null : undefined,
         supabaseProjectRef: connected.has('supabase') ? supabase || null : undefined,
+        // Always send tables when supabase is connected so unselect-all
+        // (i.e. revert to auth.users default) actually persists as `[]`.
+        supabaseTables: connected.has('supabase') ? supabaseTables : undefined,
         metaAdAccountId: connected.has('meta') ? meta || null : undefined,
       }),
     });
@@ -469,6 +486,23 @@ function ProjectMappingCard({
               value={supabase}
               onChange={setSupabase}
             />
+            {/* Only show the table picker once the Supabase project is
+                actually persisted on the row. Without supabaseProjectRef
+                the list-tables endpoint can't run. */}
+            {project.supabaseProjectRef && supabase === project.supabaseProjectRef && (
+              <SupabaseTablesPicker
+                projectId={project.id}
+                value={supabaseTables}
+                onChange={setSupabaseTables}
+              />
+            )}
+            {project.supabaseProjectRef &&
+              supabase !== project.supabaseProjectRef && (
+                <p className="text-[11px] text-text-3 mt-2">
+                  Save the new Supabase project mapping first to pick which
+                  tables to track.
+                </p>
+              )}
           </Field>
         )}
         {connected.has('meta') && (
@@ -550,4 +584,135 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       {children}
     </label>
   );
+}
+
+interface ListedTable {
+  tableName: string;
+  count: number;
+  isAuthTable?: boolean;
+}
+
+// Picker that lets the user choose which Supabase tables Helm tracks
+// for this project. Auto-loads on mount and shows live row counts so
+// the user can sanity-check ("yes, profiles really has 7 rows") before
+// committing. The selection is held in state by ProjectMapping; this
+// component only owns the discovery + render.
+function SupabaseTablesPicker({
+  projectId,
+  value,
+  onChange,
+}: {
+  projectId: string;
+  value: SupabaseTable[];
+  onChange: (next: SupabaseTable[]) => void;
+}) {
+  const [tables, setTables] = useState<ListedTable[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    fetch(`/api/integrations/supabase/list-tables?projectId=${projectId}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled) return;
+        if (data.error) {
+          setError(data.hint ?? data.error);
+          setTables([]);
+        } else {
+          setTables(data.tables ?? []);
+        }
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setError(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  const isSelected = (tableName: string) =>
+    value.some((t) => t.tableName === tableName);
+
+  const toggle = (table: ListedTable) => {
+    if (isSelected(table.tableName)) {
+      onChange(value.filter((t) => t.tableName !== table.tableName));
+      return;
+    }
+    const label = labelFor(table.tableName);
+    onChange([...value, { tableName: table.tableName, metricLabel: label }]);
+  };
+
+  if (loading) {
+    return (
+      <div className="text-xs text-text-3 mt-3 italic">
+        Discovering Supabase tables…
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="text-xs text-danger mt-3">
+        Could not list tables: {error}
+      </div>
+    );
+  }
+
+  if (tables.length === 0) {
+    return (
+      <div className="text-xs text-text-3 mt-3 italic">
+        No tables discovered for this Supabase project.
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3">
+      <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-1.5">
+        Tables to track ({value.length} selected)
+      </div>
+      <p className="text-[11px] text-text-3 mb-2">
+        Pick which tables Helm should count. Each one becomes its own widget
+        in Analytics. Leave empty to default to <code>auth.users</code>.
+      </p>
+      <div className="border border-border rounded-lg divide-y divide-border max-h-64 overflow-y-auto">
+        {tables.map((t) => (
+          <label
+            key={t.tableName}
+            className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-bg-elev/50"
+          >
+            <input
+              type="checkbox"
+              checked={isSelected(t.tableName)}
+              onChange={() => toggle(t)}
+              className="rounded border-border"
+            />
+            <span className="text-sm font-mono flex-1">{t.tableName}</span>
+            {t.isAuthTable && (
+              <span className="text-[9px] font-mono uppercase tracking-[0.1em] text-text-3">
+                auth
+              </span>
+            )}
+            <span className="text-xs text-text-3 tabular-nums">
+              {t.count} rows
+            </span>
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function labelFor(tableName: string): string {
+  if (tableName === 'auth.users') return 'Signups';
+  // Title-case the bare identifier; "profiles" → "Profiles".
+  return tableName.charAt(0).toUpperCase() + tableName.slice(1);
 }
