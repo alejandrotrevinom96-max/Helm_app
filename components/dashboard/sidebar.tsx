@@ -7,12 +7,14 @@ import type { Project } from '@/lib/db/schema';
 import { setActiveProject } from '@/app/(dashboard)/actions';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
 
+// PR #22 reorder: Marketing first (the star feature in the v2.0
+// pivot), Analytics deemphasized to penultimate before setup. Validate
+// removed — its UI was deleted, the route now 404s.
 const navItems = [
-  { href: '/analytics', label: 'Analytics', icon: AnalyticsIcon },
   { href: '/marketing', label: 'Marketing', icon: MarketingIcon },
   { href: '/research', label: 'Research', icon: ResearchIcon },
   { href: '/compass', label: 'Compass', icon: CompassIcon },
-  { href: '/validate', label: 'Validate', icon: ValidateIcon },
+  { href: '/analytics', label: 'Analytics', icon: AnalyticsIcon },
   { href: '/integrations', label: 'Integrations', icon: IntegrationsIcon },
   { href: '/settings', label: 'Settings', icon: SettingsIcon },
 ];
@@ -249,13 +251,6 @@ function ResearchIcon() {
   return (
     <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
       <path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-    </svg>
-  );
-}
-function ValidateIcon() {
-  return (
-    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
-      <path d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
     </svg>
   );
 }

@@ -32,13 +32,6 @@ const FEATURES: Feature[] = [
   },
   {
     num: '04',
-    title: 'Validate',
-    headline: 'Test ideas in 60 seconds',
-    body: '5 templates for waitlists, beta-tester signups, feature voting, pricing tests, and 5-question surveys. Get qualitative analysis from Opus on your responses. Validate before you build.',
-    tags: ['5-templates', 'opus-analysis', 'pricing-tests'],
-  },
-  {
-    num: '05',
     title: 'Compass',
     headline: 'Score your startup like a VC',
     body: 'Helm analyzes your project across 5 dimensions (Validation, Strategy, Execution, Traction, Market) and scores it 0-100 with specific recommendations on how to improve. Backed by peer-reviewed VC research — not vibes.',
@@ -57,7 +50,7 @@ export function LandingWorkspace() {
       </div>
 
       <h2 className="font-display text-3xl md:text-5xl font-light mb-4 max-w-3xl leading-[1.05] tracking-tight">
-        Five tabs.
+        Four tabs.
         <br />
         <em className="editorial-italic">One source of truth.</em>
       </h2>

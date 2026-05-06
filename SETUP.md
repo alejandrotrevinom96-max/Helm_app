@@ -152,7 +152,7 @@ helm/
 ├── app/
 │   ├── (marketing)/         # Public landing page
 │   ├── (auth)/              # /login, /auth/callback
-│   ├── (dashboard)/         # /analytics, /marketing, /research, /validate
+│   ├── (dashboard)/         # /marketing (generate/calendar/library), /research, /compass, /analytics
 │   │   └── onboarding/      # First-run setup flow
 │   ├── api/
 │   │   ├── onboarding/      # Create projects after scan

@@ -524,15 +524,13 @@ export function MarketingClient({
     ? generations.find((g) => g.platform === activeTab) ?? null
     : null;
 
+  // PR #22: outer padding + Marketing h1 moved up to the new
+  // /marketing/layout.tsx so the sub-tab nav (Generate / Calendar /
+  // Library) renders right under the header. This component is
+  // now mounted inside that layout via /marketing/generate/page.tsx,
+  // so it should NOT render its own page chrome.
   return (
-    <div className="p-4 md:p-8">
-      <div className="mb-6 md:mb-8">
-        <h1 className="font-display text-display-md font-light tracking-tight">Marketing</h1>
-        <p className="text-text-2 mt-2 max-w-2xl text-sm">
-          Generate posts tailored to your project, optimized per platform.
-        </p>
-      </div>
-
+    <div>
       <DriftAlert projectId={project.id} />
 
       <PerformanceInsights projectId={project.id} />

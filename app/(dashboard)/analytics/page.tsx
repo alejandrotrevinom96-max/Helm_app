@@ -241,17 +241,17 @@ export default async function AnalyticsPage({
       {allZero && (scope === 'project' ? !project : snapshots.length === 0) && (
         <GlassCard className="p-8 text-center mt-8">
           <p className="text-text-2 mb-4">
-            No Helm activity yet either. Start by creating a waitlist or scheduling a post.
+            No Helm activity yet. Start by scheduling a post or scanning for research signals.
           </p>
           <div className="flex gap-4 justify-center text-sm">
             <Link href="/marketing" className="text-accent hover:underline">
               → Marketing
             </Link>
-            <Link href="/validate" className="text-accent hover:underline">
-              → Validate
-            </Link>
             <Link href="/research" className="text-accent hover:underline">
               → Research
+            </Link>
+            <Link href="/compass" className="text-accent hover:underline">
+              → Compass
             </Link>
           </div>
         </GlassCard>

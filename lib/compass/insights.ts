@@ -106,8 +106,8 @@ Output STRICTLY valid JSON, no markdown fences:
       "title": "string (specific action, max 12 words)",
       "description": "string (why this matters, max 40 words)",
       "scoreLift": number (estimated +X pts),
-      "ctaLabel": "string (max 4 words, like 'Create waitlist') OR null",
-      "ctaHref": "/validate" | "/marketing" | "/research" | "/marketing/scheduled" | null,
+      "ctaLabel": "string (max 4 words, like 'Schedule a post') OR null",
+      "ctaHref": "/marketing" | "/marketing/calendar" | "/marketing/library" | "/marketing/scheduled" | "/research" | "/compass" | null,
       "effort": "low" | "medium" | "high",
       "priority": number (1-10, 10 = highest)
     }
@@ -117,7 +117,7 @@ Output STRICTLY valid JSON, no markdown fences:
 
 RULES:
 - Recommendations MUST be specific. "Improve marketing" is bad. "Schedule 4 posts this week leaning into 'Speed' pillar" is good.
-- ctaHref values: '/validate' for waitlist actions, '/marketing' for content/brand-bible, '/research' for competitor scanning, '/marketing/scheduled' for performance ratings, null if no internal action.
+- ctaHref values: '/marketing' for content/brand-bible, '/marketing/scheduled' for performance ratings, '/research' for competitor scanning, '/compass' for strategic recompute, null if no internal action.
 - scoreLift must be realistic (max gap from rubric). Be conservative.
 - priority should reflect: lift size × effort efficiency × strategic importance.
 - Cover at least 3 different dimensions in the 5 recommendations.`;
