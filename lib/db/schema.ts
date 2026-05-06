@@ -142,6 +142,11 @@ export const generatedPosts = pgTable('generated_posts', {
   prompt: text('prompt'), // What the user asked for
   status: text('status').notNull().default('draft'), // 'draft' | 'copied' | 'published'
   createdAt: timestamp('created_at').defaultNow().notNull(),
+  // PR #23: when this draft was created via "Clone & remix" from a
+  // published/scheduled post in the Library, this points back to the
+  // original (could be in scheduled_posts OR generated_posts — no FK
+  // because the reference crosses tables).
+  clonedFromId: uuid('cloned_from_id'),
 });
 
 // ===== Research Findings =====
@@ -344,10 +349,19 @@ export const scheduledPosts = pgTable('scheduled_posts', {
   visualPrompt: text('visual_prompt'),
   visualType: text('visual_type'), // 'image' | 'carousel' | null
   // Founder feedback after the post went out: 'worked' | 'flopped' | null.
-  // Powers the Performance Memory analysis (PR #13).
+  // Powers the Performance Memory analysis (PR #13). PR #23 added a
+  // 'not_sure' option (kept as text, not enum, so legacy rows stay valid).
   performanceRating: text('performance_rating'),
   performanceNote: text('performance_note'),
   ratedAt: timestamp('rated_at'),
+  // PR #23: optional manual metrics the founder enters in the Library
+  // detail modal after a post goes out. Most platforms don't expose post-
+  // level metrics via API for free, so we let the user fill these in by
+  // hand for the rare cases where they want to track virality numerically.
+  metricsImpressions: integer('metrics_impressions'),
+  metricsLikes: integer('metrics_likes'),
+  metricsComments: integer('metrics_comments'),
+  metricsShares: integer('metrics_shares'),
 });
 
 // ===== Brand Quotes =====

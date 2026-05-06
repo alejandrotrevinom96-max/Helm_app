@@ -1,14 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { Project, GeneratedPost, ScheduledPost } from '@/lib/db/schema';
+import Link from 'next/link';
+import type { Project } from '@/lib/db/schema';
 import { BrandBibleCard } from './brand-bible-card';
 import type { BrandBible } from '@/lib/types/brand';
 import { templates, categories } from '@/lib/marketing/templates';
-import { formatScheduledDate } from '@/lib/utils';
 import { GlassCard } from '@/components/ui/glass-card';
 import { Button } from '@/components/ui/button';
-import { EditScheduledModal, type EditablePost } from './edit-scheduled-modal';
 import { broadcastEvent, useBroadcast } from '@/hooks/use-broadcast';
 import { DraftCard, type Draft } from './draft-card';
 import { DriftAlert } from './drift-alert';
@@ -79,13 +78,9 @@ function pickBestDraftIdx(drafts: Draft[]): number {
 
 export function MarketingClient({
   project,
-  recentPosts,
-  upcoming,
   visualsAvailable,
 }: {
   project: Project;
-  recentPosts: GeneratedPost[];
-  upcoming: ScheduledPost[];
   visualsAvailable: boolean;
 }) {
   // Multi-select platforms; we enforce at least 1 selected at all times.
@@ -94,7 +89,6 @@ export function MarketingClient({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
-  const [editingPost, setEditingPost] = useState<EditablePost | null>(null);
 
   // After generation, one entry per platform with its own editable copy
   // and its own scheduled time. activeTab toggles which one is visible.
@@ -505,19 +499,6 @@ export function MarketingClient({
     }
   };
 
-  const cancelPost = async (id: string) => {
-    if (!confirm('Cancel this scheduled post?')) return;
-    const res = await fetch(`/api/marketing/schedule?id=${id}`, {
-      method: 'DELETE',
-    });
-    if (res.ok) {
-      broadcastEvent({ type: 'scheduled-post-deleted' });
-      location.reload();
-    } else {
-      alert('Could not cancel');
-    }
-  };
-
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const minDateTime = localMinDatetime();
   const activeGeneration = activeTab
@@ -545,9 +526,8 @@ export function MarketingClient({
         }}
       />
 
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-4">
-        <div className="space-y-4">
-          <div className="glass rounded-2xl p-4 md:p-6">
+      <div className="space-y-4">
+        <div className="glass rounded-2xl p-4 md:p-6">
             <div className="mb-4 border-b border-border pb-4">
               <label className="block text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2">
                 Platforms
@@ -837,96 +817,37 @@ export function MarketingClient({
               </div>
               <p className="text-xs text-text-3 mt-2">
                 Times in your timezone: <span className="font-mono">{tz}</span>
+            </p>
+          </GlassCard>
+        )}
+
+        {/*
+          PR #23 — Library CTA. Pre-PR-23 the right sidebar showed
+          "Upcoming posts" + "Recent generations" — useful but cluttered
+          and hard to find ("View all scheduled" was buried). The whole
+          archive (drafts + scheduled + published + cancelled, with
+          performance feedback + clone) now lives under /marketing/library.
+        */}
+        <div className="mt-2 p-6 border border-border rounded-xl bg-bg-elev">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div>
+              <h3 className="font-display text-lg mb-1">
+                Looking for past posts?
+              </h3>
+              <p className="text-sm text-text-2">
+                All your drafts, scheduled posts, and published content live
+                in your Library — with performance feedback and clone-and-remix.
               </p>
-            </GlassCard>
-          )}
-        </div>
-
-        <div className="space-y-4">
-          <div className="glass rounded-2xl p-5">
-            <div className="font-display text-lg font-light mb-1">Upcoming posts</div>
-            <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-4">
-              Next {upcoming.length}
             </div>
-            {upcoming.length === 0 && (
-              <p className="text-text-3 text-sm">No scheduled posts yet.</p>
-            )}
-            {upcoming.map((p) => (
-              <div
-                key={p.id}
-                className="border-l-2 border-accent pl-3 mb-3 last:mb-0 group relative"
-              >
-                <div className="flex justify-between items-start gap-2">
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[10px] font-mono uppercase tracking-[0.1em] text-accent mb-1">
-                      {p.platform} · {formatScheduledDate(p.scheduledFor)}
-                    </div>
-                    <div className="text-xs text-text-2 line-clamp-3 whitespace-pre-wrap">
-                      {p.content}
-                    </div>
-                  </div>
-                  <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
-                    <button
-                      onClick={() =>
-                        setEditingPost({
-                          id: p.id,
-                          platform: p.platform,
-                          content: p.content,
-                          scheduledFor: p.scheduledFor,
-                        })
-                      }
-                      className="text-text-3 hover:text-accent text-xs leading-none px-1"
-                      title="Edit scheduled post"
-                      aria-label="Edit scheduled post"
-                    >
-                      ✎
-                    </button>
-                    <button
-                      onClick={() => cancelPost(p.id)}
-                      className="text-text-3 hover:text-danger text-base leading-none px-1"
-                      title="Cancel scheduled post"
-                      aria-label="Cancel scheduled post"
-                    >
-                      ×
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))}
-            <a
-              href="/marketing/scheduled"
-              className="text-xs text-accent hover:underline mt-3 block"
+            <Link
+              href="/marketing/library"
+              className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity whitespace-nowrap self-start sm:self-auto"
             >
-              View all scheduled →
-            </a>
-          </div>
-
-          <div className="glass rounded-2xl p-5">
-            <div className="font-display text-lg font-light mb-1">Recent generations</div>
-            <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-4">
-              Last {recentPosts.length}
-            </div>
-            {recentPosts.length === 0 && (
-              <p className="text-text-3 text-sm">No posts generated yet.</p>
-            )}
-            {recentPosts.map((p) => (
-              <div
-                key={p.id}
-                className="bg-bg border border-border rounded-lg p-3 mb-2 last:mb-0 text-xs"
-              >
-                <div className="text-text-3 font-mono mb-1">{p.platform}</div>
-                <div className="line-clamp-3 text-text-2">{p.content}</div>
-              </div>
-            ))}
+              → Open Library
+            </Link>
           </div>
         </div>
       </div>
-
-      <EditScheduledModal
-        post={editingPost}
-        onClose={() => setEditingPost(null)}
-        onSaved={() => location.reload()}
-      />
     </div>
   );
 }
