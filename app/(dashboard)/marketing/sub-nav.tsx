@@ -10,6 +10,8 @@ interface SubNavItem {
   comingSoon?: boolean;
 }
 
+// PR #24 — Sprint 2.3 shipped Calendar (drag-drop + golden times) and
+// Library went live in PR #23, so neither is "Soon" anymore.
 const SUB_NAV_ITEMS: SubNavItem[] = [
   {
     name: 'Generate',
@@ -20,13 +22,11 @@ const SUB_NAV_ITEMS: SubNavItem[] = [
     name: 'Calendar',
     href: '/marketing/calendar',
     description: 'Schedule and review',
-    comingSoon: true,
   },
   {
     name: 'Library',
     href: '/marketing/library',
     description: 'Past posts & performance',
-    comingSoon: true,
   },
 ];
 

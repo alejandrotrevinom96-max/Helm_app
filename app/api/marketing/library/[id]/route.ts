@@ -1,14 +1,28 @@
-// PR #23 — Sprint 2.2.
+// PR #23 — Sprint 2.2 (PATCH for feedback).
+// PR #24 — Sprint 2.3 extends PATCH with scheduledFor (used by Calendar
+// drag-drop) and adds DELETE for permanent removal.
 //
-// PATCH /api/marketing/library/[id]
+// PATCH  /api/marketing/library/[id]?source=scheduled|generated
+// DELETE /api/marketing/library/[id]?source=scheduled|generated
 //
-// Lets the founder log post-publish feedback from the Library detail
-// modal: rating (worked / flopped / not_sure), free-text notes, and 4
-// optional manual metrics. Only applies to scheduled_posts (drafts have
-// nothing to rate). Strictly scoped to user.id.
+// `source` defaults to 'scheduled' (the only one PATCH originally
+// supported, kept for back-compat with PR #23 callers). DELETE accepts
+// both because the founder may want to nuke a draft from the Library
+// view without first scheduling it.
+//
+// Strict scoping:
+//   - scheduled_posts has user_id directly → eq(userId, user.id)
+//   - generated_posts goes through projects.user_id (no direct user_id)
+//
+// Both branches return 404 on ownership mismatch so we don't leak the
+// existence of someone else's post id.
 import { createClient } from '@/lib/supabase/server';
 import { db } from '@/lib/db';
-import { scheduledPosts } from '@/lib/db/schema';
+import {
+  generatedPosts,
+  projects,
+  scheduledPosts,
+} from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 
@@ -24,11 +38,19 @@ function coerceMetric(v: unknown): number | null {
   return Math.floor(n);
 }
 
+function parseSource(url: URL): 'scheduled' | 'generated' {
+  return url.searchParams.get('source') === 'generated'
+    ? 'generated'
+    : 'scheduled';
+}
+
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  const url = new URL(request.url);
+  const source = parseSource(url);
 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -44,6 +66,7 @@ export async function PATCH(
     metricsLikes,
     metricsComments,
     metricsShares,
+    scheduledFor,
   } = body as {
     performanceRating?: unknown;
     performanceNote?: unknown;
@@ -51,7 +74,21 @@ export async function PATCH(
     metricsLikes?: unknown;
     metricsComments?: unknown;
     metricsShares?: unknown;
+    scheduledFor?: unknown;
   };
+
+  // Drafts (generated_posts) don't have any of these fields — they only
+  // store content + status. PATCH on a draft is a no-op for now; the
+  // user route to "edit a draft" would be regenerate, not PATCH.
+  if (source === 'generated') {
+    return NextResponse.json(
+      {
+        error:
+          'Drafts cannot be edited directly. Use clone, schedule, or delete.',
+      },
+      { status: 400 }
+    );
+  }
 
   // Validate rating: null clears, valid string sets, anything else 400s.
   let ratingValue: string | null = null;
@@ -68,6 +105,27 @@ export async function PATCH(
     }
     ratingValue = performanceRating;
     setRating = true;
+  }
+
+  // Validate scheduledFor: must parse to a real date if provided.
+  let scheduledForDate: Date | null = null;
+  let setScheduledFor = false;
+  if (scheduledFor !== undefined) {
+    if (typeof scheduledFor !== 'string') {
+      return NextResponse.json(
+        { error: 'scheduledFor must be an ISO timestamp string' },
+        { status: 400 }
+      );
+    }
+    const parsed = new Date(scheduledFor);
+    if (Number.isNaN(parsed.getTime())) {
+      return NextResponse.json(
+        { error: 'scheduledFor is not a valid date' },
+        { status: 400 }
+      );
+    }
+    scheduledForDate = parsed;
+    setScheduledFor = true;
   }
 
   // Ownership check + existence — single combined query.
@@ -103,6 +161,19 @@ export async function PATCH(
     patch.metricsComments = coerceMetric(metricsComments);
   if (metricsShares !== undefined)
     patch.metricsShares = coerceMetric(metricsShares);
+  if (setScheduledFor && scheduledForDate) {
+    // Reschedule resets a 'cancelled' post back to 'scheduled'. We don't
+    // touch 'posted' rows — those have a publishedAt and changing the
+    // schedule retroactively is misleading.
+    if (post.status === 'posted') {
+      return NextResponse.json(
+        { error: 'Cannot reschedule a published post' },
+        { status: 400 }
+      );
+    }
+    patch.scheduledFor = scheduledForDate;
+    if (post.status === 'cancelled') patch.status = 'scheduled';
+  }
 
   if (Object.keys(patch).length === 0) {
     return NextResponse.json({ error: 'Nothing to update' }, { status: 400 });
@@ -117,4 +188,54 @@ export async function PATCH(
     .returning();
 
   return NextResponse.json({ success: true, post: updated });
+}
+
+export async function DELETE(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const url = new URL(request.url);
+  const source = parseSource(url);
+
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  if (source === 'scheduled') {
+    // Direct user_id check — no join needed.
+    const result = await db
+      .delete(scheduledPosts)
+      .where(
+        and(
+          eq(scheduledPosts.id, id),
+          eq(scheduledPosts.userId, user.id)
+        )
+      )
+      .returning({ id: scheduledPosts.id });
+    if (result.length === 0) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+    return NextResponse.json({ success: true });
+  }
+
+  // generated_posts has no user_id — verify ownership through the
+  // parent project. We can't do a single-statement delete-with-join in
+  // drizzle for postgres, so we read first to confirm ownership, then
+  // delete by id.
+  const [draft] = await db
+    .select({ id: generatedPosts.id })
+    .from(generatedPosts)
+    .innerJoin(projects, eq(projects.id, generatedPosts.projectId))
+    .where(
+      and(eq(generatedPosts.id, id), eq(projects.userId, user.id))
+    )
+    .limit(1);
+  if (!draft) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
+  await db.delete(generatedPosts).where(eq(generatedPosts.id, id));
+  return NextResponse.json({ success: true });
 }

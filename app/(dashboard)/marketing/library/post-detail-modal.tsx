@@ -20,6 +20,10 @@ interface Props {
   onClose: () => void;
   onUpdate: (updated: LibraryPost) => void;
   onClone: () => void;
+  // PR #24 — Sprint 2.3: parent removes the post from its in-memory
+  // list when delete or move-to-draft succeeds, so we don't need a
+  // full page reload.
+  onRemove: (id: string) => void;
 }
 
 const RATING_OPTIONS = [
@@ -43,7 +47,13 @@ function formatDateTime(iso: string | null): string {
   });
 }
 
-export function PostDetailModal({ post, onClose, onUpdate, onClone }: Props) {
+export function PostDetailModal({
+  post,
+  onClose,
+  onUpdate,
+  onClone,
+  onRemove,
+}: Props) {
   const [rating, setRating] = useState<string | null>(post.performanceRating);
   const [notes, setNotes] = useState(post.performanceNote ?? '');
   const [metrics, setMetrics] = useState<Record<string, string>>({
@@ -54,6 +64,8 @@ export function PostDetailModal({ post, onClose, onUpdate, onClone }: Props) {
   });
   const [saving, setSaving] = useState(false);
   const [cloning, setCloning] = useState(false);
+  const [movingToDraft, setMovingToDraft] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const showFeedback =
@@ -97,6 +109,67 @@ export function PostDetailModal({ post, onClose, onUpdate, onClone }: Props) {
       setError(e instanceof Error ? e.message : 'Network error');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleMoveToDraft = async () => {
+    if (
+      !confirm(
+        'Mover este post de vuelta a Drafts? El horario agendado se borrará.'
+      )
+    ) {
+      return;
+    }
+    setMovingToDraft(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/marketing/library/${post.id}/move-to-draft`,
+        { method: 'POST' }
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? 'Move failed');
+        setMovingToDraft(false);
+        return;
+      }
+      // The original scheduled row is gone; remove it from the parent
+      // list and close. The new draft will appear next time the parent
+      // refetches counts (which it does on every removal).
+      onRemove(post.id);
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Network error');
+      setMovingToDraft(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (
+      !confirm(
+        'Eliminar este post permanentemente? Esta acción NO se puede deshacer.'
+      )
+    ) {
+      return;
+    }
+    setDeleting(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/marketing/library/${post.id}?source=${post.source}`,
+        { method: 'DELETE' }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data?.error ?? 'Delete failed');
+        setDeleting(false);
+        return;
+      }
+      onRemove(post.id);
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Network error');
+      setDeleting(false);
     }
   };
 
@@ -282,27 +355,56 @@ export function PostDetailModal({ post, onClose, onUpdate, onClone }: Props) {
           </div>
         )}
 
-        {/* Actions */}
+        {/* Actions
+            PR #24 — split into destructive (left, red) and constructive
+            (right) groups. Move-to-draft only shows for scheduled rows
+            (it's a no-op for drafts and we explicitly disallow it on
+            published rows server-side). Delete is always available
+            because the user reported "I can't delete old posts" as the
+            #1 papercut. */}
         <div className="flex flex-wrap items-center justify-between gap-3 pt-4 mt-4 border-t border-border">
-          <button
-            type="button"
-            onClick={handleClone}
-            disabled={cloning}
-            className="px-4 py-2 bg-bg border border-border rounded-lg text-sm hover:bg-bg-elev hover:border-border-bright transition-colors disabled:opacity-50"
-          >
-            {cloning ? 'Cloning…' : '🔄 Clone & remix'}
-          </button>
-
-          {showFeedback && (
+          <div className="flex flex-wrap items-center gap-2">
+            {post.source === 'scheduled' && post.status === 'scheduled' && (
+              <button
+                type="button"
+                onClick={handleMoveToDraft}
+                disabled={movingToDraft}
+                className="px-3 py-2 bg-bg border border-border rounded-lg text-sm hover:bg-bg-elev hover:border-border-bright transition-colors disabled:opacity-50"
+              >
+                {movingToDraft ? 'Moving…' : '← Move to draft'}
+              </button>
+            )}
             <button
               type="button"
-              onClick={handleSave}
-              disabled={saving}
-              className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+              onClick={handleDelete}
+              disabled={deleting}
+              className="px-3 py-2 text-danger hover:bg-danger/10 rounded-lg text-sm transition-colors disabled:opacity-50"
             >
-              {saving ? 'Saving…' : 'Save feedback'}
+              {deleting ? 'Deleting…' : '🗑 Delete forever'}
             </button>
-          )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleClone}
+              disabled={cloning}
+              className="px-4 py-2 bg-bg border border-border rounded-lg text-sm hover:bg-bg-elev hover:border-border-bright transition-colors disabled:opacity-50"
+            >
+              {cloning ? 'Cloning…' : '🔄 Clone & remix'}
+            </button>
+
+            {showFeedback && (
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={saving}
+                className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+              >
+                {saving ? 'Saving…' : 'Save feedback'}
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>

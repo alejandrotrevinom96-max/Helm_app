@@ -128,6 +128,15 @@ export function LibraryClient({
     window.location.href = '/marketing/generate';
   };
 
+  // PR #24 — Sprint 2.3: when the modal deletes or moves a post to
+  // drafts, remove it from the in-memory list immediately and refresh
+  // the per-tab counts. We don't refetch the whole list to avoid a
+  // visible flicker — the optimistic remove is already correct.
+  const handleRemove = (id: string) => {
+    setPosts((prev) => prev.filter((p) => p.id !== id));
+    fetchAll();
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-baseline justify-between">
@@ -209,6 +218,7 @@ export function LibraryClient({
           onClose={() => setSelectedPost(null)}
           onUpdate={handlePostUpdate}
           onClone={handleClone}
+          onRemove={handleRemove}
         />
       )}
     </div>
