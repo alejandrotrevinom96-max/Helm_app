@@ -93,6 +93,14 @@ function selectVariantPillars(bible: BrandBible | null): BrandPillar[] {
 // Pillar-focused system prompt: takes the brand bible's main system prompt
 // and amends it with explicit instructions to lean into ONE pillar so the
 // 3 drafts are demonstrably different.
+//
+// PR #20-followup: when the user typed a real prompt (>10 chars after trim),
+// that prompt IS the topic and the bible/pillars become STYLE guidance only.
+// Pre-fix the prompt was sent as a user message but the system prompt was so
+// heavy with PILLARS / PAINS / VOICE that Haiku defaulted to generic
+// brand-bible-themed posts ("100 makers on the waitlist", "founders drowning
+// in tabs") and ignored the user's actual topic. The pillarSection's "lean
+// into this pillar" mandate was the loudest voice in the room.
 function buildPillarPrompt(
   bible: BrandBible | null,
   platform: Platform,
@@ -103,12 +111,34 @@ function buildPillarPrompt(
   draftIdx: number
 ): string {
   const guidelines = PLATFORM_GUIDANCE[platform];
-  const pillarSection = `\n\nIMPORTANT: This is draft ${draftIdx + 1} of ${PILLAR_VARIANTS_COUNT}. Lean SPECIFICALLY into the pillar "${pillar.name}: ${pillar.description}". Make this draft demonstrably different from drafts that lean into other pillars.`;
+  // Heuristic: anything substantive the user typed counts as their topic.
+  // The 10-char floor filters out empty / placeholder strings without
+  // gating real one-line prompts ("we just shipped X").
+  const hasUserTopic =
+    typeof projectDescription === 'string' &&
+    projectDescription.trim().length > 10;
+
+  // When the user gave a topic, the pillar is a STYLE bias (how to slant
+  // it) instead of a topic mandate. Otherwise the pillar IS the topic
+  // angle, same as before.
+  const pillarSection = hasUserTopic
+    ? `\n\nDRAFT VARIATION: This is draft ${draftIdx + 1} of ${PILLAR_VARIANTS_COUNT}. Slant the SAME user topic through the lens of the pillar "${pillar.name}: ${pillar.description}". Different drafts emphasize different pillars but ALL drafts must stay on the user's topic.`
+    : `\n\nIMPORTANT: This is draft ${draftIdx + 1} of ${PILLAR_VARIANTS_COUNT}. Lean SPECIFICALLY into the pillar "${pillar.name}: ${pillar.description}". Make this draft demonstrably different from drafts that lean into other pillars.`;
+
+  // Always-on TASK block that anchors the topic when the user gave one.
+  // Goes near the END of the system prompt so it's the freshest instruction
+  // before the model generates.
+  const userTopicAnchor = hasUserTopic
+    ? `\n\n═══════ TOPIC (FROM USER — TREAT AS GROUND TRUTH) ═══════
+${projectDescription.trim()}
+
+CRITICAL: Write the post about THIS topic. Do not invent milestones, signup numbers, or pain points the user didn't mention. The brand bible above is for STYLE only (voice, vocabulary, what to avoid). Do NOT pivot to a different topic that "fits the bible better".`
+    : '';
 
   if (!bible || !bible.identity) {
     return `You are a marketing assistant for "${projectName}".
 
-${projectDescription ? `Project description: ${projectDescription}` : ''}
+${hasUserTopic ? `User-supplied topic: ${projectDescription.trim()}` : ''}
 ${templateHint ? `Template guidance: ${templateHint}` : ''}
 
 Platform: ${platform}
@@ -119,7 +149,7 @@ Rules:
 - Be authentic, not salesy
 - No "Are you tired of..." openings
 - No empty hype or buzzwords
-- Output ONLY the post text, no preamble or explanation${pillarSection}`;
+- Output ONLY the post text, no preamble or explanation${userTopicAnchor}${pillarSection}`;
   }
 
   const pillarsList = (bible.pillars ?? [])
@@ -177,7 +207,7 @@ ${templateHint ? `\nTemplate guidance: ${templateHint}` : ''}
 
 ═══════ TASK ═══════
 
-Write ONE post for ${platform}. Output ONLY the post text. No preamble, no quotes, no markdown fences.${pillarSection}`;
+Write ONE post for ${platform}. Output ONLY the post text. No preamble, no quotes, no markdown fences.${userTopicAnchor}${pillarSection}`;
 }
 
 export async function POST(request: Request) {
@@ -271,11 +301,16 @@ Don't quote this verbatim — instead, channel its spirit, energy, and specific 
 
           let content = '';
           try {
+            // Explicit user message reinforces "this is the topic" so Haiku
+            // doesn't drift to brand-bible-themed defaults. Pre-fix this was
+            // just `prompt` raw, which sometimes read as a vague brief and
+            // got out-prioritized by the much louder system prompt.
+            const userMessage = `Write a post about this topic:\n\n${prompt.trim()}`;
             const response = await anthropic.messages.create({
               model: 'claude-haiku-4-5-20251001',
               max_tokens: 1500,
               system: systemPrompt,
-              messages: [{ role: 'user', content: prompt }],
+              messages: [{ role: 'user', content: userMessage }],
             });
             const textBlock = response.content.find((b) => b.type === 'text');
             content = textBlock?.type === 'text' ? textBlock.text.trim() : '';
