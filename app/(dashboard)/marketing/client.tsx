@@ -265,8 +265,24 @@ export function MarketingClient({
           postContent: draft.content,
         }),
       });
-      const data = await res.json();
-      if (data.ok && data.visual) {
+
+      // Some failures (Vercel default 500, edge timeout, etc.) return
+      // HTML instead of JSON. Pre-PR-20 we called res.json() blind and
+      // crashed with "Unexpected token 'A', 'An error o'..." — now we
+      // try JSON first, fall back to a status-derived message if the
+      // response body isn't JSON.
+      let data: { ok?: boolean; visual?: { url: string; prompt: string }; error?: string; hint?: string } = {};
+      try {
+        data = await res.json();
+      } catch {
+        patchDraft(platform, draftIdx, {
+          visualLoading: false,
+          visualError: `Server error (${res.status}). Please try again in a moment.`,
+        });
+        return;
+      }
+
+      if (res.ok && data.ok && data.visual) {
         patchDraft(platform, draftIdx, {
           visual: { url: data.visual.url, prompt: data.visual.prompt },
           visualLoading: false,
@@ -308,8 +324,19 @@ export function MarketingClient({
           template: 'educational',
         }),
       });
-      const data = await res.json();
-      if (data.ok && data.carousel?.slides?.[0]) {
+      // Same defensive parse as handleGenerateVisual — never assume the
+      // response is JSON (chromium boot timeouts often return HTML).
+      let data: { ok?: boolean; carousel?: { slides?: Array<{ url: string }>; totalSlides?: number }; error?: string; hint?: string } = {};
+      try {
+        data = await res.json();
+      } catch {
+        patchDraft(platform, draftIdx, {
+          visualLoading: false,
+          visualError: `Server error (${res.status}). Please try again in a moment.`,
+        });
+        return;
+      }
+      if (res.ok && data.ok && data.carousel?.slides?.[0]) {
         // Use slide 0 as the preview thumbnail; the full carousel still
         // lives in data.carousel for whatever ships it later.
         patchDraft(platform, draftIdx, {
@@ -557,6 +584,7 @@ export function MarketingClient({
             <div className="mb-4">
               <SmartTemplatesSection
                 projectId={project.id}
+                platforms={platforms}
                 onSelect={(promptStarter) => {
                   // Smart templates set the prompt directly. We clear
                   // selectedTemplate (the hardcoded ID) because the smart

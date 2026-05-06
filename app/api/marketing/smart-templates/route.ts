@@ -45,6 +45,26 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'projectId required' }, { status: 400 });
   }
 
+  // Pre-fix: this endpoint ignored which platforms the user had selected,
+  // so changing the channel chips in /marketing didn't change which
+  // templates Haiku produced — and the client cache used the same key
+  // regardless of channels. Now we accept ?platforms=reddit,linkedin
+  // and feed it to the prompt so the templates are channel-calibrated.
+  const VALID_PLATFORMS = new Set([
+    'instagram',
+    'facebook',
+    'linkedin',
+    'threads',
+    'reddit',
+  ]);
+  const rawPlatforms = (searchParams.get('platforms') ?? '')
+    .split(',')
+    .map((p) => p.trim().toLowerCase())
+    .filter((p) => p.length > 0 && VALID_PLATFORMS.has(p));
+  // Dedup + sort so the same selection always hashes to the same prompt
+  // regardless of order the client sent them.
+  const platforms = Array.from(new Set(rawPlatforms)).sort();
+
   const [project] = await db
     .select()
     .from(projects)
@@ -108,6 +128,25 @@ export async function GET(request: Request) {
   const pillarsList =
     (bible?.pillars ?? []).map((p) => p.name).join(', ') || 'none';
 
+  // Channel-specific guidance the LLM uses to bias each template's hook
+  // and structure. Mirrors the platform voice rules in lib/ai/claude.ts so
+  // a "Reddit only" selection produces story-driven templates and a
+  // "LinkedIn only" selection produces professional-insight templates.
+  const PLATFORM_VOICE: Record<string, string> = {
+    reddit:
+      'humble, story-driven hooks, no emojis, end with a genuine question. r/SaaS / r/IndieHackers tone',
+    linkedin: 'professional but human, "I learned X" framing, 1 emoji max',
+    instagram: 'casual, visual-first, 2-3 emojis, hook + question CTA',
+    facebook: 'conversational, personal storytelling, slightly longer',
+    threads: 'punchy 50-80 words, tweet-like, no hashtags',
+  };
+  const channelsBlock =
+    platforms.length === 0
+      ? 'TARGET CHANNELS: not specified — produce flexible templates that adapt across channels.'
+      : `TARGET CHANNELS (the founder selected these): ${platforms.join(', ')}\n\nVOICE PER CHANNEL:\n${platforms
+          .map((p) => `- ${p}: ${PLATFORM_VOICE[p] ?? 'default voice'}`)
+          .join('\n')}\n\nCALIBRATE the 4-6 templates SPECIFICALLY for these channels. If only one channel is selected, every template should feel native to that channel's culture. If multiple, lean toward formats that work across all of them.`;
+
   const prompt = `You are a content strategist for an indie hacker. Generate 4-6 SPECIFIC, CONTEXTUAL post templates based on what's actually happening with this project.
 
 ═══════ PROJECT STATE ═══════
@@ -145,6 +184,9 @@ ${
     ? `Score ${compass.totalScore}/100 (${compass.band}). Weakest dimension: ${weakestDim?.name ?? 'unknown'}`
     : 'No compass reading'
 }
+
+═══════ CHANNELS ═══════
+${channelsBlock}
 
 ═══════ TASK ═══════
 

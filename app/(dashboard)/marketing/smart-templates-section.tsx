@@ -19,6 +19,11 @@ const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 interface Props {
   projectId: string;
+  // Selected platform chips. Pre-PR-20 this wasn't passed in, so the
+  // server's prompt always saw "no channels" and the client cache key
+  // didn't differentiate between {reddit} and {instagram, linkedin}.
+  // Sorting here is purely for stability — the server also sorts.
+  platforms: string[];
   onSelect: (promptStarter: string, category: string) => void;
   // Hardcoded templates from PR #2 used as fallback if Haiku fails or
   // returns nothing. UI never goes blank.
@@ -27,6 +32,7 @@ interface Props {
 
 export function SmartTemplatesSection({
   projectId,
+  platforms,
   onSelect,
   fallbackContent,
 }: Props) {
@@ -34,9 +40,18 @@ export function SmartTemplatesSection({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Stable representation of platforms for use as both cache key suffix
+  // and useEffect dependency. join(',') is enough because we sort.
+  const platformsKey = [...platforms].sort().join(',');
+
   const fetchTemplates = useCallback(
     async (force: boolean) => {
-      const cacheKey = `${CACHE_KEY_PREFIX}${projectId}`;
+      // Cache key now includes channels so {reddit} and {linkedin} don't
+      // share the same cached templates. Empty channels keep the legacy
+      // key for back-compat with cached entries from before PR #20.
+      const cacheKey = platformsKey
+        ? `${CACHE_KEY_PREFIX}${projectId}:${platformsKey}`
+        : `${CACHE_KEY_PREFIX}${projectId}`;
 
       if (!force) {
         try {
@@ -57,9 +72,10 @@ export function SmartTemplatesSection({
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch(
-          `/api/marketing/smart-templates?projectId=${projectId}`
-        );
+        const url = platformsKey
+          ? `/api/marketing/smart-templates?projectId=${projectId}&platforms=${encodeURIComponent(platformsKey)}`
+          : `/api/marketing/smart-templates?projectId=${projectId}`;
+        const res = await fetch(url);
         const data = await res.json();
         if (!res.ok || !data.templates) {
           setError(data.hint ?? data.error ?? 'Could not generate templates');
@@ -82,9 +98,11 @@ export function SmartTemplatesSection({
         setLoading(false);
       }
     },
-    [projectId]
+    [projectId, platformsKey]
   );
 
+  // Refetch automatically when platforms change. The cache key already
+  // changes too, so this hits a fresh entry per channel-set.
   useEffect(() => {
     fetchTemplates(false);
   }, [fetchTemplates]);
