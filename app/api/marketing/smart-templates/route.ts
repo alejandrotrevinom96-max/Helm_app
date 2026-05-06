@@ -128,6 +128,19 @@ export async function GET(request: Request) {
   const pillarsList =
     (bible?.pillars ?? []).map((p) => p.name).join(', ') || 'none';
 
+  // PR #21 fix: pre-fix the prompt opened with "You are a content
+  // strategist for an indie hacker" — that hardcoded persona biased
+  // every template toward indie-hacker / micro-SaaS jargon ("100
+  // signups", "tool fragmentation"), even when the project was a
+  // travel app for Mexican women or any other non-tech audience. We
+  // now derive the strategist persona from the brand bible's audience
+  // + industry so the LLM stays in the project's actual world.
+  const audienceDescription =
+    bible?.audience?.primary?.description?.trim() ||
+    'the project\'s primary audience';
+  const industryDescription = bible?.identity?.industry?.trim() || 'this niche';
+  const archetypeDescription = bible?.archetype?.primary || 'unspecified';
+
   // Channel-specific guidance the LLM uses to bias each template's hook
   // and structure. Mirrors the platform voice rules in lib/ai/claude.ts so
   // a "Reddit only" selection produces story-driven templates and a
@@ -147,11 +160,22 @@ export async function GET(request: Request) {
           .map((p) => `- ${p}: ${PLATFORM_VOICE[p] ?? 'default voice'}`)
           .join('\n')}\n\nCALIBRATE the 4-6 templates SPECIFICALLY for these channels. If only one channel is selected, every template should feel native to that channel's culture. If multiple, lean toward formats that work across all of them.`;
 
-  const prompt = `You are a content strategist for an indie hacker. Generate 4-6 SPECIFIC, CONTEXTUAL post templates based on what's actually happening with this project.
+  const prompt = `You are a content strategist for "${project.name}", a ${industryDescription} project targeting ${audienceDescription}. Generate 4-6 SPECIFIC, CONTEXTUAL post templates based on what's actually happening with THIS project.
+
+═══════ STRICT SCOPE RULES ═══════
+- Templates must be about "${project.name}" ONLY
+- Reference the audience above, NOT a generic "indie hacker" or "founder"
+- Use the pillars listed for THIS project, not pillars from other projects
+- DO NOT mention other tools or products by name (no "Helm", "Notion", etc.)
+- DO NOT default to indie-hacker / micro-SaaS jargon unless the audience above IS indie hackers
+- If the project is non-tech (travel, fitness, food, etc.), templates should reflect that culture
 
 ═══════ PROJECT STATE ═══════
 Name: ${project.name}
 Tagline: ${bible?.identity?.tagline ?? 'none'}
+Industry: ${industryDescription}
+Archetype: ${archetypeDescription}
+Audience: ${audienceDescription}
 Pillars: ${pillarsList}
 
 Active waitlists (${pages.length}):
@@ -190,34 +214,36 @@ ${channelsBlock}
 
 ═══════ TASK ═══════
 
-Generate 4-6 templates SPECIFIC to this project's current state. Each template should:
-- Reference real data from this project (pillar names, waitlist titles, metrics, compass weak dimension, etc.)
+Generate 4-6 templates SPECIFIC to ${project.name}'s current state. Each template should:
+- Reference real data from THIS project (pillar names, waitlist titles, metrics, compass weak dimension, etc.)
+- Speak in a voice that matches ${audienceDescription}
 - Be different from generic "Product launch" / "Numbers / Milestone" templates
-- Be actionable: the founder reads it and immediately knows what to write
+- Be actionable: the creator reads it and immediately knows what to write
 
 Output STRICTLY valid JSON, no markdown:
 {
   "templates": [
     {
-      "category": "string (e.g., 'Validation', 'Build in public', 'Pillar reinforcement')",
-      "title": "string (max 6 words, specific)",
+      "category": "string (e.g., 'Validation', 'Storytelling', 'Pillar reinforcement')",
+      "title": "string (max 6 words, specific to ${project.name})",
       "description": "string (max 25 words, specific to this project)",
-      "promptStarter": "string (a starter prompt the founder can use, max 30 words)"
+      "promptStarter": "string (a starter prompt the creator can use, max 30 words)"
     }
   ]
 }
 
-EXAMPLES of GOOD templates (specific to project state):
-- "Hit ${pages[0]?.title ?? 'first waitlist'} milestone" — referencing actual waitlist
-- "Reinforce '${(bible?.pillars ?? [])[0]?.name ?? 'speed'}' pillar with real example"
-- "Address weakest compass dimension publicly"
+EXAMPLES of GOOD templates (specific to ${project.name}):
+- "Hit ${pages[0]?.title ?? 'first waitlist'} milestone" — referencing the actual waitlist above
+- "Reinforce '${(bible?.pillars ?? [])[0]?.name ?? 'core pillar'}' with real example" — referencing the actual pillar
+- A template that speaks directly to ${audienceDescription}
 
-EXAMPLES of BAD templates (avoid these — generic):
-- "Product launch"
-- "User shoutout"
-- "Behind the scenes"
+EXAMPLES of BAD templates (avoid these — too generic OR off-topic):
+- "Product launch" (no specifics)
+- "User shoutout" (no audience signal)
+- Anything mentioning "indie hacker", "micro-SaaS", "Helm", or other projects/products by name
+- Anything that contradicts the archetype "${archetypeDescription}" or the audience above
 
-Be SPECIFIC. Reference real names, real numbers, real pillars.`;
+Be SPECIFIC to ${project.name}. Reference real names, real numbers, real pillars from this project's brand bible only.`;
 
   let templates: SmartTemplate[] = [];
   try {

@@ -4,6 +4,10 @@ import { useState, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { GlassCard } from '@/components/ui/glass-card';
 import { formatScheduledDate } from '@/lib/utils';
+import {
+  EditScheduledModal,
+  type EditablePost,
+} from '../edit-scheduled-modal';
 
 interface Post {
   id: string;
@@ -28,6 +32,12 @@ export function ScheduledManager({ posts }: { posts: Post[] }) {
   const [bulkRescheduleOpen, setBulkRescheduleOpen] = useState(false);
   const [newDate, setNewDate] = useState('');
   const [busy, setBusy] = useState(false);
+  // Single-post edit modal — wired up in PR #21. Pre-fix /marketing/scheduled
+  // had bulk-only operations (cancel selected, reschedule selected) and no
+  // way to open one post for inline edit. The user reported "once I schedule
+  // a post, I can't open it again" — this state now drives the existing
+  // EditScheduledModal that the /marketing upcoming sidebar already used.
+  const [editingPost, setEditingPost] = useState<EditablePost | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
@@ -283,16 +293,38 @@ export function ScheduledManager({ posts }: { posts: Post[] }) {
               <span>Select all visible</span>
             </div>
 
-            {filtered.map((p) => (
+            {filtered.map((p) => {
+              // Only still-scheduled posts can be opened — once notified /
+              // posted / cancelled the row is historical and editing it
+              // would be misleading.
+              const editable = p.status === 'scheduled';
+              return (
               <GlassCard
                 key={p.id}
-                className={`p-4 ${selected.has(p.id) ? 'ring-1 ring-accent' : ''}`}
+                className={`p-4 ${selected.has(p.id) ? 'ring-1 ring-accent' : ''} ${
+                  editable ? 'cursor-pointer hover:border-border-bright transition-colors' : ''
+                }`}
+                onClick={(e) => {
+                  // Don't open the modal when the user clicks the
+                  // checkbox / rating buttons / nested elements with
+                  // their own handlers.
+                  if (!editable) return;
+                  const target = e.target as HTMLElement;
+                  if (target.closest('input, button, a, textarea, label')) return;
+                  setEditingPost({
+                    id: p.id,
+                    platform: p.platform,
+                    content: p.content,
+                    scheduledFor: p.scheduledFor,
+                  });
+                }}
               >
                 <div className="flex items-start gap-3">
                   <input
                     type="checkbox"
                     checked={selected.has(p.id)}
                     onChange={() => toggleSelect(p.id)}
+                    onClick={(e) => e.stopPropagation()}
                     className="mt-1 cursor-pointer"
                     aria-label={`Select ${p.platform} post`}
                   />
@@ -396,10 +428,22 @@ export function ScheduledManager({ posts }: { posts: Post[] }) {
                   </div>
                 </div>
               </GlassCard>
-            ))}
+              );
+            })}
           </>
         )}
       </div>
+
+      <EditScheduledModal
+        post={editingPost}
+        onClose={() => setEditingPost(null)}
+        onSaved={() => {
+          setEditingPost(null);
+          // Reload so the list reflects the new scheduledFor / content /
+          // platform. Same pattern as the sidebar caller in /marketing.
+          location.reload();
+        }}
+      />
     </div>
   );
 }
