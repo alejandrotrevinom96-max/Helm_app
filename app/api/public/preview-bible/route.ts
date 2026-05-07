@@ -1,26 +1,30 @@
 // PR #34 — Sprint 6.2: public landing-page preview.
+// PR #36 — Sprint 6.2.2: smart input — accepts a website URL OR an
+// Instagram handle (@voyaa.app, instagram.com/voyaa.app). Two
+// testers reported having only Instagram, no website.
 //
 // POST /api/public/preview-bible
-// Body: { url: string }
+// Body: { input?: string, url?: string }   (url kept for back-compat)
 //
-// Anonymously generates a small "this is your brand" teaser from a
-// website URL. Powers the landing-page hero feature. NO auth,
-// rate-limited per IP hash, output cached for 7 days per URL hash.
+// Sequence (no-cache path):
+//   1. Rate-limit check (read-only, per ip_hash). 429 on overflow.
+//   2. detectInputType → website | instagram | invalid.
+//   3. URL validation only on website branch (anti-SSRF).
+//   4. Cache lookup keyed by content hash (prefixed for IG so the
+//      same string can't collide across types).
+//   5. Source-specific scrape:
+//      - website: cheerio extract title/h1/h2s/body
+//      - instagram: og + meta tags from public profile page
+//   6. commitRateLimit (now we're about to spend Anthropic tokens).
+//   7. Claude Haiku 4.5 → strict JSON preview.
+//   8. Persist to public_bible_previews.
 //
-// Sequence:
-//   1. Rate-limit check (per ip_hash). 429 on overflow.
-//   2. URL validation (anti-SSRF, lib/landing/url-validator).
-//   3. Cache lookup. If non-expired hit → bump visit count, return.
-//   4. Fetch the URL (15s timeout, honest UA).
-//   5. Cheerio extract title/h1/h2s/body excerpt.
-//   6. Claude Haiku 4.5 prompt → strict JSON.
-//   7. Persist to public_bible_previews (upsert by url_hash).
+// Returns: { cached, preview, url, source, remainingRequests? }
 //
-// Returns: { cached, preview, url, remainingRequests? }
-//
-// Cost control: Haiku (not Opus), max ~3KB input + ~1KB output ≈
-// $0.003 per generation. The cache + rate limit cap exposure.
+// Cost control: Haiku (not Opus), short prompts ≈ $0.003/run. Cache
+// + per-IP rate limit cap exposure.
 import { NextResponse } from 'next/server';
+import { createHash } from 'crypto';
 import { db } from '@/lib/db';
 import { publicBiblePreviews } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
@@ -36,6 +40,12 @@ import {
   normalizeUrl,
   validatePublicUrl,
 } from '@/lib/landing/url-validator';
+import { detectInputType } from '@/lib/landing/input-detector';
+import {
+  instagramDataToContext,
+  isInstagramScrapeError,
+  scrapeInstagramPublic,
+} from '@/lib/landing/instagram-scraper';
 
 export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
@@ -127,19 +137,26 @@ function isAiPreview(input: unknown): input is AiPreview {
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}));
-  const { url } = body as { url?: string };
+  // PR #36 — accept either `input` (preferred) or `url` (legacy
+  // back-compat with anyone who built against the PR-34 shape).
+  const raw =
+    typeof body?.input === 'string'
+      ? body.input
+      : typeof body?.url === 'string'
+        ? body.url
+        : '';
 
-  if (typeof url !== 'string' || url.trim().length === 0) {
+  if (raw.trim().length === 0) {
     return NextResponse.json(
-      { error: 'URL is required' },
+      { error: 'URL or @handle is required' },
       { status: 400 }
     );
   }
 
   // 1. Read-only rate-limit check. Reject if already blocked, but
-  // DON'T increment yet — pre-Anthropic failures (invalid URL, DNS
-  // fail, etc.) shouldn't burn the user's hourly cap. We commit the
-  // slot right before the Anthropic call below.
+  // DON'T increment yet — pre-Anthropic failures (invalid input,
+  // DNS fail, IG login wall, etc.) shouldn't burn the user's
+  // hourly cap. We commit the slot right before the Anthropic call.
   const ip = getClientIp(request);
   const limit = await checkRateLimit(ip);
   if (!limit.allowed) {
@@ -152,17 +169,42 @@ export async function POST(request: Request) {
     );
   }
 
-  // 2. URL validation (anti-SSRF).
-  const validation = validatePublicUrl(url);
-  if (!validation.valid) {
+  // 2. Detect input type.
+  const detection = detectInputType(raw);
+  if (detection.type === 'invalid') {
     return NextResponse.json(
-      { error: validation.reason ?? 'Invalid URL' },
+      {
+        error:
+          detection.reason ??
+          'Invalid input. Use a website URL (yoursite.com) or Instagram handle (@yourhandle).',
+      },
       { status: 400 }
     );
   }
 
-  const normalized = normalizeUrl(url);
-  const urlHash = hashUrl(normalized);
+  // 3. Source-specific anti-SSRF / safety check (only websites need
+  // it — IG handles route to instagram.com which is safe by
+  // definition).
+  if (detection.type === 'website') {
+    const validation = validatePublicUrl(detection.normalized);
+    if (!validation.valid) {
+      return NextResponse.json(
+        { error: validation.reason ?? 'Invalid URL' },
+        { status: 400 }
+      );
+    }
+  }
+
+  // PR #36: cache key is type-prefixed so "voyaa.app" as a website
+  // and "@voyaa.app" as an IG handle never collide.
+  const urlHash =
+    detection.type === 'instagram'
+      ? createHash('sha256')
+          .update(`ig:${detection.normalized}`)
+          .digest('hex')
+          .slice(0, 32)
+      : hashUrl(detection.normalized);
+  const normalized = detection.normalized;
   const now = new Date();
 
   // 3. Cache hit returns instantly.
@@ -204,6 +246,13 @@ export async function POST(request: Request) {
         oneLiner: cached.previewOneLiner ?? '',
       },
       url: cached.originalUrl,
+      // PR #36 — derive source from the stored URL. We always
+      // persist a navigable URL in original_url; IG previews use
+      // https://instagram.com/handle/, so a substring check
+      // recovers the source without needing a new column.
+      source: /(?:^|\/\/)(?:www\.)?instagram\.com\//i.test(cached.originalUrl)
+        ? 'instagram'
+        : 'website',
       remainingRequests: commit.remainingRequests,
     });
   }
@@ -216,67 +265,90 @@ export async function POST(request: Request) {
       .where(eq(publicBiblePreviews.id, cached.id));
   }
 
-  // 4. Fetch the URL with friendly errors.
-  // PR #36: undici's "fetch failed" is opaque to a non-engineer.
-  // We map common cause codes to messages a user can act on. The
-  // pattern lives here (not in lib/landing/) because the
-  // mapping is endpoint-specific UX copy.
-  let html: string;
-  try {
-    const response = await fetch(normalized, {
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (compatible; HelmBot/1.0; +https://trythelm.com)',
-        Accept: 'text/html,application/xhtml+xml',
-      },
-      signal: AbortSignal.timeout(15000),
-    });
-    if (!response.ok) {
-      const friendly =
-        response.status === 403 || response.status === 401
-          ? `${parsedHost(normalized)} blocked our request. Some sites block bots — try a different URL or sign up to scan it from your account.`
-          : response.status === 404
-            ? `Page not found at ${parsedHost(normalized)}. Double-check the URL.`
-            : response.status >= 500
-              ? `${parsedHost(normalized)} returned a server error (HTTP ${response.status}). Try again in a moment.`
-              : `${parsedHost(normalized)} responded with HTTP ${response.status}. Make sure the page is public.`;
+  // 4. Source-specific scrape. Both branches must populate
+  // `contextForAi` (the chunk fed to Haiku) and `displayUrl` (the
+  // canonical URL stored + returned). On any failure we exit with
+  // a friendly 400 BEFORE committing the rate-limit slot.
+  let contextForAi: string;
+  let displayUrl: string;
+
+  if (detection.type === 'instagram') {
+    // PR #36 — IG path. instagram-scraper is best-effort; surface
+    // its error verbatim because it's already user-facing copy.
+    const ig = await scrapeInstagramPublic(detection.normalized);
+    if (isInstagramScrapeError(ig)) {
+      return NextResponse.json({ error: ig.error }, { status: 400 });
+    }
+    contextForAi = instagramDataToContext(ig);
+    displayUrl = `https://www.instagram.com/${detection.normalized}/`;
+  } else {
+    // Website path (original PR #34 / PR #36 friendly-error logic).
+    let html: string;
+    try {
+      const response = await fetch(normalized, {
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (compatible; HelmBot/1.0; +https://trythelm.com)',
+          Accept: 'text/html,application/xhtml+xml',
+        },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!response.ok) {
+        const friendly =
+          response.status === 403 || response.status === 401
+            ? `${parsedHost(normalized)} blocked our request. Some sites block bots — try a different URL or sign up to scan it from your account.`
+            : response.status === 404
+              ? `Page not found at ${parsedHost(normalized)}. Double-check the URL.`
+              : response.status >= 500
+                ? `${parsedHost(normalized)} returned a server error (HTTP ${response.status}). Try again in a moment.`
+                : `${parsedHost(normalized)} responded with HTTP ${response.status}. Make sure the page is public.`;
+        return NextResponse.json({ error: friendly }, { status: 400 });
+      }
+      html = await response.text();
+    } catch (e) {
+      const friendly = friendlyFetchError(e, normalized);
       return NextResponse.json({ error: friendly }, { status: 400 });
     }
-    html = await response.text();
-  } catch (e) {
-    const friendly = friendlyFetchError(e, normalized);
-    return NextResponse.json({ error: friendly }, { status: 400 });
-  }
 
-  // 5. Cheerio extract.
-  const $ = cheerio.load(html);
-  const title = $('title').text().trim();
-  const metaDesc =
-    $('meta[name="description"]').attr('content')?.trim() ?? '';
-  const ogDesc =
-    $('meta[property="og:description"]').attr('content')?.trim() ?? '';
-  const h1 = $('h1').first().text().trim();
-  const h2s = $('h2')
-    .map((_, el) => $(el).text().trim())
-    .get()
-    .slice(0, 5)
-    .filter(Boolean)
-    .join(' | ');
-  $('script, style, noscript').remove();
-  const bodyText = $('body')
-    .text()
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 3000);
+    // 5. Cheerio extract.
+    const $ = cheerio.load(html);
+    const title = $('title').text().trim();
+    const metaDesc =
+      $('meta[name="description"]').attr('content')?.trim() ?? '';
+    const ogDesc =
+      $('meta[property="og:description"]').attr('content')?.trim() ?? '';
+    const h1 = $('h1').first().text().trim();
+    const h2s = $('h2')
+      .map((_, el) => $(el).text().trim())
+      .get()
+      .slice(0, 5)
+      .filter(Boolean)
+      .join(' | ');
+    $('script, style, noscript').remove();
+    const bodyText = $('body')
+      .text()
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 3000);
 
-  if (!title && !h1 && bodyText.length < 50) {
-    return NextResponse.json(
-      {
-        error:
-          'Could not extract content from this site. Make sure it has a title or visible text.',
-      },
-      { status: 400 }
-    );
+    if (!title && !h1 && bodyText.length < 50) {
+      return NextResponse.json(
+        {
+          error:
+            'Could not extract content from this site. Make sure it has a title or visible text.',
+        },
+        { status: 400 }
+      );
+    }
+
+    contextForAi = `Website: ${normalized}
+Title: ${title || '(empty)'}
+Description: ${metaDesc || ogDesc || '(empty)'}
+H1: ${h1 || '(empty)'}
+H2 sections: ${h2s || '(empty)'}
+Body excerpt:
+${bodyText.slice(0, 2000)}`;
+    displayUrl = normalized;
   }
 
   // PR #36 — Commit a rate-limit slot now that we've successfully
@@ -297,16 +369,11 @@ export async function POST(request: Request) {
   }
 
   // 6. Claude Haiku call. Strict JSON output; we sanitize before
-  // persisting.
-  const prompt = `You are a brand strategist analyzing a website to derive a quick brand bible preview. Be SPECIFIC to this brand — never use generic phrasing.
+  // persisting. Source-agnostic prompt — works for both website
+  // and Instagram inputs.
+  const prompt = `You are a brand strategist analyzing a brand source to derive a quick brand bible preview. Be SPECIFIC to this brand — never use generic phrasing.
 
-Website: ${normalized}
-Title: ${title || '(empty)'}
-Description: ${metaDesc || ogDesc || '(empty)'}
-H1: ${h1 || '(empty)'}
-H2 sections: ${h2s || '(empty)'}
-Body excerpt:
-${bodyText.slice(0, 2000)}
+${contextForAi}
 
 Output ONLY valid JSON, no markdown fences, in this exact shape:
 {
@@ -340,10 +407,10 @@ Rules:
   }
 
   const textBlock = response.content.find((b) => b.type === 'text');
-  let raw = textBlock?.type === 'text' ? textBlock.text.trim() : '';
+  let aiText = textBlock?.type === 'text' ? textBlock.text.trim() : '';
   // Strip ``` fences if Haiku adds them despite the rule.
-  if (raw.startsWith('```')) {
-    raw = raw
+  if (aiText.startsWith('```')) {
+    aiText = aiText
       .replace(/^```(?:json)?\s*/i, '')
       .replace(/\s*```\s*$/i, '')
       .trim();
@@ -351,7 +418,7 @@ Rules:
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(raw);
+    parsed = JSON.parse(aiText);
   } catch {
     return NextResponse.json(
       { error: 'AI returned invalid JSON. Try again.' },
@@ -388,7 +455,7 @@ Rules:
     .insert(publicBiblePreviews)
     .values({
       urlHash,
-      originalUrl: normalized,
+      originalUrl: displayUrl,
       previewArchetype: preview.archetype,
       previewVoice: preview.voice,
       previewPillars: preview.pillars,
@@ -417,7 +484,8 @@ Rules:
   return NextResponse.json({
     cached: false,
     preview,
-    url: normalized,
+    url: displayUrl,
+    source: detection.type, // 'website' | 'instagram'
     remainingRequests: commit.remainingRequests,
   });
 }

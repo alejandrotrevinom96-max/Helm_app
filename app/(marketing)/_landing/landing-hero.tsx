@@ -33,12 +33,20 @@ interface PreviewData {
   oneLiner: string;
 }
 
+// PR #36 — Sprint 6.2.2: hero now accepts URL OR @handle. The
+// `source` returned by the API drives the small "Read from
+// Instagram bio · Limited data" hint shown below the URL row in the
+// preview card, so visitors know why an IG-sourced preview is
+// thinner than a website one.
+type PreviewSource = 'website' | 'instagram';
+
 export function LandingHero() {
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [preview, setPreview] = useState<PreviewData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [scrapedUrl, setScrapedUrl] = useState<string | null>(null);
+  const [source, setSource] = useState<PreviewSource | null>(null);
   const [remaining, setRemaining] = useState<number | null>(null);
 
   const handlePreview = async (e: React.FormEvent) => {
@@ -47,11 +55,14 @@ export function LandingHero() {
     setLoading(true);
     setError(null);
     setPreview(null);
+    setSource(null);
     try {
       const res = await fetch('/api/public/preview-bible', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: url.trim() }),
+        // PR #36 — `input` is the new field name (covers URL + IG
+        // handle); the backend still accepts `url` for back-compat.
+        body: JSON.stringify({ input: url.trim() }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -60,6 +71,11 @@ export function LandingHero() {
       }
       setPreview(data.preview);
       setScrapedUrl(data.url);
+      setSource(
+        data.source === 'instagram' || data.source === 'website'
+          ? data.source
+          : null
+      );
       setRemaining(
         typeof data.remainingRequests === 'number'
           ? data.remainingRequests
@@ -75,6 +91,7 @@ export function LandingHero() {
   const reset = () => {
     setPreview(null);
     setScrapedUrl(null);
+    setSource(null);
     setUrl('');
     setError(null);
   };
@@ -120,11 +137,15 @@ export function LandingHero() {
                 type="text"
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
-                placeholder="yoursite.com"
+                // PR #36 — accept either signal. autoComplete stays
+                // url-flavored because most users will type a domain;
+                // inputMode dropped to default so the on-screen
+                // keyboard shows @ on mobile.
+                placeholder="yoursite.com or @yourhandle"
                 disabled={loading}
                 className="flex-1 px-4 py-3 bg-bg-elev border border-border rounded-lg text-base outline-none focus:border-accent disabled:opacity-50 placeholder:text-text-3"
-                autoComplete="url"
-                inputMode="url"
+                autoComplete="off"
+                spellCheck={false}
               />
               <button
                 type="submit"
@@ -145,7 +166,7 @@ export function LandingHero() {
               </button>
             </div>
             <p className="text-xs text-text-3 mt-3">
-              Free preview · No signup needed · ~30 seconds
+              Works with website URLs or Instagram handles · ~30 seconds
             </p>
             {error && (
               <div className="mt-4 p-3 bg-danger/10 border border-danger/30 rounded-lg text-sm text-danger">
@@ -166,6 +187,14 @@ export function LandingHero() {
                 >
                   {scrapedUrl}
                 </div>
+                {/* PR #36 — IG previews are noticeably thinner than
+                    website ones (bio + stats only). Tell the user
+                    instead of letting them wonder. */}
+                {source === 'instagram' && (
+                  <div className="text-[10px] text-text-3 mt-1">
+                    Read from Instagram bio · limited data
+                  </div>
+                )}
               </div>
               <button
                 type="button"
