@@ -35,7 +35,15 @@ export async function middleware(request: NextRequest) {
 
   const pathname = request.nextUrl.pathname;
   const isAuthRoute = pathname.startsWith('/login') || pathname.startsWith('/auth');
-  const isPublicRoute = pathname === '/' || pathname.startsWith('/w/'); // /w/* = public waitlist pages
+  // PR #29 — /privacy and /terms MUST be publicly accessible because
+  // Meta App Review and Vercel's robots both crawl them anonymously.
+  // Hiding them behind /login fails Meta's review. /w/* are the
+  // public waitlist pages from Sprint 1.
+  const isPublicRoute =
+    pathname === '/' ||
+    pathname.startsWith('/w/') ||
+    pathname === '/privacy' ||
+    pathname === '/terms';
   const isApiRoute = pathname.startsWith('/api');
 
   // Protect dashboard routes
