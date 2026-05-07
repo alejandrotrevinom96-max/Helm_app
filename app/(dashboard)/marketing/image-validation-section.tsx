@@ -62,7 +62,7 @@ export function ImageValidationSection({ projectId, enabled }: Props) {
       !confirm(
         `Generate ${BATCH_SIZE} validation images? Estimated cost ~$${(
           BATCH_SIZE * COST_PER_IMAGE
-        ).toFixed(2)} on your fal.ai account.`
+        ).toFixed(2)} on your fal.ai account. Takes ~30 seconds.`
       )
     ) {
       return;
@@ -80,8 +80,12 @@ export function ImageValidationSection({ projectId, enabled }: Props) {
         success?: boolean;
         images?: ImageRow[];
         totalCost?: number;
+        // PR #27 legacy + PR #28 canonical names.
         succeeded?: number;
         requested?: number;
+        generatedCount?: number;
+        expectedCount?: number;
+        partial?: boolean;
         error?: string;
       };
       if (!res.ok || !data.success) {
@@ -90,10 +94,22 @@ export function ImageValidationSection({ projectId, enabled }: Props) {
       }
       // Merge new batch on top of older history.
       setImages((prev) => [...(data.images ?? []), ...prev]);
+
       const cost = (data.totalCost ?? 0).toFixed(2);
-      setBatchSummary(
-        `Generated ${data.succeeded}/${data.requested} images · $${cost} total`
-      );
+      const got = data.generatedCount ?? data.succeeded ?? 0;
+      const want = data.expectedCount ?? data.requested ?? BATCH_SIZE;
+      // PR #28 — distinguish full vs. partial. Partial gets a yellow
+      // tint via the error slot so the warning lands; success uses
+      // the green tint already wired up.
+      if (data.partial && got > 0) {
+        setBatchSummary(
+          `Generated ${got} of ${want} images · $${cost} total. Some contexts failed — re-generate to fill the gaps.`
+        );
+      } else {
+        setBatchSummary(
+          `Generated ${got}/${want} images · $${cost} total`
+        );
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Network error');
     } finally {
@@ -190,7 +206,9 @@ export function ImageValidationSection({ projectId, enabled }: Props) {
           {generating ? (
             <span className="flex items-center gap-2">
               <Loader2 className="w-4 h-4 animate-spin" />
-              Generating ~60-90s…
+              {/* PR #28 — chunked engine cuts wall time to ~20-30s.
+                  Honest message: "in parallel" hints at why. */}
+              Generating in parallel (~30s)…
             </span>
           ) : latestBatch.length > 0 ? (
             <span className="flex items-center gap-2">
@@ -214,7 +232,17 @@ export function ImageValidationSection({ projectId, enabled }: Props) {
         </div>
       )}
       {batchSummary && !error && (
-        <div className="p-3 border border-emerald-500/30 bg-emerald-500/10 rounded-lg text-xs text-emerald-500">
+        // PR #28 — yellow tint when the summary mentions partial
+        // generation, green when it's a full batch. We sniff the
+        // string for the partial sentence rather than tracking a
+        // separate state since this lives in one render path.
+        <div
+          className={`p-3 border rounded-lg text-xs ${
+            batchSummary.includes('Some contexts failed')
+              ? 'border-amber-500/30 bg-amber-500/10 text-amber-500'
+              : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-500'
+          }`}
+        >
           {batchSummary}
         </div>
       )}

@@ -136,34 +136,67 @@ export async function generateValidationImage(
   };
 }
 
-// Generates the full batch, sequentially. We tolerate per-image
-// failures (one rate-limit spike shouldn't tank the whole batch) by
-// catching + skipping. Callers see the partial array; the row count
-// in the response tells them how many succeeded.
+// PR #28 — Sprint 4.1.
+//
+// Parallel-chunked batch generation. Pre-PR-28 this loop was strictly
+// sequential and a 12-image batch took 60-120s, blowing past Vercel's
+// 60s serverless ceiling. Sequential ate the whole budget on rate-
+// limit-friendly safety; in practice fal.ai handles 4 concurrent
+// requests per account without throttling.
+//
+// Chunked approach:
+//   - 12 contexts split into chunks of CHUNK_SIZE (4)
+//   - Within a chunk: Promise.all → 4 in parallel
+//   - Between chunks: sequential await
+//   - Total: 3 chunks × ~6-10s ≈ 18-30s wall time
+//
+// Why chunks instead of pure Promise.all over all 12:
+//   - 12 simultaneous requests trip fal.ai per-account rate limits
+//   - One bad surge fails 12 instead of 4 (worse partial outcome)
+//   - Chunks let the next group "see" the earlier group's failure
+//     pattern via the persistent fal client state
+//
+// Per-image failure semantics unchanged: one bad context returns null
+// from the worker, the rest of the batch proceeds. Callers filter
+// by checking the array length vs. IMAGE_CONTEXTS.length.
+const CHUNK_SIZE = 4;
+
 export async function generateValidationBatch(
   bible: BrandBible,
   projectName: string,
   onProgress?: (completed: number, total: number) => void
 ): Promise<GeneratedValidationImage[]> {
+  const total = IMAGE_CONTEXTS.length;
   const out: GeneratedValidationImage[] = [];
-  for (let i = 0; i < IMAGE_CONTEXTS.length; i++) {
-    const ctx = IMAGE_CONTEXTS[i];
-    try {
-      const generated = await generateValidationImage(
-        ctx,
-        bible,
-        projectName
-      );
-      out.push(generated);
-    } catch (err) {
-      console.error(
-        `[validation-batch] context "${ctx.id}" failed`,
-        err instanceof Error ? err.message : err
-      );
-      // Soft-fail per image — keep going so partial batches still
-      // give the user something to vote on.
+  let completed = 0;
+
+  for (let i = 0; i < total; i += CHUNK_SIZE) {
+    const chunk = IMAGE_CONTEXTS.slice(i, i + CHUNK_SIZE);
+    const chunkResults = await Promise.all(
+      chunk.map(async (ctx) => {
+        try {
+          const generated = await generateValidationImage(
+            ctx,
+            bible,
+            projectName
+          );
+          return generated;
+        } catch (err) {
+          console.error(
+            `[validation-batch] context "${ctx.id}" failed`,
+            err instanceof Error ? err.message : err
+          );
+          return null;
+        } finally {
+          completed += 1;
+          onProgress?.(completed, total);
+        }
+      })
+    );
+    for (const r of chunkResults) {
+      if (r) out.push(r);
     }
-    onProgress?.(i + 1, IMAGE_CONTEXTS.length);
   }
+
   return out;
 }

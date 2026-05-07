@@ -28,10 +28,15 @@ import {
 } from '@/lib/brand-bible/generate-validation-images';
 import type { BrandBible } from '@/lib/types/brand';
 
-// fal.ai Flux Pro v1.1 takes ~5-8s per image; 12 images sequential
-// = up to ~120s. Vercel hobby maxes at 60s, but production accounts
-// honor the longer ceiling — set to 300 (5 min) so we have headroom.
-export const maxDuration = 300;
+// PR #28 — Sprint 4.1.
+// Pre-PR-28 this was 300s (which Vercel Hobby silently caps to 60).
+// The real fix is parallel chunks in the engine — 12 images now
+// finish in ~20-30s wall time. We keep maxDuration at 60 (the
+// universal ceiling) and depend on the chunked engine to stay
+// inside it. force-dynamic prevents any unintended caching of
+// generation responses.
+export const maxDuration = 60;
+export const dynamic = 'force-dynamic';
 
 function bibleHasEnoughSignal(bible: BrandBible | null): boolean {
   if (!bible) return false;
@@ -138,14 +143,25 @@ export async function POST(request: Request) {
     .returning();
 
   const totalCost = results.reduce((sum, r) => sum + r.cost, 0);
+  // PR #28 — surface partial-batch state to the UI so it can show a
+  // "X of Y generated" message instead of silently presenting a short
+  // grid. The frontend can also offer a one-click retry that only
+  // re-fires the failed contexts (future PR).
+  const expectedCount = 12;
+  const partial = results.length < expectedCount;
 
   return NextResponse.json({
     success: true,
     batchId,
     images: inserted,
     totalCost,
-    requested: 12,
+    // Legacy field names kept for back-compat with PR #27 callers.
+    requested: expectedCount,
     succeeded: results.length,
+    // New PR #28 fields the UI consumes.
+    expectedCount,
+    generatedCount: results.length,
+    partial,
   });
 }
 
