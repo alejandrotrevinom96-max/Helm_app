@@ -228,8 +228,28 @@ export function CalendarView({
                       ${STATUS_TINT[post.status] ?? 'bg-bg'}
                     `}
                   >
-                    <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-text-3 mb-1">
-                      {fmtTime(post.scheduledFor)} · {post.platform}
+                    <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-text-3 mb-1 flex items-center gap-1">
+                      <span>{fmtTime(post.scheduledFor)} · {post.platform}</span>
+                      {/* PR #29 — auto-publish indicator. Tiny so it
+                          doesn't dominate the chip. */}
+                      {post.publishStatus === 'published' && (
+                        <span
+                          className="text-emerald-500"
+                          title="Published"
+                          aria-label="Published"
+                        >
+                          ✓
+                        </span>
+                      )}
+                      {post.publishStatus === 'failed' && (
+                        <span
+                          className="text-danger"
+                          title="Publishing failed"
+                          aria-label="Publishing failed"
+                        >
+                          ⚠
+                        </span>
+                      )}
                     </div>
                     <div className="line-clamp-3 text-text-1">
                       {post.content}
@@ -310,7 +330,13 @@ export function CalendarView({
                       ${STATUS_TINT[post.status] ?? 'bg-bg'}
                     `}
                   >
-                    {fmtTime(post.scheduledFor)} {post.platform}
+                    <span>{fmtTime(post.scheduledFor)} {post.platform}</span>
+                    {post.publishStatus === 'published' && (
+                      <span className="text-emerald-500 ml-1" aria-label="Published">✓</span>
+                    )}
+                    {post.publishStatus === 'failed' && (
+                      <span className="text-danger ml-1" aria-label="Publishing failed">⚠</span>
+                    )}
                   </div>
                 ))}
                 {dayPosts.length > 3 && (

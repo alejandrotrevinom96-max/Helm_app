@@ -362,7 +362,78 @@ export const scheduledPosts = pgTable('scheduled_posts', {
   metricsLikes: integer('metrics_likes'),
   metricsComments: integer('metrics_comments'),
   metricsShares: integer('metrics_shares'),
+  // PR #29 — Sprint 5.1: Auto-publishing fields. The scheduled-post
+  // lifecycle is now: scheduled → (cron fires at scheduledFor) → the
+  // publisher tries to push to Meta → published OR failed (with
+  // retry). publishStatus is independent of `status` because some
+  // failure modes leave the row in {status: 'scheduled',
+  // publishStatus: 'failed'} (eligible for retry) while others move
+  // straight to {status: 'published', publishStatus: 'published'}.
+  publishStatus: text('publish_status'), // null | 'pending' | 'publishing' | 'published' | 'failed'
+  publishedAt: timestamp('published_at'),
+  publishFailureReason: text('publish_failure_reason'),
+  publishRetryCount: integer('publish_retry_count').default(0).notNull(),
+  publishNextRetryAt: timestamp('publish_next_retry_at'),
+  // Meta-specific identifiers — stored only after a successful publish.
+  // metaPostId is the FB post id or IG media id; metaPermalink is the
+  // public URL we link to from Library. metaContainerId is the IG
+  // 2-step container id we save before calling /media_publish so a
+  // retry doesn't recreate it. metaTargetType is left flexible
+  // ('facebook_page' | 'instagram_feed' | 'instagram_story' |
+  // 'instagram_reel') — Sprint 5.2/5.3 will use the latter values.
+  metaPostId: text('meta_post_id'),
+  metaPermalink: text('meta_permalink'),
+  metaTargetType: text('meta_target_type'),
+  metaContainerId: text('meta_container_id'),
 });
+
+// ===== Meta Integrations =====
+// PR #29 — Sprint 5.1. One row per (user, project) pair representing
+// a connected Meta (Facebook + Instagram) Business asset. The project
+// is the unit of integration because a single user may run multiple
+// brands (Voya, Helm, …) each with its own FB Page.
+//
+// We deliberately store only the Page Access Token (encrypted), not
+// the user-level token — the Page token is what the publishing engine
+// uses and Meta scopes it to the Page only. UNIQUE on project_id
+// enforces "one active integration per project" — re-connecting
+// upserts.
+export const metaIntegrations = pgTable(
+  'meta_integrations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    // Facebook Page (auto-selected first page during OAuth — future PR
+    // adds a picker UI when the user has multiple pages).
+    facebookPageId: text('facebook_page_id'),
+    facebookPageName: text('facebook_page_name'),
+    // AES-256-GCM encrypted long-lived Page Access Token (60 days).
+    // NEVER returned to the client.
+    facebookPageAccessToken: text('facebook_page_access_token'),
+    // Instagram Business account linked to the FB Page (optional —
+    // pages without IG just can't post to IG).
+    instagramBusinessId: text('instagram_business_id'),
+    instagramBusinessUsername: text('instagram_business_username'),
+    // User-level metadata captured during OAuth for display purposes.
+    metaUserId: text('meta_user_id'),
+    metaUserName: text('meta_user_name'),
+    tokenExpiresAt: timestamp('token_expires_at'),
+    tokenRefreshedAt: timestamp('token_refreshed_at'),
+    // 'pending' | 'connected' | 'expired' | 'disconnected' | 'failed'
+    status: text('status').notNull().default('pending'),
+    lastError: text('last_error'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    uniqueProject: unique().on(t.projectId),
+  })
+);
 
 // ===== Brand Quotes =====
 // Founder-curated library of quotes that capture authentic voice. Used by
@@ -513,3 +584,4 @@ export type BrandQuote = typeof brandQuotes.$inferSelect;
 export type CompassReadingRow = typeof compassReadings.$inferSelect;
 export type BrandBibleSource = typeof brandBibleSources.$inferSelect;
 export type BrandImageValidation = typeof brandImageValidations.$inferSelect;
+export type MetaIntegration = typeof metaIntegrations.$inferSelect;

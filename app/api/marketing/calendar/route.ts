@@ -26,6 +26,10 @@ export interface CalendarPost {
   scheduledFor: string; // ISO
   visualUrl: string | null;
   consistencyScore: number | null;
+  // PR #29 — Sprint 5.1 publish lifecycle. Calendar chips show a
+  // small ✓ on success and ⚠ on failure so the user spots problems
+  // at a glance without opening each post.
+  publishStatus: string | null;
 }
 
 export async function GET(request: Request) {
@@ -100,6 +104,7 @@ export async function GET(request: Request) {
     scheduledFor: r.scheduledFor.toISOString(),
     visualUrl: r.visualUrl ?? null,
     consistencyScore: r.consistencyScore ?? null,
+    publishStatus: r.publishStatus ?? null,
   }));
 
   return NextResponse.json({ posts });

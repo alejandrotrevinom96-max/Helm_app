@@ -46,6 +46,14 @@ export interface LibraryPost {
   metricsShares: number | null;
   consistencyScore: number | null;
   createdAt: string; // ISO
+  // PR #29 — Sprint 5.1 publish lifecycle fields. Always null for
+  // source='generated' (drafts don't publish). For source='scheduled'
+  // these reflect Meta auto-publishing state from the cron worker.
+  publishStatus: string | null; // null | 'pending' | 'publishing' | 'published' | 'failed'
+  publishFailureReason: string | null;
+  publishRetryCount: number;
+  metaPermalink: string | null; // public URL on FB/IG once published
+  metaPostId: string | null;
 }
 
 const VALID_STATUSES: LibraryStatus[] = [
@@ -145,6 +153,11 @@ export async function GET(request: Request) {
       metricsShares: null,
       consistencyScore: null,
       createdAt: r.createdAt.toISOString(),
+      publishStatus: null,
+      publishFailureReason: null,
+      publishRetryCount: 0,
+      metaPermalink: null,
+      metaPostId: null,
     }));
   }
 
@@ -195,7 +208,10 @@ export async function GET(request: Request) {
         content: r.content,
         prompt: null,
         scheduledFor: r.scheduledFor.toISOString(),
-        publishedAt: r.postedAt?.toISOString() ?? null,
+        publishedAt:
+          r.publishedAt?.toISOString() ??
+          r.postedAt?.toISOString() ??
+          null,
         visualUrl: r.visualUrl ?? null,
         performanceRating: r.performanceRating ?? null,
         performanceNote: r.performanceNote ?? null,
@@ -205,6 +221,11 @@ export async function GET(request: Request) {
         metricsShares: r.metricsShares ?? null,
         consistencyScore: r.consistencyScore ?? null,
         createdAt: r.createdAt.toISOString(),
+        publishStatus: r.publishStatus ?? null,
+        publishFailureReason: r.publishFailureReason ?? null,
+        publishRetryCount: r.publishRetryCount ?? 0,
+        metaPermalink: r.metaPermalink ?? null,
+        metaPostId: r.metaPostId ?? null,
       };
     });
   }

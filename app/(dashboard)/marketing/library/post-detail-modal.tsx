@@ -66,6 +66,10 @@ export function PostDetailModal({
   const [cloning, setCloning] = useState(false);
   const [movingToDraft, setMovingToDraft] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // PR #29 — manual retry for posts whose auto-publish failed. We
+  // don't auto-poll the publishStatus because the Library refetches
+  // every time the user opens this modal anyway.
+  const [retryingPublish, setRetryingPublish] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const showFeedback =
@@ -141,6 +145,36 @@ export function PostDetailModal({
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Network error');
       setMovingToDraft(false);
+    }
+  };
+
+  const handleRetryPublish = async () => {
+    setRetryingPublish(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/marketing/library/${post.id}/retry-publish`,
+        { method: 'POST' }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        setError(data?.error ?? 'Retry failed');
+        setRetryingPublish(false);
+        return;
+      }
+      // Reflect success locally — parent will pick up canonical state
+      // on next refetch but we update optimistically so the modal
+      // doesn't keep showing "Failed" while we wait.
+      onUpdate({
+        ...post,
+        publishStatus: 'published',
+        publishFailureReason: null,
+        metaPermalink: data.permalink ?? post.metaPermalink,
+        status: 'published',
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Network error');
+      setRetryingPublish(false);
     }
   };
 
@@ -270,6 +304,78 @@ export function PostDetailModal({
             </div>
           )}
         </div>
+
+        {/* PR #29 — Publishing status block. Only renders for scheduled
+            posts that have actually been touched by the publisher
+            (publishStatus is set). Drafts and never-attempted posts
+            don't show this. */}
+        {post.source === 'scheduled' && post.publishStatus && (
+          <div className="mb-5 p-4 bg-bg rounded-lg border border-border">
+            <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2">
+              Publishing
+            </div>
+
+            {post.publishStatus === 'publishing' && (
+              <div className="text-sm text-amber-500">
+                Publishing now…
+              </div>
+            )}
+
+            {post.publishStatus === 'published' && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-sm text-emerald-500">
+                  <span>✓</span>
+                  <span>Published successfully</span>
+                </div>
+                {post.publishedAt && (
+                  <div className="text-xs text-text-3">
+                    {new Date(post.publishedAt).toLocaleString()}
+                  </div>
+                )}
+                {post.metaPermalink && (
+                  <a
+                    href={post.metaPermalink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-xs text-accent hover:underline"
+                  >
+                    View on {post.platform === 'instagram'
+                      ? 'Instagram'
+                      : 'Facebook'}{' '}
+                    ↗
+                  </a>
+                )}
+              </div>
+            )}
+
+            {post.publishStatus === 'failed' && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-sm text-danger">
+                  <span>⚠</span>
+                  <span>Publishing failed</span>
+                </div>
+                {post.publishFailureReason && (
+                  <div className="text-xs text-text-3 bg-bg-elev p-2 rounded font-mono break-words">
+                    {post.publishFailureReason}
+                  </div>
+                )}
+                {post.publishRetryCount > 0 && (
+                  <div className="text-[10px] text-text-3">
+                    Auto-retry attempts: {post.publishRetryCount}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={handleRetryPublish}
+                  disabled={retryingPublish}
+                  className="px-3 py-1.5 bg-accent text-white rounded-lg text-xs font-medium hover:opacity-90 disabled:opacity-50"
+                >
+                  {retryingPublish ? 'Retrying…' : '↻ Retry now'}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Feedback section — only for published posts */}
         {showFeedback && (

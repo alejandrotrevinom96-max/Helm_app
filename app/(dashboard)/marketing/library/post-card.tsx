@@ -74,12 +74,30 @@ export function LibraryPostCard({ post, onClick }: Props) {
       onClick={onClick}
       className="text-left w-full p-4 border border-border rounded-xl bg-bg hover:bg-bg-elev hover:border-border-bright transition-colors group"
     >
-      <div className="flex items-center justify-between mb-3">
-        <span
-          className={`text-[10px] font-mono uppercase tracking-[0.1em] px-2 py-0.5 rounded ${status.bg}`}
-        >
-          {status.label}
-        </span>
+      <div className="flex items-center justify-between mb-3 gap-2">
+        <div className="flex items-center gap-1 flex-wrap">
+          <span
+            className={`text-[10px] font-mono uppercase tracking-[0.1em] px-2 py-0.5 rounded ${status.bg}`}
+          >
+            {status.label}
+          </span>
+          {/* PR #29 — auto-publishing state badge. Shows alongside the
+              status badge so the user sees lifecycle (scheduled →
+              published) AND the publish attempt outcome separately. */}
+          {post.publishStatus === 'publishing' && (
+            <span className="text-[10px] font-mono uppercase tracking-[0.1em] px-2 py-0.5 rounded bg-amber-500/15 text-amber-500">
+              Publishing…
+            </span>
+          )}
+          {post.publishStatus === 'failed' && (
+            <span
+              className="text-[10px] font-mono uppercase tracking-[0.1em] px-2 py-0.5 rounded bg-danger/15 text-danger"
+              title={post.publishFailureReason ?? 'Publishing failed'}
+            >
+              Failed
+            </span>
+          )}
+        </div>
         <span className="text-[10px] font-mono uppercase tracking-[0.1em] text-text-3">
           {post.platform}
         </span>
@@ -98,8 +116,22 @@ export function LibraryPostCard({ post, onClick }: Props) {
         {post.content}
       </p>
 
-      <div className="flex items-center justify-between text-xs text-text-3">
-        <span>{dateLabel}</span>
+      <div className="flex items-center justify-between text-xs text-text-3 gap-2">
+        <span className="truncate">{dateLabel}</span>
+        {/* PR #29 — when the post made it to Meta we show a permalink
+            chip the user can click to view the live post. stopPropagation
+            so the card-click (open modal) doesn't fire too. */}
+        {post.metaPermalink && (
+          <a
+            href={post.metaPermalink}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="text-[10px] font-mono uppercase tracking-[0.1em] px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-500 hover:bg-emerald-500/25 transition-colors shrink-0"
+          >
+            View ↗
+          </a>
+        )}
         {post.performanceRating && RATING_EMOJI[post.performanceRating] && (
           <span aria-label={post.performanceRating} title={post.performanceRating}>
             {RATING_EMOJI[post.performanceRating]}

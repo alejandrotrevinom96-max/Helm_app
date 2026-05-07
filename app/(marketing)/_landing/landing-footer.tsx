@@ -34,13 +34,21 @@ export function LandingFooter() {
             <span className="text-xs text-text-3">© 2026</span>
           </div>
 
-          <div className="flex gap-4 md:gap-6 text-sm text-text-3">
+          <div className="flex flex-wrap gap-4 md:gap-6 text-sm text-text-3">
             <a href="#features" className="hover:text-text-1">
               Features
             </a>
             <a href="#how" className="hover:text-text-1">
               How it works
             </a>
+            {/* PR #29 — required by Meta App Review (Privacy Policy +
+                Terms of Service URLs surfaced from a public page). */}
+            <Link href="/privacy" className="hover:text-text-1">
+              Privacy
+            </Link>
+            <Link href="/terms" className="hover:text-text-1">
+              Terms
+            </Link>
             <Link href="/login" className="hover:text-text-1">
               Sign in
             </Link>
