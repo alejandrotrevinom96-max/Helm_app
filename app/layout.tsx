@@ -3,14 +3,25 @@ import { Analytics } from '@vercel/analytics/next';
 import { getServerTheme } from '@/lib/theme';
 import './globals.css';
 
+// PR #36 — Sprint 6.2.1: copy aligned with the landing rebuild
+// (PR #34). Pre-PR-36 the root layout still framed Helm with v1
+// dashboard messaging while the landing already pitched it as a
+// marketing suite — inconsistent across surfaces (the SEO / share
+// preview disagreed with what the visitor actually saw). The
+// (marketing)/page.tsx metadata override still wins for /, but this
+// default applies to every other route that doesn't supply its own
+// (auth pages, dashboard, etc).
 export const metadata: Metadata = {
-  title: 'Helm — The command center for indie hackers',
+  title:
+    'Helm — Brand-aware content that sounds like you. Posted automatically.',
   description:
-    'Stop juggling Vercel, Supabase, Meta Ads, and 7 other tabs. Helm pulls every signal from your micro-SaaS into one dashboard.',
+    'AI marketing suite for indie founders. Auto-generate a brand bible from your website, write posts that fit your voice, and auto-publish to Meta. Free for the first 20 founders.',
   openGraph: {
-    title: 'Helm — The command center for indie hackers',
-    description: 'One dashboard for analytics, marketing, research, and validation.',
-    url: 'https://helm.so',
+    title:
+      'Helm — Brand-aware content that sounds like you. Posted automatically.',
+    description:
+      'AI marketing suite for indie founders. Free for the first 20 founders.',
+    url: 'https://trythelm.com',
     siteName: 'Helm',
     type: 'website',
   },

@@ -1,6 +1,6 @@
 # Helm — Setup Guide
 
-The command center for indie hackers. This is the production codebase.
+Marketing suite for indie founders. This is the production codebase.
 
 ## 🏗 Stack
 

@@ -84,7 +84,7 @@ function LoginForm() {
             Welcome back, <em className="editorial-italic">founder.</em>
           </h1>
           <p className="text-text-2 text-sm">
-            Sign in to your command center.
+            Sign in to keep shipping.
           </p>
         </div>
 

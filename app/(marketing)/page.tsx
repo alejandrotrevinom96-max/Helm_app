@@ -3,9 +3,10 @@ import { redirect } from 'next/navigation';
 import { LandingPage } from './_landing/landing-page';
 
 // PR #34 — Sprint 6.2: metadata refresh.
-// Old copy ("command center", "7 tabs") leaned into the v1 dashboard
-// pitch. The product is now a marketing suite — the new copy matches
-// the Hero tagline and what a visitor will actually see/do.
+// Old copy framed Helm as a v1 dashboard product ("the c-c for indie
+// hackers", "stop juggling 7 tabs"). The product is now a marketing
+// suite — the new copy matches the Hero tagline and what a visitor
+// will actually see/do.
 export const metadata = {
   title:
     'Helm — Brand-aware content that sounds like you. Posted automatically.',
