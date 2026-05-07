@@ -1,3 +1,48 @@
+# Sprint 5.x — Manual Setup Required
+
+This file covers the post-deploy steps that the operator must run by
+hand. Sprint 5.1 added the Meta foundation; Sprint 5.3 added Reels
+(Supabase Storage bucket + a second cron worker).
+
+## Sprint 5.3 — Reels-specific setup
+
+### Create the "reels" Supabase Storage bucket
+
+```bash
+SUPABASE_SERVICE_ROLE_KEY=… npx tsx scripts/setup-reels-bucket.ts
+```
+
+Idempotent. Creates a public-read bucket allowed for `video/mp4` and
+`video/quicktime`. We deliberately don't set a bucket-level file-size
+cap (Supabase Free rejects values > 50 MB at bucket creation). The
+100 MB cap is enforced client-side (`lib/storage/reels-upload.ts`)
+and server-side (the `/api/marketing/schedule` endpoint).
+
+### Apply the RLS policies (manual, Supabase Dashboard)
+
+The script prints the exact policies — copy them into
+**Storage → reels → Policies**. Without them anyone can write to
+your bucket.
+
+### Run the migration
+
+```bash
+DATABASE_URL=<prod_url> npx tsx scripts/add-reel-fields.ts
+```
+
+Adds `is_reel`, `video_url`, video metadata, and the polling state
+columns to `scheduled_posts`. Adds `is_reel`/`video_url` to
+`generated_posts` so the flag survives draft → scheduled. Idempotent.
+
+### Reels polling cron
+
+`/api/cron/poll-reels` is registered in `vercel.json`. On Hobby plan
+this runs once per day — useless for an "auto-publish at the
+scheduled minute" feature. Use the same external pinger you set up
+for `/api/cron/publish-scheduled` (Sprint 5.1 setup, step 5) and
+add a second job that hits `/api/cron/poll-reels` with the same
+`Authorization: Bearer $CRON_SECRET` header on a 1-minute schedule.
+
 # Sprint 5.1 — Manual Setup Required
 
 PR #29 ships the foundation for auto-posting to Facebook + Instagram, but

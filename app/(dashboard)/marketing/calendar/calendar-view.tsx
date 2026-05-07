@@ -240,6 +240,21 @@ export function CalendarView({
                           📸
                         </span>
                       )}
+                      {/* PR #32 — Reel marker. Purple distinguishes from
+                          Story pink. */}
+                      {post.isReel && (
+                        <span
+                          className="text-purple-500"
+                          title={
+                            post.reelProcessingStatus === 'meta_processing'
+                              ? 'Reel — Meta is processing'
+                              : 'Instagram Reel'
+                          }
+                          aria-label="Instagram Reel"
+                        >
+                          🎬
+                        </span>
+                      )}
                       {/* PR #29 — auto-publish indicator. Tiny so it
                           doesn't dominate the chip. */}
                       {post.publishStatus === 'published' && (
@@ -347,6 +362,14 @@ export function CalendarView({
                         aria-label="Instagram Story"
                       >
                         📸
+                      </span>
+                    )}
+                    {post.isReel && (
+                      <span
+                        className="text-purple-500 ml-1"
+                        aria-label="Instagram Reel"
+                      >
+                        🎬
                       </span>
                     )}
                     {post.publishStatus === 'published' && (

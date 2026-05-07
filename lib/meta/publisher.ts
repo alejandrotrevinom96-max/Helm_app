@@ -29,6 +29,17 @@ export interface PublishResult {
   // recoverable (rate limits, transient outages). Auth failures and
   // content-policy rejections shouldn't be retried.
   isTransient?: boolean;
+  // PR #32 — Sprint 5.3: Reels create a container synchronously but
+  // need polling before /media_publish. publishPost returns
+  // pendingPolling=true after creating the container; the cron
+  // worker won't mark the row as failed and the dedicated poll-reels
+  // cron picks it up. The first round of Reel creation isn't a
+  // "publish failure" — it's "publish delayed", so we need a flag.
+  pendingPolling?: boolean;
+  // Set by publishReelAfterProcessing when the container is still
+  // processing. Tells the polling cron to leave the row in
+  // meta_processing and reschedule, not flip to failed.
+  stillProcessing?: boolean;
 }
 
 // Backoff schedule. Index = retry count we're about to enter (0-based:
@@ -173,6 +184,51 @@ export async function publishPost(postId: string): Promise<PublishResult> {
           isTransient: false,
         };
       }
+
+      // PR #32 — Sprint 5.3: Reels. Async flow — we ONLY create the
+      // container here, then hand off to the polling cron. The cron
+      // (poll-reels) waits for status_code=FINISHED before calling
+      // /media_publish. Returning pendingPolling=true tells the
+      // outer cron worker not to flip publishStatus to failed.
+      if (post.isReel === true) {
+        if (!post.videoUrl) {
+          return {
+            success: false,
+            error:
+              'Reels require a video. Upload one in Generate before scheduling.',
+            isTransient: false,
+          };
+        }
+        // Reuse a container if a previous attempt already created
+        // one — saves a Graph API call on retry and avoids burning
+        // the 24h container window twice.
+        let containerId = post.metaContainerId ?? null;
+        if (!containerId) {
+          const container = await client.createInstagramReelContainer(
+            integration.instagramBusinessId,
+            post.videoUrl,
+            post.content
+          );
+          containerId = container.id;
+          await db
+            .update(scheduledPosts)
+            .set({
+              metaContainerId: containerId,
+              metaTargetType: 'instagram_reel',
+              reelProcessingStatus: 'meta_processing',
+              reelPollingAttempts: 0,
+              // First poll in 30s — Meta typically needs at least
+              // that long to start processing.
+              reelPollingNextAt: new Date(Date.now() + 30 * 1000),
+            })
+            .where(eq(scheduledPosts.id, postId));
+        }
+        return {
+          success: true,
+          pendingPolling: true,
+        };
+      }
+
       if (!post.visualUrl) {
         return {
           success: false,
@@ -264,6 +320,133 @@ export async function publishPost(postId: string): Promise<PublishResult> {
       error: `Platform "${platform}" is not yet supported for auto-publishing. Only facebook and instagram are wired up in Sprint 5.1.`,
       isTransient: false,
     };
+  } catch (e) {
+    if (e instanceof MetaApiError) {
+      return {
+        success: false,
+        error: e.message,
+        isTransient: e.isTransient,
+      };
+    }
+    return {
+      success: false,
+      error: e instanceof Error ? e.message : 'Unknown error',
+      isTransient: false,
+    };
+  }
+}
+
+// PR #32 — Sprint 5.3: Reels post-processing publish.
+//
+// Called by /api/cron/poll-reels for rows with
+// reelProcessingStatus='meta_processing'. Polls the container's
+// status_code; if FINISHED, calls /media_publish and returns
+// success+permalink. If still processing, returns
+// stillProcessing=true so the cron can reschedule the next poll.
+//
+// Distinct entry point (vs publishPost) because:
+//   - publishPost would re-create the container (bad — we'd waste
+//     the existing one and confuse Meta).
+//   - The polling logic + max-attempts cap belongs in this layer,
+//     not the generic publishPost happy path.
+export async function publishReelAfterProcessing(
+  postId: string
+): Promise<PublishResult> {
+  const [post] = await db
+    .select()
+    .from(scheduledPosts)
+    .where(eq(scheduledPosts.id, postId))
+    .limit(1);
+  if (!post) return { success: false, error: 'Post not found' };
+  if (!post.metaContainerId) {
+    return { success: false, error: 'No Meta container id on row' };
+  }
+
+  const [integration] = await db
+    .select()
+    .from(metaIntegrations)
+    .where(
+      and(
+        eq(metaIntegrations.projectId, post.projectId),
+        eq(metaIntegrations.status, 'connected')
+      )
+    )
+    .limit(1);
+  if (!integration?.facebookPageAccessToken) {
+    return {
+      success: false,
+      error: 'No active Meta integration',
+      isTransient: false,
+    };
+  }
+  if (!integration.instagramBusinessId) {
+    return {
+      success: false,
+      error: 'No Instagram Business id on integration',
+      isTransient: false,
+    };
+  }
+
+  let pageAccessToken: string;
+  try {
+    pageAccessToken = decryptToken(integration.facebookPageAccessToken);
+  } catch {
+    return { success: false, error: 'Token decryption failed' };
+  }
+
+  const client = new MetaGraphClient(pageAccessToken);
+
+  try {
+    const status = await client.getInstagramReelStatus(post.metaContainerId);
+
+    if (status.status_code === 'IN_PROGRESS') {
+      return {
+        success: false,
+        error: 'Reel still processing on Meta',
+        isTransient: true,
+        stillProcessing: true,
+      };
+    }
+    if (status.status_code === 'ERROR') {
+      return {
+        success: false,
+        error: status.status ?? 'Reel processing returned ERROR',
+        isTransient: false,
+      };
+    }
+    if (status.status_code === 'EXPIRED') {
+      return {
+        success: false,
+        error:
+          'Reel container expired (24h window). Re-upload the video and reschedule.',
+        isTransient: false,
+      };
+    }
+    if (
+      status.status_code !== 'FINISHED' &&
+      status.status_code !== 'PUBLISHED'
+    ) {
+      return {
+        success: false,
+        error: `Unexpected status: ${status.status_code}`,
+        isTransient: true,
+        stillProcessing: true,
+      };
+    }
+
+    // FINISHED → publish.
+    const published = await client.publishInstagramReel(
+      integration.instagramBusinessId,
+      post.metaContainerId
+    );
+    let permalink: string | undefined;
+    try {
+      const link = await client.getInstagramReelPermalink(published.id);
+      permalink = link.permalink;
+    } catch {
+      // best-effort
+    }
+    return { success: true, metaPostId: published.id, permalink };
   } catch (e) {
     if (e instanceof MetaApiError) {
       return {

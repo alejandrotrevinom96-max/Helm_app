@@ -18,10 +18,14 @@ import { LibraryPostCard } from './post-card';
 import { PostDetailModal } from './post-detail-modal';
 
 // PR #30 — Sprint 5.2: 'stories' is a sibling tab to the lifecycle
-// statuses. It cuts across all statuses (draft / scheduled /
-// published) and shows only is_story=true rows. We model it as a
-// LibraryTabValue union so existing TabValue users keep working.
-type LibraryTabValue = LibraryStatus | 'all' | 'stories';
+// statuses. PR #32 — Sprint 5.3 added 'reels' the same way. Both
+// cut across all statuses and the API uses status='all' + type=
+// {story|reel} when one of them is active.
+type LibraryTabValue =
+  | LibraryStatus
+  | 'all'
+  | 'stories'
+  | 'reels';
 
 const TABS: Array<{ value: LibraryTabValue; label: string }> = [
   { value: 'all', label: 'All' },
@@ -29,6 +33,7 @@ const TABS: Array<{ value: LibraryTabValue; label: string }> = [
   { value: 'scheduled', label: 'Scheduled' },
   { value: 'published', label: 'Published' },
   { value: 'stories', label: '📸 Stories' },
+  { value: 'reels', label: '🎬 Reels' },
 ];
 
 export function LibraryClient({
@@ -42,13 +47,13 @@ export function LibraryClient({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<LibraryTabValue>('all');
-  // PR #30 — `type` filter (post / story / '' for both) lets the user
-  // subset within a tab. Independent of the activeTab='stories' which
-  // pre-applies type=story.
+  // PR #30/#32 — `type` filter widens to include 'reel' (Sprint 5.3).
+  // Independent of activeTab='stories'/'reels' which pre-apply the
+  // corresponding type at the API layer.
   const [filters, setFilters] = useState({
     platform: '',
     search: '',
-    type: '' as '' | 'post' | 'story',
+    type: '' as '' | 'post' | 'story' | 'reel',
   });
   const [selectedPost, setSelectedPost] = useState<LibraryPost | null>(null);
 
@@ -64,6 +69,7 @@ export function LibraryClient({
     published: 0,
     cancelled: 0,
     stories: 0,
+    reels: 0,
   });
 
   const fetchAll = useCallback(async () => {
@@ -82,6 +88,7 @@ export function LibraryClient({
         published: all.filter((p) => p.status === 'published').length,
         cancelled: all.filter((p) => p.status === 'cancelled').length,
         stories: all.filter((p) => p.isStory).length,
+        reels: all.filter((p) => p.isReel).length,
       });
     } catch {
       // counts are best-effort; UI still works without them
@@ -92,13 +99,13 @@ export function LibraryClient({
     setLoading(true);
     setError(null);
     try {
-      // PR #30 — Stories tab is a cross-status filter; the API uses
-      // status='all' + type='story'. Other tabs pass through their
-      // status as-is. Manual `type` filter from the dropdown overlays
-      // on top — we pass it whenever it's set, including when the
-      // Stories tab already pinned type=story.
+      // PR #30/#32 — Stories/Reels tabs are cross-status filters.
+      // API: status='all' + type=story|reel. Lifecycle tabs pass
+      // through as-is. Manual `type` filter overlays on top, except
+      // when Stories/Reels tab already pinned a type.
       const isStoriesTab = activeTab === 'stories';
-      const apiStatus = isStoriesTab ? 'all' : activeTab;
+      const isReelsTab = activeTab === 'reels';
+      const apiStatus = isStoriesTab || isReelsTab ? 'all' : activeTab;
       const params = new URLSearchParams({
         projectId,
         status: apiStatus,
@@ -107,6 +114,8 @@ export function LibraryClient({
       if (filters.search.trim()) params.set('search', filters.search.trim());
       if (isStoriesTab) {
         params.set('type', 'story');
+      } else if (isReelsTab) {
+        params.set('type', 'reel');
       } else if (filters.type) {
         params.set('type', filters.type);
       }

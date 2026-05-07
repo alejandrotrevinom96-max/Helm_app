@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/sync-metrics",
       "schedule": "0 0 * * *"
+    },
+    {
+      "path": "/api/cron/poll-reels",
+      "schedule": "0 0 * * *"
     }
   ]
 }

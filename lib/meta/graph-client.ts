@@ -260,6 +260,66 @@ export class MetaGraphClient {
     return this.request(`/${mediaId}?fields=permalink`);
   }
 
+  // ============ INSTAGRAM REELS ============
+  // Reels diverge from feed/stories because Meta processes the video
+  // ASYNCHRONOUSLY. The flow is:
+  //   1. createInstagramReelContainer  → returns a container_id
+  //   2. (Meta processes the video)    → ~30–90s, sometimes longer
+  //   3. getInstagramReelStatus polls  → wait for FINISHED
+  //   4. publishInstagramReel          → actually posts
+  //
+  // share_to_feed=true makes the Reel appear in both the Reels tab
+  // AND the regular feed — by default IG only shows it in the Reels
+  // tab, which is much lower reach for most accounts.
+
+  async createInstagramReelContainer(
+    igBusinessId: string,
+    videoUrl: string,
+    caption?: string
+  ): Promise<{ id: string }> {
+    return this.request(`/${igBusinessId}/media`, {
+      method: 'POST',
+      body: JSON.stringify({
+        media_type: 'REELS',
+        video_url: videoUrl,
+        caption: caption ?? '',
+        share_to_feed: true,
+      }),
+    });
+  }
+
+  // Reels container processing has its own status_code values. Same
+  // endpoint shape as the regular IG container status, broader enum.
+  async getInstagramReelStatus(containerId: string): Promise<{
+    status_code:
+      | 'IN_PROGRESS'
+      | 'FINISHED'
+      | 'ERROR'
+      | 'EXPIRED'
+      | 'PUBLISHED';
+    status?: string;
+  }> {
+    return this.request(`/${containerId}?fields=status_code,status`);
+  }
+
+  async publishInstagramReel(
+    igBusinessId: string,
+    containerId: string
+  ): Promise<{ id: string }> {
+    // Same /media_publish endpoint feed posts use; the difference
+    // lives on the container's media_type.
+    return this.request(`/${igBusinessId}/media_publish`, {
+      method: 'POST',
+      body: JSON.stringify({ creation_id: containerId }),
+    });
+  }
+
+  async getInstagramReelPermalink(
+    mediaId: string
+  ): Promise<{ permalink: string }> {
+    return this.request(`/${mediaId}?fields=permalink`);
+  }
+
   // ============ HEALTH CHECK ============
 
   async validateToken(): Promise<boolean> {

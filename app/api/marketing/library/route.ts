@@ -60,6 +60,14 @@ export interface LibraryPost {
   // is null on drafts (set only when the publisher actually fires).
   isStory: boolean;
   storyExpiresAt: string | null;
+  // PR #32 — Sprint 5.3: Reels. videoUrl is the public Supabase URL
+  // (drafts AND scheduled). Other reel fields are scheduled-only.
+  isReel: boolean;
+  videoUrl: string | null;
+  videoDurationSeconds: number | null;
+  videoSizeBytes: number | null;
+  reelProcessingStatus: string | null;
+  reelProcessingError: string | null;
 }
 
 const VALID_STATUSES: LibraryStatus[] = [
@@ -96,8 +104,16 @@ export async function GET(request: Request) {
   // is_story=true rows; 'post' excludes them; '' / undefined returns
   // both (the default the Library tab uses).
   const typeRaw = searchParams.get('type') ?? '';
-  const typeFilter: 'story' | 'post' | null =
-    typeRaw === 'story' ? 'story' : typeRaw === 'post' ? 'post' : null;
+  // PR #32 — Sprint 5.3: 'reel' joins 'story' and 'post'. 'post' now
+  // means "neither story nor reel" — the catchall regular feed type.
+  const typeFilter: 'story' | 'post' | 'reel' | null =
+    typeRaw === 'story'
+      ? 'story'
+      : typeRaw === 'reel'
+        ? 'reel'
+        : typeRaw === 'post'
+          ? 'post'
+          : null;
 
   if (!projectId) {
     return NextResponse.json(
@@ -142,8 +158,11 @@ export async function GET(request: Request) {
     }
     if (typeFilter === 'story') {
       draftFilters.push(eq(generatedPosts.isStory, true));
+    } else if (typeFilter === 'reel') {
+      draftFilters.push(eq(generatedPosts.isReel, true));
     } else if (typeFilter === 'post') {
       draftFilters.push(eq(generatedPosts.isStory, false));
+      draftFilters.push(eq(generatedPosts.isReel, false));
     }
     const draftRows = await db
       .select()
@@ -177,6 +196,12 @@ export async function GET(request: Request) {
       metaPostId: null,
       isStory: r.isStory ?? false,
       storyExpiresAt: null,
+      isReel: r.isReel ?? false,
+      videoUrl: r.videoUrl ?? null,
+      videoDurationSeconds: null,
+      videoSizeBytes: null,
+      reelProcessingStatus: null,
+      reelProcessingError: null,
     }));
   }
 
@@ -206,8 +231,11 @@ export async function GET(request: Request) {
     }
     if (typeFilter === 'story') {
       schedFilters.push(eq(scheduledPosts.isStory, true));
+    } else if (typeFilter === 'reel') {
+      schedFilters.push(eq(scheduledPosts.isReel, true));
     } else if (typeFilter === 'post') {
       schedFilters.push(eq(scheduledPosts.isStory, false));
+      schedFilters.push(eq(scheduledPosts.isReel, false));
     }
 
     const schedRows = await db
@@ -252,6 +280,12 @@ export async function GET(request: Request) {
         metaPostId: r.metaPostId ?? null,
         isStory: r.isStory ?? false,
         storyExpiresAt: r.storyExpiresAt?.toISOString() ?? null,
+        isReel: r.isReel ?? false,
+        videoUrl: r.videoUrl ?? null,
+        videoDurationSeconds: r.videoDurationSeconds ?? null,
+        videoSizeBytes: r.videoSizeBytes ?? null,
+        reelProcessingStatus: r.reelProcessingStatus ?? null,
+        reelProcessingError: r.reelProcessingError ?? null,
       };
     });
   }

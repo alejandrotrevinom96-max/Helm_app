@@ -14,6 +14,8 @@ import { DriftAlert } from './drift-alert';
 import { PerformanceInsights } from './performance-insights';
 import { SmartTemplatesSection } from './smart-templates-section';
 import { StoryToggle } from './story-toggle';
+import { ReelToggle } from './reel-toggle';
+import type { VideoMetadata } from '@/lib/meta/video-validator';
 
 const PLATFORMS = [
   { id: 'instagram', label: 'Instagram', color: '#e1306c' },
@@ -79,9 +81,13 @@ function pickBestDraftIdx(drafts: Draft[]): number {
 
 export function MarketingClient({
   project,
+  userId,
   visualsAvailable,
 }: {
   project: Project;
+  // PR #32 — Sprint 5.3: forwarded to ReelToggle for Supabase Storage
+  // upload path namespacing.
+  userId: string;
   visualsAvailable: boolean;
 }) {
   // Multi-select platforms; we enforce at least 1 selected at all times.
@@ -97,6 +103,14 @@ export function MarketingClient({
   // picker makes the intent visible from the first click and the
   // schedule POST applies it only to Instagram (FB silently ignores).
   const [isStory, setIsStory] = useState(false);
+  // PR #32 — Sprint 5.3: Reel intent + uploaded-video state.
+  // Mutually exclusive with isStory (a single post can't be both —
+  // enforced both client-side and server-side).
+  const [isReel, setIsReel] = useState(false);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [videoMetadata, setVideoMetadata] = useState<VideoMetadata | null>(
+    null
+  );
 
   // After generation, one entry per platform with its own editable copy
   // and its own scheduled time. activeTab toggles which one is visible.
@@ -142,10 +156,31 @@ export function MarketingClient({
   // to Facebook only, and end up with a flagged-but-impossible
   // schedule that the server would 400 anyway.
   useEffect(() => {
-    if (!platforms.includes('instagram') && isStory) {
+    if (!platforms.includes('instagram')) {
+      if (isStory) setIsStory(false);
+      // PR #32 — Reel state collapses too. videoUrl stays uploaded
+      // in Supabase (cheap to leave) but we drop the local
+      // reference so re-toggling Reel later starts clean.
+      if (isReel) setIsReel(false);
+      if (videoUrl) {
+        setVideoUrl(null);
+        setVideoMetadata(null);
+      }
+    }
+  }, [platforms, isStory, isReel, videoUrl]);
+
+  // PR #32 — Sprint 5.3: Story / Reel are mutually exclusive. The
+  // last-clicked toggle wins. Server-side guard re-validates this so
+  // a stale state can't slip through.
+  useEffect(() => {
+    if (isStory && isReel) {
+      // Whichever became true last wins; React batches but in practice
+      // setIsStory and setIsReel are wired to user clicks so they
+      // can't fire in the same render. If we ever land here, drop
+      // the Story (Reel is the heavier intent — it has an upload).
       setIsStory(false);
     }
-  }, [platforms, isStory]);
+  }, [isStory, isReel]);
 
   useBroadcast((event) => {
     if (event.type.startsWith('scheduled-post')) {
@@ -495,6 +530,26 @@ export function MarketingClient({
                 // an FB+IG batch with the toggle on schedules cleanly:
                 // FB as feed, IG as Story.
                 isStory: isStory && g.platform === 'instagram',
+                // PR #32 — Sprint 5.3: Reels also Instagram-only. We
+                // ship the videoUrl + metadata so the server can
+                // re-validate without re-parsing. Mutually exclusive
+                // with isStory at the per-platform level (server 400
+                // catches any inconsistency).
+                isReel: isReel && g.platform === 'instagram',
+                videoUrl:
+                  isReel && g.platform === 'instagram' ? videoUrl : null,
+                videoDurationSeconds:
+                  isReel && g.platform === 'instagram'
+                    ? videoMetadata?.duration ?? null
+                    : null,
+                videoSizeBytes:
+                  isReel && g.platform === 'instagram'
+                    ? videoMetadata?.sizeBytes ?? null
+                    : null,
+                videoAspectRatio:
+                  isReel && g.platform === 'instagram'
+                    ? videoMetadata?.aspectRatio ?? null
+                    : null,
               }),
             });
             return { platform: g.platform, ok: res.ok };
@@ -582,16 +637,15 @@ export function MarketingClient({
                   : `${platforms.length} platforms · each gets its own optimized version`}
               </p>
 
-              {/* PR #31 — Story toggle surfaced next to the platforms
-                  picker. Only renders when Instagram is selected (the
-                  StoryToggle component's own no-op guard handles
-                  this) — visible from the first click instead of
-                  hidden in the post-generation review panel.
-                  imageUrl is null pre-generation; once drafts exist,
-                  we feed the selected Instagram draft's visual so
-                  the dimension-warning fires reactively. */}
+              {/* PR #31/#32 — Story + Reel toggles surfaced next to
+                  the platforms picker. Both no-op for non-Instagram
+                  platforms. imageUrl for the Story warning is null
+                  pre-generation; once drafts exist, we feed the
+                  selected Instagram draft's visual so the dimension
+                  validator fires reactively. The Reel toggle owns
+                  its own video upload state. */}
               {platforms.includes('instagram') && (
-                <div className="mt-4">
+                <div className="mt-4 space-y-2">
                   <StoryToggle
                     platform="instagram"
                     imageUrl={(() => {
@@ -602,7 +656,25 @@ export function MarketingClient({
                       return sel?.visual?.url ?? null;
                     })()}
                     isStory={isStory}
-                    onChange={setIsStory}
+                    onChange={(next) => {
+                      setIsStory(next);
+                      if (next && isReel) setIsReel(false);
+                    }}
+                  />
+                  <ReelToggle
+                    platform="instagram"
+                    userId={userId}
+                    isReel={isReel}
+                    videoUrl={videoUrl}
+                    videoMetadata={videoMetadata}
+                    onChangeReel={(next) => {
+                      setIsReel(next);
+                      if (next && isStory) setIsStory(false);
+                    }}
+                    onChangeVideo={(url, meta) => {
+                      setVideoUrl(url);
+                      setVideoMetadata(meta);
+                    }}
                   />
                 </div>
               )}

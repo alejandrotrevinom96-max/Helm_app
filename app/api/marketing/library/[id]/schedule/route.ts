@@ -61,7 +61,8 @@ export async function POST(
 
   // Verify ownership through the parent project — generated_posts has
   // no user_id column. PR #30 also pulls is_story so the flag travels
-  // from the draft pool into scheduled_posts unchanged.
+  // from the draft pool into scheduled_posts unchanged. PR #32 adds
+  // is_reel + video_url for the same reason.
   const [draft] = await db
     .select({
       id: generatedPosts.id,
@@ -69,6 +70,8 @@ export async function POST(
       platform: generatedPosts.platform,
       content: generatedPosts.content,
       isStory: generatedPosts.isStory,
+      isReel: generatedPosts.isReel,
+      videoUrl: generatedPosts.videoUrl,
     })
     .from(generatedPosts)
     .innerJoin(projects, eq(projects.id, generatedPosts.projectId))
@@ -103,6 +106,31 @@ export async function POST(
     );
   }
 
+  // PR #32 — Reels validation when promoting a draft. A Reel-flagged
+  // draft must already have a video uploaded; otherwise the publisher
+  // would fail later. Surface that here so the user re-uploads or
+  // un-flags the draft before scheduling.
+  if (draft.isReel) {
+    if (draft.platform !== 'instagram') {
+      return NextResponse.json(
+        {
+          error:
+            'Reel flag is set but platform is not Instagram. Reels only ship to Instagram.',
+        },
+        { status: 400 }
+      );
+    }
+    if (!draft.videoUrl) {
+      return NextResponse.json(
+        {
+          error:
+            'This draft is flagged as a Reel but has no video uploaded. Re-upload or un-flag the draft, then schedule.',
+        },
+        { status: 400 }
+      );
+    }
+  }
+
   // Insert the new scheduled post FIRST. If something fails, the
   // draft is still recoverable — better than losing both rows.
   const [newScheduled] = await db
@@ -115,6 +143,9 @@ export async function POST(
       scheduledFor: when,
       status: 'scheduled',
       isStory: draft.isStory,
+      isReel: draft.isReel,
+      videoUrl: draft.videoUrl ?? null,
+      reelProcessingStatus: draft.isReel ? 'uploaded' : null,
     })
     .returning();
 

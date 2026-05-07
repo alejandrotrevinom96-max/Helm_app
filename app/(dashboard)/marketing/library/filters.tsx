@@ -16,7 +16,7 @@ interface Props {
   filters: {
     platform: string;
     search: string;
-    type: '' | 'post' | 'story';
+    type: '' | 'post' | 'story' | 'reel';
   };
   onChange: (next: Props['filters']) => void;
 }
@@ -37,7 +37,7 @@ export function LibraryFilters({ filters, onChange }: Props) {
         onChange={(e) =>
           onChange({
             ...filters,
-            type: e.target.value as '' | 'post' | 'story',
+            type: e.target.value as '' | 'post' | 'story' | 'reel',
           })
         }
         className="px-3 py-2 bg-bg-elev border border-border rounded-lg text-sm outline-none focus:border-accent"
@@ -45,6 +45,7 @@ export function LibraryFilters({ filters, onChange }: Props) {
         <option value="">All types</option>
         <option value="post">Regular posts</option>
         <option value="story">📸 Stories</option>
+        <option value="reel">🎬 Reels</option>
       </select>
 
       <select

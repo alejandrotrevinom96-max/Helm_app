@@ -23,6 +23,11 @@ export default async function MarketingGeneratePage() {
   return (
     <MarketingClient
       project={project}
+      // PR #32 — Sprint 5.3: Reels uploads go directly from the
+      // browser to Supabase Storage. We need the user id to namespace
+      // the upload path (RLS enforces "users can only write to their
+      // own folder"). Server-rendered prop avoids a client roundtrip.
+      userId={user.id}
       visualsAvailable={visualsAvailable}
     />
   );

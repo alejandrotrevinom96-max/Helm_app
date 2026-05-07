@@ -28,6 +28,14 @@ export async function POST(request: Request) {
     visualUrl,
     visualPrompt,
     isStory,
+    // PR #32 — Sprint 5.3: Reel fields. videoUrl is the public Supabase
+    // Storage URL the browser uploaded to; the metadata fields are
+    // captured at upload time so the server can re-validate.
+    isReel,
+    videoUrl,
+    videoDurationSeconds,
+    videoSizeBytes,
+    videoAspectRatio,
   } = await request.json();
 
   if (!projectId || !platform || !content || !scheduledFor) {
@@ -45,6 +53,7 @@ export async function POST(request: Request) {
   // client. Image-dimension check stays client-only — that needs the
   // bytes, the schedule API doesn't have them.
   const wantsStory = isStory === true;
+  const wantsReel = isReel === true;
   if (wantsStory) {
     if (platform !== 'instagram') {
       return NextResponse.json(
@@ -58,6 +67,53 @@ export async function POST(request: Request) {
     if (!visualUrl || typeof visualUrl !== 'string') {
       return NextResponse.json(
         { error: 'Stories require an image. Add a visual before scheduling.' },
+        { status: 400 }
+      );
+    }
+  }
+
+  // PR #32 — Sprint 5.3: Reels validation. Mutually exclusive with
+  // Stories (a single post can't be both). videoUrl must be the
+  // public Supabase URL Meta will fetch — duration / size / aspect
+  // are stored as metadata for display + future filtering.
+  const REELS_MAX_BYTES = 100 * 1024 * 1024;
+  if (wantsReel) {
+    if (wantsStory) {
+      return NextResponse.json(
+        { error: 'A post cannot be both a Story and a Reel.' },
+        { status: 400 }
+      );
+    }
+    if (platform !== 'instagram') {
+      return NextResponse.json(
+        {
+          error:
+            'Reels are only supported on Instagram. Uncheck "Post as Reel" or change the platform.',
+        },
+        { status: 400 }
+      );
+    }
+    if (!videoUrl || typeof videoUrl !== 'string') {
+      return NextResponse.json(
+        { error: 'Reels require a video. Upload one before scheduling.' },
+        { status: 400 }
+      );
+    }
+    if (
+      typeof videoDurationSeconds === 'number' &&
+      (videoDurationSeconds < 3 || videoDurationSeconds > 90)
+    ) {
+      return NextResponse.json(
+        { error: 'Reels must be between 3 and 90 seconds.' },
+        { status: 400 }
+      );
+    }
+    if (
+      typeof videoSizeBytes === 'number' &&
+      videoSizeBytes > REELS_MAX_BYTES
+    ) {
+      return NextResponse.json(
+        { error: 'Reel video exceeds 100 MB limit.' },
         { status: 400 }
       );
     }
@@ -118,6 +174,25 @@ export async function POST(request: Request) {
       visualPrompt: safeVisualPrompt,
       visualType: safeVisualUrl ? 'image' : null,
       isStory: wantsStory,
+      // PR #32 — Sprint 5.3: Reel persistence. reelProcessingStatus
+      // starts as 'uploaded' (the file is in Supabase Storage and
+      // ready) and the publisher will flip it to 'meta_processing'
+      // when it creates the IG container.
+      isReel: wantsReel,
+      videoUrl: wantsReel && typeof videoUrl === 'string' ? videoUrl : null,
+      videoDurationSeconds:
+        wantsReel && typeof videoDurationSeconds === 'number'
+          ? Math.round(videoDurationSeconds)
+          : null,
+      videoSizeBytes:
+        wantsReel && typeof videoSizeBytes === 'number'
+          ? videoSizeBytes
+          : null,
+      videoAspectRatio:
+        wantsReel && typeof videoAspectRatio === 'number'
+          ? videoAspectRatio.toFixed(4)
+          : null,
+      reelProcessingStatus: wantsReel ? 'uploaded' : null,
     })
     .returning();
 

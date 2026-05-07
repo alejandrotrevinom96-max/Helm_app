@@ -112,6 +112,31 @@ export function LibraryPostCard({ post, onClick }: Props) {
                 Expired
               </span>
             )}
+          {/* PR #32 — Reel badges. Purple distinguishes from Story's
+              pink. Processing tint mirrors the Story flow:
+              meta_processing → amber, error → danger, ready → no
+              extra badge (the lifecycle status badge above tells
+              the published story). */}
+          {post.isReel && (
+            <span className="text-[10px] font-mono uppercase tracking-[0.1em] px-2 py-0.5 rounded bg-purple-500/15 text-purple-500">
+              🎬 Reel
+            </span>
+          )}
+          {post.isReel &&
+            post.reelProcessingStatus === 'meta_processing' && (
+              <span className="text-[10px] font-mono uppercase tracking-[0.1em] px-2 py-0.5 rounded bg-amber-500/15 text-amber-500">
+                Processing…
+              </span>
+            )}
+          {post.isReel &&
+            post.reelProcessingStatus === 'error' && (
+              <span
+                className="text-[10px] font-mono uppercase tracking-[0.1em] px-2 py-0.5 rounded bg-danger/15 text-danger"
+                title={post.reelProcessingError ?? 'Reel processing failed'}
+              >
+                Reel error
+              </span>
+            )}
         </div>
         <span className="text-[10px] font-mono uppercase tracking-[0.1em] text-text-3">
           {post.platform}

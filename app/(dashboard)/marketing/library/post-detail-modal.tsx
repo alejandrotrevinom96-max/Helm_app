@@ -273,6 +273,45 @@ export function PostDetailModal({
           />
         )}
 
+        {/* PR #32 — Reel video preview + processing state. videoUrl
+            is the Supabase Storage public URL we uploaded — we can
+            preview it inline without going through Meta. */}
+        {post.isReel && post.videoUrl && (
+          <div className="mb-4">
+            <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2">
+              Reel video
+            </div>
+            {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+            <video
+              src={post.videoUrl}
+              controls
+              playsInline
+              className="w-full max-w-sm rounded bg-bg"
+              style={{ aspectRatio: '9/16' }}
+            />
+            <div className="mt-2 text-xs text-text-3">
+              {post.videoDurationSeconds
+                ? `${post.videoDurationSeconds}s`
+                : ''}
+              {post.videoSizeBytes
+                ? ` · ${(post.videoSizeBytes / (1024 * 1024)).toFixed(1)} MB`
+                : ''}
+            </div>
+            {post.reelProcessingStatus === 'meta_processing' && (
+              <div className="mt-2 p-2 bg-amber-500/10 border border-amber-500/30 rounded text-xs text-amber-500">
+                ⏱ Meta is processing this Reel. The polling worker will
+                publish it once status hits FINISHED — typically 30–90
+                seconds, sometimes longer for large videos.
+              </div>
+            )}
+            {post.reelProcessingStatus === 'error' && (
+              <div className="mt-2 p-2 bg-danger/10 border border-danger/30 rounded text-xs text-danger">
+                ⊘ {post.reelProcessingError ?? 'Reel processing failed'}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Metadata */}
         <div className="mb-6 grid grid-cols-2 gap-3 text-xs">
           {post.scheduledFor && (

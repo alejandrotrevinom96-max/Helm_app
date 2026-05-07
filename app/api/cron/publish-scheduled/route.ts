@@ -99,6 +99,22 @@ export async function GET(request: Request) {
           const result = await publishPost(post.id);
 
           if (result.success) {
+            // PR #32 — Sprint 5.3: Reels return success+pendingPolling
+            // because we only created the container; /media_publish
+            // still has to wait for processing. Don't mark this row
+            // as 'published' yet — the publisher already set
+            // publishStatus to 'publishing' and the polling cron will
+            // flip it to 'published' once Meta says FINISHED.
+            if (result.pendingPolling) {
+              // Leave publishStatus='publishing' so this cron skips
+              // the row on next tick (the WHERE clause excludes
+              // 'publishing'). The poll-reels cron filters by
+              // reelProcessingStatus='meta_processing' and will
+              // flip publishStatus to 'published' or 'failed' once
+              // Meta returns a terminal status_code. No-op here.
+              results.retrying += 1;
+              return;
+            }
             await db
               .update(scheduledPosts)
               .set({

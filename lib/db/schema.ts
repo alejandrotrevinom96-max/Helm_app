@@ -9,6 +9,7 @@ import {
   date,
   boolean,
   unique,
+  bigint,
 } from 'drizzle-orm/pg-core';
 import type { BrandBible } from '@/lib/types/brand';
 import type { ScoreBreakdown } from '@/lib/ai/consistency-score';
@@ -152,6 +153,12 @@ export const generatedPosts = pgTable('generated_posts', {
   // flag preserved if the draft sits in the pool before scheduling.
   // The schedule-from-draft endpoint copies this into scheduled_posts.
   isStory: boolean('is_story').default(false).notNull(),
+  // PR #32 — Sprint 5.3: Reel intent + uploaded video URL travel with
+  // the draft. Drafts only carry the URL (the source of truth lives
+  // in the Supabase bucket) — duration / size / aspect_ratio belong to
+  // scheduled_posts because that's where they affect publish behaviour.
+  isReel: boolean('is_reel').default(false).notNull(),
+  videoUrl: text('video_url'),
 });
 
 // ===== Research Findings =====
@@ -398,6 +405,34 @@ export const scheduledPosts = pgTable('scheduled_posts', {
   // that unless the founder archived it as a Highlight manually.
   isStory: boolean('is_story').default(false).notNull(),
   storyExpiresAt: timestamp('story_expires_at'),
+  // PR #32 — Sprint 5.3: Instagram Reels. Reels diverge from
+  // Stories/feed because Meta processes the video asynchronously
+  // (~30-90s typically, can stretch). The publisher creates the
+  // container and stops; a SECOND cron (poll-reels) checks
+  // status_code on a backoff schedule and calls /media_publish
+  // when status hits FINISHED.
+  //
+  // Storage: video lives in the "reels" Supabase bucket with a
+  // public-read URL Meta can fetch. video_url is that URL.
+  // Other fields are captured client-side at upload time so the
+  // backend can re-validate without parsing the video again.
+  isReel: boolean('is_reel').default(false).notNull(),
+  videoUrl: text('video_url'),
+  videoDurationSeconds: integer('video_duration_seconds'),
+  videoSizeBytes: bigint('video_size_bytes', { mode: 'number' }),
+  videoAspectRatio: numeric('video_aspect_ratio', {
+    precision: 5,
+    scale: 4,
+  }),
+  // Reel processing lifecycle, distinct from publishStatus:
+  //   uploading → uploaded → meta_processing → ready → (publish path)
+  //   uploading → uploaded → meta_processing → error
+  reelProcessingStatus: text('reel_processing_status'),
+  reelProcessingError: text('reel_processing_error'),
+  reelPollingAttempts: integer('reel_polling_attempts')
+    .default(0)
+    .notNull(),
+  reelPollingNextAt: timestamp('reel_polling_next_at'),
 });
 
 // ===== Meta Integrations =====

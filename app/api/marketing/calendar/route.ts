@@ -34,6 +34,10 @@ export interface CalendarPost {
   // when isStory is true so the user spots them on the grid.
   isStory: boolean;
   storyExpiresAt: string | null;
+  // PR #32 — Sprint 5.3: Reels. 🎬 marker on chips; the
+  // reelProcessingStatus surfaces "processing" badges in the modal.
+  isReel: boolean;
+  reelProcessingStatus: string | null;
 }
 
 export async function GET(request: Request) {
@@ -111,6 +115,8 @@ export async function GET(request: Request) {
     publishStatus: r.publishStatus ?? null,
     isStory: r.isStory ?? false,
     storyExpiresAt: r.storyExpiresAt?.toISOString() ?? null,
+    isReel: r.isReel ?? false,
+    reelProcessingStatus: r.reelProcessingStatus ?? null,
   }));
 
   return NextResponse.json({ posts });
