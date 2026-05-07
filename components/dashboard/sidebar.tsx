@@ -6,6 +6,8 @@ import { useState, useTransition, useEffect } from 'react';
 import type { Project } from '@/lib/db/schema';
 import { setActiveProject } from '@/app/(dashboard)/actions';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
+import { FounderCard } from './founder-card';
+import { AddProjectModal } from './add-project-modal';
 
 // PR #22 reorder: Marketing first (the star feature in the v2.0
 // pivot), Analytics deemphasized to penultimate before setup. Validate
@@ -32,6 +34,10 @@ export function Sidebar({
   const [open, setOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
+  // PR #33 — Sprint 6.1: manual project creation via modal. Pre-PR-33
+  // the "+ Add project" link bounced to /onboarding (a GitHub-only
+  // flow). Now non-GitHub users can create a project from anywhere.
+  const [addProjectOpen, setAddProjectOpen] = useState(false);
 
   useEffect(() => {
     setMobileOpen(false);
@@ -168,13 +174,16 @@ export function Sidebar({
                       {p.id === activeProject.id && <span className="text-accent text-xs">✓</span>}
                     </button>
                   ))}
-                  <Link
-                    href="/onboarding"
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpen(false);
+                      setAddProjectOpen(true);
+                    }}
                     className="block w-full p-3 border-t border-border text-sm text-accent hover:bg-surface-1 text-center transition-colors"
-                    onClick={() => setOpen(false)}
                   >
                     + Add project
-                  </Link>
+                  </button>
                 </div>
               </>
             )}
@@ -216,19 +225,19 @@ export function Sidebar({
         </div>
 
         <div className="p-3 border-t border-border">
-          <div className="flex items-center gap-3 p-2">
-            {user.avatarUrl ? (
-              <img src={user.avatarUrl} alt="" className="w-8 h-8 rounded-full" />
-            ) : (
-              <div className="w-8 h-8 rounded-full bg-[image:var(--accent-grad)]" />
-            )}
-            <div className="flex-1 min-w-0">
-              <div className="text-sm font-medium truncate">{user.name}</div>
-              <div className="text-xs text-text-3">Free plan</div>
-            </div>
-          </div>
+          {/* PR #33 — Sprint 6.1: avatar card → dropdown trigger
+              with Settings + Sign out. Was static pre-PR-33; the
+              "no logout button" was the #1 piece of user feedback. */}
+          <FounderCard user={user} />
         </div>
       </aside>
+
+      {/* PR #33 — global modal mounted once. Anywhere in the sidebar
+          (project switcher "+ Add project") can open it. */}
+      <AddProjectModal
+        isOpen={addProjectOpen}
+        onClose={() => setAddProjectOpen(false)}
+      />
     </>
   );
 }

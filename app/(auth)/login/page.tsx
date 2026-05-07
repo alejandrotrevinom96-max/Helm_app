@@ -1,17 +1,57 @@
 'use client';
 
+// PR #33 — Sprint 6.1: login page expanded.
+//
+// Pre-PR-33 the only sign-in option was "Continue with GitHub". User
+// feedback was "nuestro signup al momento es únicamente por medio de
+// GitHub. Hay que poner OAuth de Google o registrarse con mail +
+// password." This page now supports all three.
+//
+// Layout matches the editorial-glass aesthetic: glass-elevated card,
+// accent-glow blob, font-display heading. Existing GitHub users hit
+// the same button — back-compat preserved.
+import { useState, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
+import { Loader2, Mail } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { OAuthButtons } from '../_oauth-buttons';
 
-export default function LoginPage() {
-  const handleGithubLogin = async () => {
+function LoginForm() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(
+    // ?error=auth_failed lands here from the callback handler when
+    // an OAuth round-trip fails. Surface it so the user knows why.
+    searchParams.get('error') === 'auth_failed'
+      ? 'Sign-in failed. Try again.'
+      : searchParams.get('error') === 'no_code'
+        ? 'OAuth flow returned no authorization code. Try again.'
+        : null
+  );
+
+  const handleEmailLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
     const supabase = createClient();
-    await supabase.auth.signInWithOAuth({
-      provider: 'github',
-      options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
-        scopes: 'read:user user:email repo',
-      },
+    const { error: signInError } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password,
     });
+    if (signInError) {
+      setError(signInError.message);
+      setSubmitting(false);
+      return;
+    }
+    // The middleware will route us correctly based on whether the
+    // user has finished onboarding. router.refresh() makes server
+    // components re-fetch with the new session.
+    router.push('/');
+    router.refresh();
   };
 
   return (
@@ -21,10 +61,16 @@ export default function LoginPage() {
         className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-accent-glow blur-[140px] opacity-25 -z-10 pointer-events-none"
       />
 
-      <div className="glass-elevated rounded-2xl max-w-md w-full p-8 md:p-12">
-        <div className="text-center mb-10">
-          <div className="inline-flex items-center gap-3 mb-8">
-            <svg viewBox="0 0 32 32" className="w-10 h-10" fill="none" stroke="currentColor" strokeWidth={1.5}>
+      <div className="glass-elevated rounded-2xl max-w-md w-full p-8 md:p-10">
+        <div className="text-center mb-8">
+          <div className="inline-flex items-center gap-3 mb-6">
+            <svg
+              viewBox="0 0 32 32"
+              className="w-8 h-8"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={1.5}
+            >
               <circle cx="16" cy="16" r="14" />
               <circle cx="16" cy="16" r="3" fill="var(--accent)" stroke="none" />
               <line x1="16" y1="2" x2="16" y2="8" />
@@ -32,31 +78,101 @@ export default function LoginPage() {
               <line x1="2" y1="16" x2="8" y2="16" />
               <line x1="24" y1="16" x2="30" y2="16" />
             </svg>
-            <span className="font-display text-3xl font-medium">Helm</span>
+            <span className="font-display text-2xl font-medium">Helm</span>
           </div>
-          <h1 className="font-display text-3xl md:text-4xl font-light leading-tight mb-3">
+          <h1 className="font-display text-3xl font-light leading-tight mb-2">
             Welcome back, <em className="editorial-italic">founder.</em>
           </h1>
           <p className="text-text-2 text-sm">
-            Sign in with GitHub to access your command center.
+            Sign in to your command center.
           </p>
         </div>
 
-        <button
-          onClick={handleGithubLogin}
-          className="w-full bg-[image:var(--accent-grad)] text-white py-3 px-6 rounded-lg font-medium flex items-center justify-center gap-3 shadow-editorial hover:shadow-editorial-lg hover:-translate-y-0.5 transition-all"
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />
-          </svg>
-          Continue with GitHub
-        </button>
+        {error && (
+          <div className="mb-4 p-3 bg-danger/10 border border-danger/30 rounded-lg text-sm text-danger">
+            {error}
+          </div>
+        )}
 
-        <p className="text-center text-text-3 text-xs mt-6">
-          We&apos;ll scan your public + private repos to detect your SaaS projects.
-          Your data is encrypted and never shared.
-        </p>
+        <OAuthButtons />
+
+        <div className="flex items-center gap-3 my-5">
+          <div className="flex-1 h-px bg-border" />
+          <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3">
+            or
+          </span>
+          <div className="flex-1 h-px bg-border" />
+        </div>
+
+        <form onSubmit={handleEmailLogin} className="space-y-3">
+          <div>
+            <label className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2 block">
+              Email
+            </label>
+            <input
+              type="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full px-3 py-2 bg-bg border border-border rounded-lg text-sm outline-none focus:border-accent"
+              placeholder="you@example.com"
+              autoComplete="email"
+            />
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 block">
+                Password
+              </label>
+              <Link
+                href="/forgot-password"
+                className="text-xs text-text-3 hover:text-accent"
+              >
+                Forgot?
+              </Link>
+            </div>
+            <input
+              type="password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full px-3 py-2 bg-bg border border-border rounded-lg text-sm outline-none focus:border-accent"
+              placeholder="••••••••"
+              autoComplete="current-password"
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={submitting}
+            className="w-full px-4 py-2.5 bg-accent text-white rounded-lg text-sm font-medium hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {submitting ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Mail className="w-4 h-4" />
+            )}
+            Sign in
+          </button>
+        </form>
+
+        <div className="text-center pt-5 mt-5 border-t border-border text-sm text-text-3">
+          New to Helm?{' '}
+          <Link href="/signup" className="text-accent hover:underline">
+            Create account
+          </Link>
+        </div>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  // useSearchParams must be inside a Suspense boundary in Next 15.
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
   );
 }

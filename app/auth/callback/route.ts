@@ -1,4 +1,24 @@
-import { createClient, createServiceClient } from '@/lib/supabase/server';
+// PR #33 — Sprint 6.1: callback hardened for non-GitHub providers.
+//
+// Pre-PR-33 this route assumed every incoming session came from
+// GitHub and unconditionally tried to extract `user_name`, save a
+// GitHub provider token, and bump onboarding step. That worked fine
+// for the original sign-in flow but breaks when a user comes back
+// via email/password or Google OAuth — there's no `provider_token`,
+// no GitHub metadata, and the GitHub-only side effects shouldn't
+// fire.
+//
+// New behavior:
+//   1. Always exchange the code for a session.
+//   2. Always upsert the user row with whatever metadata is present
+//      (full_name / name fall back to email prefix).
+//   3. Save GitHub provider_token + bump onboarding step ONLY when
+//      the session's app_metadata.provider is 'github'.
+//
+// Email/password signups land here via the Supabase confirmation
+// link; Google OAuth lands here after the redirect. Both work
+// without GitHub metadata.
+import { createClient } from '@/lib/supabase/server';
 import { encrypt } from '@/lib/crypto';
 import { db } from '@/lib/db';
 import { users, integrations } from '@/lib/db/schema';
@@ -6,8 +26,17 @@ import { eq } from 'drizzle-orm';
 import { redirect } from 'next/navigation';
 import { type NextRequest } from 'next/server';
 
+interface MetadataShape {
+  user_name?: string;
+  preferred_username?: string;
+  provider_id?: string;
+  full_name?: string;
+  name?: string;
+  avatar_url?: string;
+}
+
 export async function GET(request: NextRequest) {
-  const { searchParams, origin } = new URL(request.url);
+  const { searchParams } = new URL(request.url);
   const code = searchParams.get('code');
   const next = searchParams.get('next') ?? '/onboarding';
 
@@ -25,30 +54,60 @@ export async function GET(request: NextRequest) {
 
   const user = data.user;
   const session = data.session;
-  const githubMeta = user.user_metadata;
-  const providerToken = session.provider_token; // GitHub access token
+  const meta = (user.user_metadata ?? {}) as MetadataShape;
+  // app_metadata.provider tells us which OAuth provider (or 'email')
+  // owned this session. We use it to gate provider-specific work
+  // below.
+  const provider =
+    (user.app_metadata?.provider as string | undefined) ?? 'email';
+  const providerToken = session.provider_token; // present for OAuth
+  const isGithub = provider === 'github';
 
-  // Upsert user record in our DB
+  // Display name fallback chain: full_name → name → email local part.
+  // The third arm matters for email signups where neither metadata
+  // field is set.
+  const displayName =
+    meta.full_name ??
+    meta.name ??
+    user.email?.split('@')[0] ??
+    'Founder';
+
+  // Provider-specific GitHub fields only land when the actual session
+  // came from GitHub. Email + Google sessions leave them null.
   await db
     .insert(users)
     .values({
       id: user.id,
       email: user.email!,
-      githubUsername: githubMeta?.user_name || githubMeta?.preferred_username,
-      githubId: githubMeta?.provider_id ? parseInt(githubMeta.provider_id) : undefined,
-      name: githubMeta?.full_name || githubMeta?.name,
-      avatarUrl: githubMeta?.avatar_url,
+      githubUsername: isGithub
+        ? meta.user_name ?? meta.preferred_username ?? null
+        : null,
+      githubId:
+        isGithub && meta.provider_id ? parseInt(meta.provider_id) : undefined,
+      name: displayName,
+      avatarUrl: meta.avatar_url ?? null,
     })
     .onConflictDoUpdate({
       target: users.id,
       set: {
-        githubUsername: githubMeta?.user_name || githubMeta?.preferred_username,
-        avatarUrl: githubMeta?.avatar_url,
+        // Only refresh the GitHub-specific fields when re-logging in
+        // via GitHub. Other providers shouldn't clobber a previously
+        // saved GitHub username with null.
+        ...(isGithub
+          ? {
+              githubUsername:
+                meta.user_name ?? meta.preferred_username ?? null,
+            }
+          : {}),
+        avatarUrl: meta.avatar_url ?? undefined,
       },
     });
 
-  // Save GitHub access token (encrypted)
-  if (providerToken) {
+  // Save the GitHub access token only when this session is GitHub.
+  // Supabase reuses the same callback for every provider, but the
+  // token is provider-specific — saving a Google token under
+  // provider='github' would corrupt the integrations table.
+  if (isGithub && providerToken) {
     await db
       .insert(integrations)
       .values({
@@ -66,16 +125,17 @@ export async function GET(request: NextRequest) {
       });
   }
 
-  // Check if user has completed onboarding
   const [dbUser] = await db
     .select()
     .from(users)
     .where(eq(users.id, user.id))
     .limit(1);
 
-  // Connecting GitHub satisfies wizard step 1 — bump them past it without
-  // demoting if they're already further along.
-  if (providerToken && (dbUser?.onboardingStep ?? 0) < 2) {
+  // Connecting GitHub satisfies wizard step 1. We don't auto-bump
+  // for email/Google because those flows don't yet have integration
+  // data — the user has to add a project manually (PR #33 modal) or
+  // open Settings to connect more.
+  if (isGithub && providerToken && (dbUser?.onboardingStep ?? 0) < 2) {
     await db
       .update(users)
       .set({ onboardingStep: 2 })

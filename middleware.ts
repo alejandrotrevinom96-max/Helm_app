@@ -34,7 +34,16 @@ export async function middleware(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
 
   const pathname = request.nextUrl.pathname;
-  const isAuthRoute = pathname.startsWith('/login') || pathname.startsWith('/auth');
+  // PR #33 — Sprint 6.1: /signup, /forgot-password, /reset-password
+  // join /login as auth-public routes. Without this, an
+  // unauthenticated visitor hits /signup and the middleware bounces
+  // them to /login, which is the opposite of useful.
+  const isAuthRoute =
+    pathname.startsWith('/login') ||
+    pathname.startsWith('/signup') ||
+    pathname.startsWith('/forgot-password') ||
+    pathname.startsWith('/reset-password') ||
+    pathname.startsWith('/auth');
   // PR #29 — /privacy and /terms MUST be publicly accessible because
   // Meta App Review and Vercel's robots both crawl them anonymously.
   // Hiding them behind /login fails Meta's review. /w/* are the

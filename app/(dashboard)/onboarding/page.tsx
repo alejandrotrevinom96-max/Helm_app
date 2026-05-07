@@ -12,15 +12,29 @@ export default async function OnboardingPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
-  // Get GitHub token
+  // Get GitHub token (optional in PR #33+).
   const [githubIntegration] = await db
     .select()
     .from(integrations)
     .where(and(eq(integrations.userId, user.id), eq(integrations.provider, 'github')))
     .limit(1);
 
+  // PR #33 — Sprint 6.1: users who signed up via email or Google
+  // don't have a GitHub integration. Pre-PR-33 we kicked them back
+  // to /login with ?error=no_github — confusing because they DID
+  // sign in successfully. Now we render the OnboardingClient with
+  // empty candidates + a flag so it shows a "no GitHub — add a
+  // project manually" CTA. Avoids redirect loops with downstream
+  // dashboard pages that require an active project.
   if (!githubIntegration) {
-    return redirect('/login?error=no_github');
+    return (
+      <OnboardingClient
+        candidates={[]}
+        scanError={null}
+        userId={user.id}
+        noGithub
+      />
+    );
   }
 
   const token = decrypt(githubIntegration.encryptedAccessToken);

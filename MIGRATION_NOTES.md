@@ -1,3 +1,60 @@
+# Sprint 6.1 — Auth providers setup
+
+PR #33 added Google OAuth and email/password sign-up on top of the
+existing GitHub OAuth flow. The code shipped, but two of the three
+providers need operator setup in Supabase / Google Cloud before they
+work in production.
+
+## Email + password (Supabase)
+
+Supabase Dashboard → Authentication → Providers → **Email**:
+- Make sure the provider is **enabled** (it usually is by default).
+- "Confirm email" should stay on so users get a verification link
+  before they can sign in.
+
+For deliverability you almost certainly want a real SMTP provider
+instead of Supabase's default sender (which has aggressive rate
+limits in production):
+
+Supabase Dashboard → Authentication → SMTP Settings:
+```
+Host:     smtp.resend.com   (or your provider)
+Port:     465
+User:     resend
+Password: <RESEND_API_KEY>
+Sender:   noreply@trythelm.com
+```
+
+Verify your sender domain in Resend before flipping the switch
+or every confirmation email gets dropped.
+
+## Google OAuth
+
+1. Google Cloud Console → https://console.cloud.google.com/
+2. Create / pick a project (e.g. "Helm").
+3. **APIs & Services → Credentials → Create OAuth Client ID**.
+4. Application type: **Web application**.
+5. Authorized redirect URI:
+   ```
+   https://<your-supabase-project>.supabase.co/auth/v1/callback
+   ```
+   (find the exact URL in Supabase → Authentication → Providers →
+   Google → Callback URL)
+6. Copy the Client ID + Client Secret.
+7. Supabase Dashboard → Authentication → Providers → **Google**:
+   enable and paste the credentials. Save.
+
+Once saved, "Continue with Google" on `/login` and `/signup` works.
+
+## Smoke test post-setup
+
+- `/signup` with email/password → confirmation email arrives
+- Click confirmation link → redirected to `/onboarding`
+- Email-only user (no GitHub) sees the new "Add a project manually"
+  variant of the onboarding screen
+- Sidebar avatar (bottom-left) clicks open a dropdown → "Sign out"
+  works and routes back to `/login`
+
 # Sprint 5.x — Manual Setup Required
 
 This file covers the post-deploy steps that the operator must run by

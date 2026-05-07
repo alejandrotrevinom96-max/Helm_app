@@ -2,6 +2,8 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Plus } from 'lucide-react';
+import { AddProjectModal } from '@/components/dashboard/add-project-modal';
 
 type Candidate = {
   repo: {
@@ -25,16 +27,60 @@ export function OnboardingClient({
   candidates,
   scanError,
   userId,
+  noGithub = false,
 }: {
   candidates: Candidate[];
   scanError: string | null;
   userId: string;
+  // PR #33 — Sprint 6.1: when the user signed up via email/Google
+  // there's no GitHub integration to scan. Switch to a "manual
+  // first project" UI instead of showing an empty repo list.
+  noGithub?: boolean;
 }) {
   const router = useRouter();
   const [selected, setSelected] = useState<Set<number>>(
     new Set(candidates.map((c) => c.repo.id))
   );
   const [submitting, setSubmitting] = useState(false);
+  const [addProjectOpen, setAddProjectOpen] = useState(false);
+
+  // PR #33 — render the manual-first variant when GitHub isn't
+  // connected. The user gets a single big "Add project" button that
+  // opens the same modal the sidebar uses; once a project exists,
+  // the AddProjectModal redirects to /marketing/generate.
+  if (noGithub) {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-6">
+        <div className="glass-elevated rounded-2xl max-w-md w-full p-8 md:p-10 text-center">
+          <h1 className="font-display text-3xl font-light mb-2">
+            Welcome to Helm
+          </h1>
+          <p className="text-sm text-text-2 mb-6">
+            Let&apos;s create your first project. You can connect
+            integrations (Vercel, Supabase, Meta) later from the Integrations
+            page.
+          </p>
+          <button
+            type="button"
+            onClick={() => setAddProjectOpen(true)}
+            className="inline-flex items-center gap-2 px-5 py-2.5 bg-accent text-white rounded-lg text-sm font-medium hover:opacity-90"
+          >
+            <Plus className="w-4 h-4" />
+            Add a project
+          </button>
+          <p className="text-[10px] text-text-3 mt-6">
+            You can also connect a GitHub account later from{' '}
+            <span className="font-medium">Settings → Integrations</span> to
+            scan repos automatically.
+          </p>
+          <AddProjectModal
+            isOpen={addProjectOpen}
+            onClose={() => setAddProjectOpen(false)}
+          />
+        </div>
+      </div>
+    );
+  }
 
   const toggle = (id: number) => {
     const next = new Set(selected);
@@ -149,6 +195,28 @@ export function OnboardingClient({
             {submitting ? 'Setting up...' : 'Continue → Connect integrations'}
           </button>
         </div>
+
+        {/* PR #33 — Sprint 6.1: skip-and-add-manually escape hatch.
+            Useful when the user's repos don't match what Helm
+            expects (e.g. monorepo, non-web SaaS) and they'd rather
+            describe their project from scratch. */}
+        <div className="mt-8 pt-6 border-t border-border text-center">
+          <p className="text-sm text-text-3 mb-2">
+            Don&apos;t see your project, or none of these match?
+          </p>
+          <button
+            type="button"
+            onClick={() => setAddProjectOpen(true)}
+            className="text-sm text-accent hover:underline"
+          >
+            Skip and add manually →
+          </button>
+        </div>
+
+        <AddProjectModal
+          isOpen={addProjectOpen}
+          onClose={() => setAddProjectOpen(false)}
+        />
       </div>
     </div>
   );
