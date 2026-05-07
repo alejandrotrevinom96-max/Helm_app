@@ -68,21 +68,63 @@ inside the Meta dashboard can complete the OAuth flow. Review takes
 For testing without review: add yourself as an App Tester at
 **App settings → Roles → Testers**.
 
-## 5. Verify the cron worker
+## 5. Trigger the publish-scheduled cron
 
-Once `CRON_SECRET` is set and Vercel redeploys, `/api/cron/publish-scheduled`
-runs every minute. Check `vercel.json` to confirm:
+The `/api/cron/publish-scheduled` endpoint exists and is auth-gated by
+`CRON_SECRET`, but it is **NOT** wired up to Vercel Cron because the
+project runs on the Hobby plan (which limits cron jobs to once per
+day — useless for a "publish at the scheduled minute" feature).
+
+You have three options to drive the cron:
+
+### Option A — External cron service (recommended for Hobby plan)
+
+Set up a free pinger like [cron-job.org](https://cron-job.org) or
+[uptimerobot.com](https://uptimerobot.com) to hit the endpoint every
+minute:
+
+- **URL:** `https://trythelm.com/api/cron/publish-scheduled`
+- **Method:** GET
+- **Headers:** `Authorization: Bearer <CRON_SECRET>`
+- **Schedule:** every 1 minute
+
+The endpoint is idempotent (it claims rows via `publishStatus =
+'publishing'` before firing) so overlapping ticks won't double-post.
+
+### Option B — GitHub Actions cron
+
+Add `.github/workflows/publish-cron.yml`:
+
+```yaml
+on:
+  schedule:
+    - cron: '* * * * *'
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          curl -fsS -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            https://trythelm.com/api/cron/publish-scheduled
+```
+
+GitHub Actions cron has ~5min jitter — slightly less precise than a
+dedicated pinger, but free and within the same repo.
+
+### Option C — Upgrade to Vercel Pro
+
+If you upgrade to Pro ($20/mo), add this back to `vercel.json`:
 
 ```json
 {
-  "crons": [
-    { "path": "/api/cron/sync-metrics", "schedule": "0 0 * * *" },
-    { "path": "/api/cron/publish-scheduled", "schedule": "* * * * *" }
-  ]
+  "path": "/api/cron/publish-scheduled",
+  "schedule": "* * * * *"
 }
 ```
 
-You can manually trigger a tick (debug only):
+Pro unlocks per-minute crons and saves you from the external dance.
+
+### Manual test (debug)
 
 ```bash
 curl -H "Authorization: Bearer $CRON_SECRET" \
