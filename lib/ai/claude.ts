@@ -10,6 +10,135 @@ const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
 // Use Opus for nuanced tasks (research synthesis, qualitative analysis)
 const OPUS_MODEL = 'claude-opus-4-7';
 
+// ============ PR #35 — Sprint 6.3: prompt caching helpers ============
+//
+// Anthropic supports `cache_control: { type: 'ephemeral' }` on system
+// blocks and user content blocks to reuse the prefix on subsequent
+// calls. Cache reads cost ~10% of regular reads; writes cost ~1.25x
+// (paid once). TTL is 5 min (default) or 1 h with a beta header — we
+// stick to default since session-based usage almost always lands
+// inside 5 min.
+//
+// Minimum cacheable prefix: 1024 tokens. Below that, the cache_control
+// flag is silently ignored. Don't bother caching short systems.
+//
+// IMPORTANT: cache_control marks the END of a prefix. Everything BEFORE
+// that block in the same call is part of the cached prefix. So order
+// matters — put stable context (system, brand bible) first, dynamic
+// content (user query) last.
+export const MODELS = {
+  HAIKU: HAIKU_MODEL,
+  OPUS: OPUS_MODEL,
+} as const;
+
+// Marks a system prompt for ephemeral caching. SDK v0.32 only types
+// `cache_control` on the beta surface, but the runtime accepts it on
+// the regular endpoint — so we cast at the boundary. When the SDK
+// promotes the field to stable types we can drop the assertion.
+type CachedTextBlock = Anthropic.TextBlockParam & {
+  cache_control: { type: 'ephemeral' };
+};
+
+export function cachedSystem(content: string): Anthropic.TextBlockParam[] {
+  return [
+    {
+      type: 'text',
+      text: content,
+      cache_control: { type: 'ephemeral' },
+    } as CachedTextBlock,
+  ];
+}
+
+// Wraps a static context block (e.g. a serialized brand bible) +
+// dynamic user query so the static block ends with cache_control. Use
+// this when the per-call query is small but the context is large +
+// repeated across calls in the same session.
+export function cachedUserMessage(
+  staticContext: string,
+  dynamicQuery: string
+): Anthropic.TextBlockParam[] {
+  return [
+    {
+      type: 'text',
+      text: staticContext,
+      cache_control: { type: 'ephemeral' },
+    } as CachedTextBlock,
+    {
+      type: 'text',
+      text: dynamicQuery,
+    },
+  ];
+}
+
+// Pricing per million tokens (2026-05 snapshot — update if Anthropic
+// changes). Used by lib/ai/usage-tracker.ts for cost estimates.
+export const MODEL_PRICING_PER_MTOK: Record<
+  string,
+  {
+    input: number;
+    output: number;
+    cacheWrite: number;
+    cacheRead: number;
+  }
+> = {
+  [HAIKU_MODEL]: {
+    input: 0.8,
+    output: 4,
+    cacheWrite: 1, // ~1.25x input
+    cacheRead: 0.08, // ~0.10x input
+  },
+  [OPUS_MODEL]: {
+    input: 15,
+    output: 75,
+    cacheWrite: 18.75, // 1.25x input
+    cacheRead: 1.5, // 0.10x input
+  },
+};
+
+export interface CacheStats {
+  cacheRead: number;
+  cacheWrite: number;
+  regularInput: number;
+  output: number;
+}
+
+// Reads usage off a Messages.create response and reports cache stats.
+// SDK v0.32 doesn't type cache_*_input_tokens on Usage (they live on
+// the beta surface only) but the runtime returns them when you
+// passed cache_control on a request — same boundary cast as the
+// CachedTextBlock above.
+type UsageWithCache = Anthropic.Usage & {
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+};
+
+export function readCacheStats(
+  usage: Anthropic.Usage | undefined
+): CacheStats {
+  const u = usage as UsageWithCache | undefined;
+  return {
+    cacheRead: u?.cache_read_input_tokens ?? 0,
+    cacheWrite: u?.cache_creation_input_tokens ?? 0,
+    regularInput: u?.input_tokens ?? 0,
+    output: u?.output_tokens ?? 0,
+  };
+}
+
+export function logCacheStats(
+  endpoint: string,
+  usage: Anthropic.Usage | undefined
+): CacheStats {
+  const stats = readCacheStats(usage);
+  // Only log when caching actually happened — otherwise the noise
+  // drowns the signal.
+  if (stats.cacheRead > 0 || stats.cacheWrite > 0) {
+    console.log(
+      `[CACHE] ${endpoint}: read=${stats.cacheRead} write=${stats.cacheWrite} input=${stats.regularInput} output=${stats.output}`
+    );
+  }
+  return stats;
+}
+
 // Legacy shape from PR #2. Kept for the deprecated /api/brand/analyze route
 // and any older callers that haven't migrated to the BrandBible path yet.
 export interface BrandContext {
@@ -199,12 +328,29 @@ export async function generatePost(params: {
     context.description
   );
 
+  // PR #35 — Sprint 6.3: prompt caching. The system prompt embeds the
+  // full brand bible (~3-5k tokens for a complete bible), and the user
+  // typically generates several drafts × platforms in a row. Marking
+  // the system block ephemeral means the second-through-Nth call in a
+  // 5-min window pays ~10% on input instead of full price. Empirical
+  // saving on a heavy session: ~80%.
   const response = await anthropic.messages.create({
     model: HAIKU_MODEL,
     max_tokens: 1500,
-    system: systemPrompt,
+    system: cachedSystem(systemPrompt),
     messages: [{ role: 'user', content: prompt }],
   });
+  logCacheStats('generatePost', response.usage);
+  // Lazy import to avoid a circular dep — usage-tracker imports
+  // pricing from this file. Top-level import works at runtime but
+  // creates a wart in the type checker we'd rather avoid.
+  void import('./usage-tracker').then(({ trackUsage }) =>
+    trackUsage({
+      endpoint: 'generatePost',
+      model: HAIKU_MODEL,
+      usage: response.usage,
+    })
+  );
 
   const textBlock = response.content.find((b) => b.type === 'text');
   return textBlock?.type === 'text' ? textBlock.text : '';

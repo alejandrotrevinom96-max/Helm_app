@@ -1,4 +1,11 @@
-import { anthropic } from '@/lib/ai/claude';
+import type Anthropic from '@anthropic-ai/sdk';
+import {
+  anthropic,
+  cachedSystem,
+  cachedUserMessage,
+  logCacheStats,
+  MODELS,
+} from '@/lib/ai/claude';
 import type { BrandBible } from '@/lib/types/brand';
 
 export interface ScoreBreakdown {
@@ -69,35 +76,13 @@ export async function computeConsistencyScore(
   const nonNeg = (bible.nonNegotiables ?? []).join(' | ') || '(none)';
   const topPain = bible.audience?.primary?.painPoints?.[0]?.pain ?? '(unknown)';
 
-  const evaluationPrompt = `You are a brand quality auditor. Evaluate the following post against the brand bible. Output STRICTLY valid JSON.
+  // PR #35 — Sprint 6.3: split into system + user blocks so prompt
+  // caching can reuse the bible across the 3 drafts × N platforms a
+  // single Generate click produces. The system prompt holds the
+  // scoring rubric (stable across all calls). The user message has
+  // TWO blocks: bible (cached) + post-to-evaluate (dynamic).
+  const SYSTEM_PROMPT = `You are a brand quality auditor. Evaluate posts against the provided brand bible. Output STRICTLY valid JSON in this shape:
 
-═══════ BRAND BIBLE ═══════
-
-Archetype: ${bible.archetype?.primary ?? 'unknown'}
-Voice (0=left, 10=right):
-- Casual ↔ Formal: ${bible.voice?.formal ?? 5}/10
-- Playful ↔ Serious: ${bible.voice?.serious ?? 5}/10
-- Reserved ↔ Bold: ${bible.voice?.bold ?? 5}/10
-
-Pillars: ${pillars}
-${pillarFocus ? `THIS DRAFT WAS WRITTEN TO LEAN INTO PILLAR: ${pillarFocus}` : ''}
-
-Banned terms: ${banned}
-Preferred terms: ${preferred}
-Non-negotiables: ${nonNeg}
-
-Audience: ${bible.audience?.primary?.description ?? '(unknown)'}
-Top pain: ${topPain}
-
-═══════ POST TO EVALUATE ═══════
-
-${postContent}
-
-═══════ TASK ═══════
-
-Score each dimension 0-10. Be strict but fair. Then list specific violations and suggestions.
-
-Output JSON:
 {
   "voice": 0-10 (does it match the voice spectrum?),
   "vocabulary": 0-10 (uses preferred, avoids banned?),
@@ -106,15 +91,53 @@ Output JSON:
   "audienceResonance": 0-10 (would the audience care about this?),
   "violations": [string] (specific things wrong, max 5),
   "suggestions": [string] (specific improvements, max 3)
-}`;
+}
 
-  let response;
+Be strict but fair. Penalize banned-term hits hard (vocabulary score). Reward authentic voice that matches the calibration sliders. No preamble, no markdown fences.`;
+
+  const bibleBlock = `═══════ BRAND BIBLE ═══════
+
+Archetype: ${bible.archetype?.primary ?? 'unknown'}
+Voice (0=left, 10=right):
+- Casual ↔ Formal: ${bible.voice?.formal ?? 5}/10
+- Playful ↔ Serious: ${bible.voice?.serious ?? 5}/10
+- Reserved ↔ Bold: ${bible.voice?.bold ?? 5}/10
+
+Pillars: ${pillars}
+Banned terms: ${banned}
+Preferred terms: ${preferred}
+Non-negotiables: ${nonNeg}
+
+Audience: ${bible.audience?.primary?.description ?? '(unknown)'}
+Top pain: ${topPain}`;
+
+  const postBlock = `═══════ POST TO EVALUATE ═══════
+
+${pillarFocus ? `(this draft was written to lean into pillar: ${pillarFocus})\n\n` : ''}${postContent}`;
+
+  let response: Anthropic.Message;
   try {
     response = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
+      model: MODELS.HAIKU,
       max_tokens: 1500,
-      messages: [{ role: 'user', content: evaluationPrompt }],
+      system: cachedSystem(SYSTEM_PROMPT),
+      messages: [
+        {
+          role: 'user',
+          // First block (bible) gets cache_control; second block (post)
+          // is dynamic so the cache prefix ends right before it.
+          content: cachedUserMessage(bibleBlock, postBlock),
+        },
+      ],
     });
+    logCacheStats('consistency-score', response.usage);
+    void import('./usage-tracker').then(({ trackUsage }) =>
+      trackUsage({
+        endpoint: 'consistency-score',
+        model: MODELS.HAIKU,
+        usage: response.usage,
+      })
+    );
   } catch {
     return neutralScore('Score evaluation failed');
   }

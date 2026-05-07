@@ -1,4 +1,10 @@
-import { anthropic } from '@/lib/ai/claude';
+import type Anthropic from '@anthropic-ai/sdk';
+import {
+  anthropic,
+  cachedSystem,
+  logCacheStats,
+  MODELS,
+} from '@/lib/ai/claude';
 import type { HelmData } from './data-pull';
 import type {
   CompassDimension,
@@ -59,32 +65,13 @@ export async function generateInsights(
     .sort((a, b) => b.gap - a.gap);
   const top10Gaps = allGaps.slice(0, 10);
 
-  const prompt = `You are a senior venture analyst evaluating an indie hacker project. Generate concrete, actionable insights.
-
-═══════ CURRENT SCORE ═══════
-Total: ${totalScore}/100
-
-By dimension:
-${dimensions.map((d) => `- ${d.name}: ${d.pts}/${d.maxPts}`).join('\n')}
-
-═══════ TOP GAPS (sorted by potential lift) ═══════
-${top10Gaps.map((g) => `- [${g.dimensionName}] ${g.name}: ${g.pts}/${g.maxPts} pts. ${g.evidence}`).join('\n')}
-
-═══════ HELM DATA SUMMARY ═══════
-- Project: ${data.project?.name ?? 'unknown'}
-- Tagline: "${data.brandBible?.identity?.tagline ?? 'none'}"
-- Archetype: ${data.brandBible?.archetype?.primary ?? 'none'}
-- Pillars: ${(data.brandBible?.pillars ?? []).map((p) => p.name).join(', ') || 'none'}
-- Waitlist signups: ${data.uniqueWaitlistSignups}
-- Pricing-test responses: ${data.pricingTestResponses.length}
-- Survey pain quotes: ${data.surveyResponses.length}
-- Posts last 30d: ${data.scheduledPostsLast30d}
-- Days since last activity: ${data.daysSinceLastPost ?? 'unknown'}
-- Competitors tracked: ${data.competitorsConfigured.join(', ') || 'none'}
-- 7-day signup growth: ${data.signupGrowthRate7d}%
-
-Form data provided by founder:
-${JSON.stringify(formData, null, 2)}
+  // PR #35 — Sprint 6.3: split into cached system + dynamic user.
+  // The rubric, output JSON spec, and rules are stable across every
+  // recompute — only the score data + form input change. Users
+  // typically tweak the form 2-4 times before they're happy with
+  // the output, so caching the ~1500-token instructions saves the
+  // bulk of input cost on retries.
+  const SYSTEM_PROMPT = `You are a senior venture analyst evaluating an indie hacker project. Generate concrete, actionable insights.
 
 ═══════ TASK ═══════
 
@@ -122,13 +109,47 @@ RULES:
 - priority should reflect: lift size × effort efficiency × strategic importance.
 - Cover at least 3 different dimensions in the 5 recommendations.`;
 
-  let response;
+  const userPrompt = `═══════ CURRENT SCORE ═══════
+Total: ${totalScore}/100
+
+By dimension:
+${dimensions.map((d) => `- ${d.name}: ${d.pts}/${d.maxPts}`).join('\n')}
+
+═══════ TOP GAPS (sorted by potential lift) ═══════
+${top10Gaps.map((g) => `- [${g.dimensionName}] ${g.name}: ${g.pts}/${g.maxPts} pts. ${g.evidence}`).join('\n')}
+
+═══════ HELM DATA SUMMARY ═══════
+- Project: ${data.project?.name ?? 'unknown'}
+- Tagline: "${data.brandBible?.identity?.tagline ?? 'none'}"
+- Archetype: ${data.brandBible?.archetype?.primary ?? 'none'}
+- Pillars: ${(data.brandBible?.pillars ?? []).map((p) => p.name).join(', ') || 'none'}
+- Waitlist signups: ${data.uniqueWaitlistSignups}
+- Pricing-test responses: ${data.pricingTestResponses.length}
+- Survey pain quotes: ${data.surveyResponses.length}
+- Posts last 30d: ${data.scheduledPostsLast30d}
+- Days since last activity: ${data.daysSinceLastPost ?? 'unknown'}
+- Competitors tracked: ${data.competitorsConfigured.join(', ') || 'none'}
+- 7-day signup growth: ${data.signupGrowthRate7d}%
+
+Form data provided by founder:
+${JSON.stringify(formData, null, 2)}`;
+
+  let response: Anthropic.Message;
   try {
     response = await anthropic.messages.create({
-      model: 'claude-opus-4-7',
+      model: MODELS.OPUS,
       max_tokens: 3000,
-      messages: [{ role: 'user', content: prompt }],
+      system: cachedSystem(SYSTEM_PROMPT),
+      messages: [{ role: 'user', content: userPrompt }],
     });
+    logCacheStats('compass-insights', response.usage);
+    void import('@/lib/ai/usage-tracker').then(({ trackUsage }) =>
+      trackUsage({
+        endpoint: 'compass-insights',
+        model: MODELS.OPUS,
+        usage: response.usage,
+      })
+    );
   } catch (e) {
     return fallback(
       e instanceof Error ? `AI call failed: ${e.message}` : 'AI call failed'

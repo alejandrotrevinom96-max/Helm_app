@@ -655,6 +655,29 @@ export const previewRateLimits = pgTable('preview_rate_limits', {
   blockedUntil: timestamp('blocked_until'),
 });
 
+// ===== Anthropic Usage Log =====
+// PR #35 — Sprint 6.3: every cached endpoint persists usage stats
+// here so we can watch cache hit rate trend over time and spot any
+// endpoint that regressed (cache_read_input_tokens dropping to zero
+// = something broke the prefix). user_id and project_id are
+// nullable because the public preview endpoint logs without either.
+export const anthropicUsageLog = pgTable('anthropic_usage_log', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id'),
+  projectId: uuid('project_id'),
+  endpoint: text('endpoint').notNull(), // 'generatePost' | 'consistency-score' | …
+  model: text('model').notNull(),
+  inputTokens: integer('input_tokens').notNull().default(0),
+  outputTokens: integer('output_tokens').notNull().default(0),
+  cacheReadTokens: integer('cache_read_tokens').notNull().default(0),
+  cacheWriteTokens: integer('cache_write_tokens').notNull().default(0),
+  estimatedCostUsd: numeric('estimated_cost_usd', {
+    precision: 10,
+    scale: 6,
+  }),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
 // ===== Type exports =====
 export type User = typeof users.$inferSelect;
 export type Project = typeof projects.$inferSelect;
