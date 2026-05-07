@@ -2,24 +2,34 @@
 // PR #36 — Sprint 6.2.2: smart input — accepts a website URL OR an
 // Instagram handle (@voyaa.app, instagram.com/voyaa.app). Two
 // testers reported having only Instagram, no website.
+// PR #36 — Sprint 6.2.3: manual description fallback. When scrape
+// fails (Meta login wall, dead URL, blocked bot), the landing
+// surfaces a "Describe your brand manually" link that POSTs the
+// founder's typed description in place of a URL. Same Anthropic
+// prompt + output shape; no scrape step.
 //
 // POST /api/public/preview-bible
-// Body: { input?: string, url?: string }   (url kept for back-compat)
+// Body — exactly one of:
+//   { input: 'yoursite.com' | '@yourhandle' | 'instagram.com/yourhandle' }
+//   { url: '...' }                       // legacy alias for input
+//   { description: '30–1000 chars' }     // 6.2.3 fallback path
 //
-// Sequence (no-cache path):
+// Sequence:
 //   1. Rate-limit check (read-only, per ip_hash). 429 on overflow.
-//   2. detectInputType → website | instagram | invalid.
-//   3. URL validation only on website branch (anti-SSRF).
-//   4. Cache lookup keyed by content hash (prefixed for IG so the
-//      same string can't collide across types).
-//   5. Source-specific scrape:
-//      - website: cheerio extract title/h1/h2s/body
-//      - instagram: og + meta tags from public profile page
-//   6. commitRateLimit (now we're about to spend Anthropic tokens).
-//   7. Claude Haiku 4.5 → strict JSON preview.
-//   8. Persist to public_bible_previews.
+//   2. Description mode: validate length, skip detection/scrape.
+//      URL/IG mode: detectInputType → website | instagram | invalid,
+//                   validate (anti-SSRF for website).
+//   3. Cache lookup keyed by content hash, mode-prefixed so the
+//      same string can't collide across types ("voyaa.app" as URL
+//      vs IG handle vs description all hash differently).
+//   4. Source-specific scrape (skipped for description).
+//   5. commitRateLimit (now we're about to spend Anthropic tokens).
+//   6. Claude Haiku 4.5 → strict JSON preview.
+//   7. Persist to public_bible_previews.
 //
 // Returns: { cached, preview, url, source, remainingRequests? }
+//   - source: 'website' | 'instagram' | 'description'
+//   - url: null when source === 'description' (no canonical URL exists)
 //
 // Cost control: Haiku (not Opus), short prompts ≈ $0.003/run. Cache
 // + per-IP rate limit cap exposure.
@@ -37,7 +47,6 @@ import {
 } from '@/lib/landing/rate-limit';
 import {
   hashUrl,
-  normalizeUrl,
   validatePublicUrl,
 } from '@/lib/landing/url-validator';
 import { detectInputType } from '@/lib/landing/input-detector';
@@ -59,6 +68,13 @@ const HAIKU_OUTPUT_COST_PER_TOKEN = 0.000004;
 // pay AI twice for the same site this week" with "the brand voice
 // can drift if you change the homepage".
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+// PR #36 Sprint 6.2.3: description bounds. 30 lower bound stops
+// "asdfasdf" garbage; 1000 upper bound caps prompt size for Haiku
+// (a focused brand description fits in <500 chars; 1000 leaves
+// room for founders who think out loud).
+const DESCRIPTION_MIN_CHARS = 30;
+const DESCRIPTION_MAX_CHARS = 1000;
 
 // PR #36: pull the hostname out of a normalized URL for use in
 // human-readable error messages. The URL constructor never throws
@@ -114,6 +130,12 @@ function friendlyFetchError(e: unknown, url: string): string {
   return `Couldn't reach ${host}. Make sure the site is online and the URL is correct.`;
 }
 
+// PR #36 Sprint 6.2.3: marker prefix on original_url so we can
+// detect description rows on cache lookup without adding a column.
+// The full description still drives the hash; this just stores a
+// truncated label for display fallback.
+const DESCRIPTION_URL_MARKER = 'description:';
+
 interface AiPreview {
   archetype: string;
   voice: string;
@@ -135,22 +157,64 @@ function isAiPreview(input: unknown): input is AiPreview {
   );
 }
 
+type Mode = 'website' | 'instagram' | 'description';
+
+// PR #36: cache hits don't carry mode metadata, so we recover it
+// from the stored original_url. Description rows have a sentinel
+// prefix; IG rows have an instagram.com URL; everything else is a
+// plain website URL.
+function detectStoredMode(originalUrl: string): Mode {
+  if (originalUrl.startsWith(DESCRIPTION_URL_MARKER)) return 'description';
+  if (/(?:^|\/\/)(?:www\.)?instagram\.com\//i.test(originalUrl)) {
+    return 'instagram';
+  }
+  return 'website';
+}
+
 export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}));
+
+  // PR #36 Sprint 6.2.3 — description path is mutually exclusive
+  // with input/url. If `description` is present (non-empty after
+  // trim), we skip URL detection and scraping entirely.
+  const descriptionRaw =
+    typeof body?.description === 'string' ? body.description.trim() : '';
+  const isDescriptionMode = descriptionRaw.length > 0;
+
   // PR #36 — accept either `input` (preferred) or `url` (legacy
   // back-compat with anyone who built against the PR-34 shape).
-  const raw =
-    typeof body?.input === 'string'
+  const raw = isDescriptionMode
+    ? ''
+    : typeof body?.input === 'string'
       ? body.input
       : typeof body?.url === 'string'
         ? body.url
         : '';
 
-  if (raw.trim().length === 0) {
+  if (!isDescriptionMode && raw.trim().length === 0) {
     return NextResponse.json(
       { error: 'URL or @handle is required' },
       { status: 400 }
     );
+  }
+
+  if (isDescriptionMode) {
+    if (descriptionRaw.length < DESCRIPTION_MIN_CHARS) {
+      return NextResponse.json(
+        {
+          error: `Add a bit more detail (at least ${DESCRIPTION_MIN_CHARS} characters) so we can pick up your brand.`,
+        },
+        { status: 400 }
+      );
+    }
+    if (descriptionRaw.length > DESCRIPTION_MAX_CHARS) {
+      return NextResponse.json(
+        {
+          error: `Description is too long (max ${DESCRIPTION_MAX_CHARS} characters).`,
+        },
+        { status: 400 }
+      );
+    }
   }
 
   // 1. Read-only rate-limit check. Reject if already blocked, but
@@ -169,42 +233,62 @@ export async function POST(request: Request) {
     );
   }
 
-  // 2. Detect input type.
-  const detection = detectInputType(raw);
-  if (detection.type === 'invalid') {
-    return NextResponse.json(
-      {
-        error:
-          detection.reason ??
-          'Invalid input. Use a website URL (yoursite.com) or Instagram handle (@yourhandle).',
-      },
-      { status: 400 }
-    );
-  }
+  // 2. Mode detection. Description is its own mode; URL/IG falls
+  // through detectInputType + (for websites) anti-SSRF.
+  let mode: Mode;
+  let normalized: string; // content used to compute the cache hash
+  let displayUrl: string; // canonical "URL-shaped" value for display + storage
 
-  // 3. Source-specific anti-SSRF / safety check (only websites need
-  // it — IG handles route to instagram.com which is safe by
-  // definition).
-  if (detection.type === 'website') {
-    const validation = validatePublicUrl(detection.normalized);
-    if (!validation.valid) {
+  if (isDescriptionMode) {
+    mode = 'description';
+    normalized = descriptionRaw;
+    // Persisted as a marker so we can detect description rows on
+    // cache lookup without adding a new column. Truncated for
+    // safety; the full text is what generated the preview anyway.
+    displayUrl = `${DESCRIPTION_URL_MARKER}${descriptionRaw.slice(0, 200)}`;
+  } else {
+    const detection = detectInputType(raw);
+    if (detection.type === 'invalid') {
       return NextResponse.json(
-        { error: validation.reason ?? 'Invalid URL' },
+        {
+          error:
+            detection.reason ??
+            'Invalid input. Use a website URL (yoursite.com) or Instagram handle (@yourhandle).',
+        },
         { status: 400 }
       );
     }
+    if (detection.type === 'website') {
+      const validation = validatePublicUrl(detection.normalized);
+      if (!validation.valid) {
+        return NextResponse.json(
+          { error: validation.reason ?? 'Invalid URL' },
+          { status: 400 }
+        );
+      }
+    }
+    mode = detection.type;
+    normalized = detection.normalized;
+    // displayUrl is set after the scrape (websites use the
+    // normalized URL; IG uses the canonical
+    // instagram.com/handle/ form).
+    displayUrl = '';
   }
 
-  // PR #36: cache key is type-prefixed so "voyaa.app" as a website
-  // and "@voyaa.app" as an IG handle never collide.
+  // PR #36: cache key is mode-prefixed so the same string can't
+  // collide across input types.
   const urlHash =
-    detection.type === 'instagram'
+    mode === 'instagram'
       ? createHash('sha256')
-          .update(`ig:${detection.normalized}`)
+          .update(`ig:${normalized}`)
           .digest('hex')
           .slice(0, 32)
-      : hashUrl(detection.normalized);
-  const normalized = detection.normalized;
+      : mode === 'description'
+        ? createHash('sha256')
+            .update(`desc:${normalized.toLowerCase()}`)
+            .digest('hex')
+            .slice(0, 32)
+        : hashUrl(normalized);
   const now = new Date();
 
   // 3. Cache hit returns instantly.
@@ -236,6 +320,8 @@ export async function POST(request: Request) {
         lastVisitedAt: now,
       })
       .where(eq(publicBiblePreviews.id, cached.id));
+
+    const storedMode = detectStoredMode(cached.originalUrl);
     return NextResponse.json({
       cached: true,
       preview: {
@@ -245,14 +331,11 @@ export async function POST(request: Request) {
         audience: cached.previewAudience ?? '',
         oneLiner: cached.previewOneLiner ?? '',
       },
-      url: cached.originalUrl,
-      // PR #36 — derive source from the stored URL. We always
-      // persist a navigable URL in original_url; IG previews use
-      // https://instagram.com/handle/, so a substring check
-      // recovers the source without needing a new column.
-      source: /(?:^|\/\/)(?:www\.)?instagram\.com\//i.test(cached.originalUrl)
-        ? 'instagram'
-        : 'website',
+      // For description hits there's no real URL; null tells the
+      // UI to render "Generated from your description" instead of
+      // the (truncated) marker string.
+      url: storedMode === 'description' ? null : cached.originalUrl,
+      source: storedMode,
       remainingRequests: commit.remainingRequests,
     });
   }
@@ -270,17 +353,25 @@ export async function POST(request: Request) {
   // canonical URL stored + returned). On any failure we exit with
   // a friendly 400 BEFORE committing the rate-limit slot.
   let contextForAi: string;
-  let displayUrl: string;
 
-  if (detection.type === 'instagram') {
+  if (mode === 'description') {
+    // PR #36 Sprint 6.2.3 — no scrape. Feed the founder's words
+    // straight to Haiku with a NOTE so it doesn't hallucinate
+    // site-style details.
+    contextForAi = `User-provided brand description:
+${descriptionRaw}
+
+NOTE: Source is the founder's own description (no website or social profile scrape). Use the description verbatim — don't add claims, products, or audiences that aren't there.`;
+    // displayUrl already set above (DESCRIPTION_URL_MARKER + truncated text).
+  } else if (mode === 'instagram') {
     // PR #36 — IG path. instagram-scraper is best-effort; surface
     // its error verbatim because it's already user-facing copy.
-    const ig = await scrapeInstagramPublic(detection.normalized);
+    const ig = await scrapeInstagramPublic(normalized);
     if (isInstagramScrapeError(ig)) {
       return NextResponse.json({ error: ig.error }, { status: 400 });
     }
     contextForAi = instagramDataToContext(ig);
-    displayUrl = `https://www.instagram.com/${detection.normalized}/`;
+    displayUrl = `https://www.instagram.com/${normalized}/`;
   } else {
     // Website path (original PR #34 / PR #36 friendly-error logic).
     let html: string;
@@ -369,8 +460,8 @@ ${bodyText.slice(0, 2000)}`;
   }
 
   // 6. Claude Haiku call. Strict JSON output; we sanitize before
-  // persisting. Source-agnostic prompt — works for both website
-  // and Instagram inputs.
+  // persisting. Source-agnostic prompt — works for websites,
+  // Instagram bios, and founder-typed descriptions alike.
   const prompt = `You are a brand strategist analyzing a brand source to derive a quick brand bible preview. Be SPECIFIC to this brand — never use generic phrasing.
 
 ${contextForAi}
@@ -484,8 +575,11 @@ Rules:
   return NextResponse.json({
     cached: false,
     preview,
-    url: displayUrl,
-    source: detection.type, // 'website' | 'instagram'
+    // For description mode there's no canonical URL — return null
+    // so the UI can render "Generated from your description"
+    // instead of leaking the marker string.
+    url: mode === 'description' ? null : displayUrl,
+    source: mode, // 'website' | 'instagram' | 'description'
     remainingRequests: commit.remainingRequests,
   });
 }
