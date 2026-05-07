@@ -1,13 +1,35 @@
+'use client';
+
+// PR #34 — Sprint 6.2: landing nav rebuild.
+//
+// Sticky top nav with backdrop blur. Transparent at top of page,
+// fades to bg/80 + border once the user scrolls past 20px so it
+// stays readable over content. The dual CTA (Sign in + Start free)
+// matches the rest of the auth flow added in PR #33.
 import Link from 'next/link';
+import { useEffect, useState } from 'react';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
 
 export function LandingNav() {
+  const [scrolled, setScrolled] = useState(false);
+
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 20);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
   return (
-    <nav className="fixed top-0 left-0 right-0 z-50 backdrop-blur-glass bg-bg/70 border-b border-border">
-      <div className="max-w-6xl mx-auto px-4 md:px-8 py-4 flex justify-between items-center">
+    <nav
+      className={`fixed top-0 left-0 right-0 z-50 transition-colors ${
+        scrolled
+          ? 'bg-bg/80 backdrop-blur-glass border-b border-border'
+          : 'bg-transparent'
+      }`}
+    >
+      <div className="max-w-6xl mx-auto px-4 md:px-8 h-14 flex items-center justify-between">
         <Link href="/" className="flex items-center gap-2.5">
-          {/* Compass icon — same family as the sidebar's CompassIcon (PR #14)
-              so logged-in users see continuity from landing → app */}
           <svg
             viewBox="0 0 24 24"
             className="w-7 h-7 text-accent"
@@ -21,31 +43,31 @@ export function LandingNav() {
           <span className="font-display text-xl font-medium">Helm</span>
         </Link>
 
-        <div className="flex items-center gap-2 sm:gap-4">
+        <div className="flex items-center gap-2 md:gap-5 text-sm">
           <a
-            href="#features"
-            className="hidden md:inline text-sm text-text-2 hover:text-text-1"
+            href="#pillars"
+            className="hidden md:inline-block text-text-2 hover:text-text-1 transition-colors"
           >
             Features
           </a>
           <a
-            href="#how"
-            className="hidden md:inline text-sm text-text-2 hover:text-text-1"
+            href="#how-it-works"
+            className="hidden md:inline-block text-text-2 hover:text-text-1 transition-colors"
           >
             How it works
-          </a>
-          <a
-            href="#pricing"
-            className="hidden md:inline text-sm text-text-2 hover:text-text-1"
-          >
-            Pricing
           </a>
           <ThemeToggle />
           <Link
             href="/login"
-            className="bg-[image:var(--accent-grad)] text-white px-4 py-2 rounded-lg text-sm font-medium transition-transform hover:-translate-y-0.5"
+            className="text-text-2 hover:text-text-1 transition-colors"
           >
-            Get early access →
+            Sign in
+          </Link>
+          <Link
+            href="/signup"
+            className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity"
+          >
+            Start free
           </Link>
         </div>
       </div>

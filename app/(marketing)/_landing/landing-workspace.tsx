@@ -1,96 +1,82 @@
-import { GlassCard } from '@/components/ui/glass-card';
+// PR #34 — Sprint 6.2: replaced the v1 features-card grid with a
+// linear "How it works" timeline. Same file path so the route
+// group keeps its existing structure; the export is renamed to
+// LandingHowItWorks and aliased as LandingWorkspace for back-compat.
 
-interface Feature {
-  num: string;
+interface Step {
+  number: string;
   title: string;
-  headline: string;
-  body: string;
-  tags: string[];
+  description: string;
 }
 
-const FEATURES: Feature[] = [
+const STEPS: Step[] = [
   {
-    num: '01',
-    title: 'Analytics',
-    headline: 'See everything that matters',
-    body: 'Visitors from Vercel, signups from Supabase, ad spend from Meta — cross-referenced into MRR, CAC, and LTV. Calculated automatically. No spreadsheets.',
-    tags: ['vercel', 'supabase', 'meta-ads'],
+    number: '01',
+    title: 'Connect your website',
+    description:
+      'Paste your URL or sign up with Google / GitHub / email. Helm reads your existing brand presence — the same way the landing preview already showed you.',
   },
   {
-    num: '02',
-    title: 'Marketing',
-    headline: 'Brand-aware content that sounds like you',
-    body: 'Multi-draft posts scored 0-100 against your brand bible. 12 archetypes, voice spectrum, quote vault. Schedule to Instagram, Facebook, LinkedIn, Threads, and Reddit — each one gets brand-tuned copy. Drift detection alerts when your brand starts wandering.',
-    tags: ['brand-bible', 'consistency-score', 'quote-vault'],
+    number: '02',
+    title: 'Auto-generate your brand bible',
+    description:
+      'AI extracts your archetype, voice, pillars, and audience. Validate visually with a 12-image batch. Refine or accept — it lives with your project.',
   },
   {
-    num: '03',
-    title: 'Research',
-    headline: 'Find pain. Find users.',
-    body: 'Scans Reddit, Hacker News, Indie Hackers, and Google Trends for signals matching your niche. Auto-configures sources based on your brand bible. Get pinged when someone describes the problem you solve.',
-    tags: ['reddit-api', 'hn-api', 'opus-synthesis'],
+    number: '03',
+    title: 'Generate posts that actually fit',
+    description:
+      'Type a topic, AI writes brand-aligned drafts for each platform you choose — Instagram, Facebook, LinkedIn, Threads, Reddit.',
   },
   {
-    num: '04',
-    title: 'Compass',
-    headline: 'Score your startup like a VC',
-    body: 'Helm analyzes your project across 5 dimensions (Validation, Strategy, Execution, Traction, Market) and scores it 0-100 with specific recommendations on how to improve. Backed by peer-reviewed VC research — not vibes.',
-    tags: ['opus-analysis', 'vc-research', 'weak-dim-detection'],
+    number: '04',
+    title: 'Schedule and ship',
+    description:
+      'Drag drafts onto the calendar. Pick a golden time. Connect Meta, Helm publishes when scheduled. Stories and Reels work too.',
   },
 ];
 
-export function LandingWorkspace() {
+function LandingHowItWorks() {
   return (
     <section
-      id="features"
-      className="max-w-6xl mx-auto px-4 md:px-8 py-20 md:py-24"
+      id="how-it-works"
+      className="py-24 px-4 md:px-8 border-t border-border bg-bg-elev/30"
     >
-      <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-accent mb-3">
-        // the workspace
-      </div>
+      <div className="max-w-3xl mx-auto">
+        <div className="text-center mb-12 md:mb-16">
+          <div className="text-[10px] font-mono uppercase tracking-[0.2em] text-text-3 mb-3">
+            How it works
+          </div>
+          <h2 className="font-display text-4xl md:text-5xl tracking-tight font-light leading-tight">
+            From website to scheduled posts in minutes
+          </h2>
+        </div>
 
-      <h2 className="font-display text-3xl md:text-5xl font-light mb-4 max-w-3xl leading-[1.05] tracking-tight">
-        Four tabs.
-        <br />
-        <em className="editorial-italic">One source of truth.</em>
-      </h2>
-
-      <p className="text-base md:text-lg text-text-2 max-w-2xl mb-12 md:mb-16 leading-relaxed">
-        Helm replaces the chaos of context-switching with a unified workspace
-        built around the actual jobs of an indie hacker — including strategy
-        scoring backed by VC research.
-      </p>
-
-      <div className="space-y-6 md:space-y-8">
-        {FEATURES.map((f) => (
-          <GlassCard key={f.num} className="p-6 md:p-10">
-            <div className="grid md:grid-cols-3 gap-6 md:gap-8 items-start">
-              <div>
-                <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2">
-                  {f.num} / {f.title}
-                </div>
-                <h3 className="font-display text-2xl md:text-3xl font-light leading-tight">
-                  {f.headline}
-                </h3>
+        {/* hairline-separated panels — editorial layout, no shadows */}
+        <div className="space-y-px bg-border rounded-2xl overflow-hidden">
+          {STEPS.map((step) => (
+            <div
+              key={step.number}
+              className="bg-bg p-6 md:p-8 flex gap-5 md:gap-6 items-start"
+            >
+              <div className="font-display text-3xl md:text-4xl text-accent font-light shrink-0 w-12">
+                {step.number}
               </div>
-
-              <div className="md:col-span-2">
-                <p className="text-text-2 leading-relaxed mb-4">{f.body}</p>
-                <div className="flex flex-wrap gap-2">
-                  {f.tags.map((tag) => (
-                    <span
-                      key={tag}
-                      className="text-[10px] font-mono px-2 py-1 rounded bg-bg-elev text-text-3 border border-border"
-                    >
-                      {tag}
-                    </span>
-                  ))}
-                </div>
+              <div className="flex-1">
+                <h3 className="font-display text-lg md:text-xl mb-2 font-light">
+                  {step.title}
+                </h3>
+                <p className="text-sm md:text-base text-text-2 leading-relaxed">
+                  {step.description}
+                </p>
               </div>
             </div>
-          </GlassCard>
-        ))}
+          ))}
+        </div>
       </div>
     </section>
   );
 }
+
+export { LandingHowItWorks };
+export const LandingWorkspace = LandingHowItWorks;

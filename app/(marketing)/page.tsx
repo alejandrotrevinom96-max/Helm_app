@@ -2,21 +2,28 @@ import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { LandingPage } from './_landing/landing-page';
 
+// PR #34 — Sprint 6.2: metadata refresh.
+// Old copy ("command center", "7 tabs") leaned into the v1 dashboard
+// pitch. The product is now a marketing suite — the new copy matches
+// the Hero tagline and what a visitor will actually see/do.
 export const metadata = {
-  title: 'Helm — The command center for indie hackers',
+  title:
+    'Helm — Brand-aware content that sounds like you. Posted automatically.',
   description:
-    'Stop juggling 7 tabs. Helm pulls every signal from your micro-SaaS into one dashboard — analytics, marketing, research, validation, and VC-grade strategy scoring. Now live, free for first 20 founders.',
+    'AI marketing suite for indie founders. Auto-generate a brand bible from your website, write posts that fit your voice, and auto-publish to Meta. Free for the first 20 founders.',
   openGraph: {
-    title: 'Helm — The command center for indie hackers',
+    title:
+      'Helm — Brand-aware content that sounds like you. Posted automatically.',
     description:
-      'Stop juggling 7 tabs. Now live, free for first 20 founders.',
+      'AI marketing suite for indie founders. Free for the first 20 founders.',
+    url: 'https://trythelm.com',
+    siteName: 'Helm',
     type: 'website',
   },
   twitter: {
     card: 'summary_large_image' as const,
-    title: 'Helm — The command center for indie hackers',
-    description:
-      'Stop juggling 7 tabs. Now live, free for first 20 founders.',
+    title: 'Helm — Brand-aware content that sounds like you',
+    description: 'Posted automatically.',
   },
 };
 

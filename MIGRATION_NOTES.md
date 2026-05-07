@@ -1,3 +1,47 @@
+# Sprint 6.2 — Landing viral preview setup
+
+PR #34 ships a public-facing preview endpoint (`/api/public/preview-bible`)
+that scrapes a URL the visitor types into the landing-page hero and
+returns a small AI-generated brand teaser. Two operator steps before
+this is fully wired up in production:
+
+## 1. Run the migration
+
+```bash
+DATABASE_URL=<prod_url> npx tsx scripts/add-public-bible-previews.ts
+```
+
+Idempotent. Adds `public_bible_previews` (7-day cache) and
+`preview_rate_limits` (per-IP-hash sliding window).
+
+## 2. Set IP_HASH_SALT in Vercel
+
+The rate limiter hashes IPs before storing them so we don't keep
+plaintext IPs in the DB. The salt should be unique to this
+deployment — rotating it doesn't break anything (just resets the
+counters).
+
+```
+IP_HASH_SALT=$(openssl rand -hex 32)
+```
+
+Add it to Vercel → Project Settings → Environment Variables.
+
+If unset, the limiter falls back to `NEXTAUTH_SECRET` (already
+deployed) — that's safe but means the limiter shares a secret with
+auth, which is harder to rotate.
+
+## 3. Smoke test post-deploy
+
+- Visit `/` → new editorial hero loads
+- Type `voya.com.mx` → click "See your brand" → preview renders in
+  ~30s
+- Same URL again → returns instantly (cache hit, `cached: true`)
+- 6th request from the same IP within an hour → 429
+- `localhost` / private IPs → 400 with anti-SSRF message
+- Click "See full bible" on the preview → `/signup?url=…` shows the
+  context banner ("We'll auto-generate the full brand bible for X")
+
 # Sprint 6.1 — Auth providers setup
 
 PR #33 added Google OAuth and email/password sign-up on top of the

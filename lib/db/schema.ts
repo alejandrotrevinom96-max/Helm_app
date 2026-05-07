@@ -617,6 +617,44 @@ export const brandImageValidations = pgTable('brand_image_validations', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
+// ===== Public Bible Previews =====
+// PR #34 — Sprint 6.2. Cache for the landing page's "see your brand"
+// teaser. Anyone can hit POST /api/public/preview-bible with a URL
+// and get a small AI-generated preview of how Helm would interpret
+// their brand — no signup required. We cache for 7 days per URL hash
+// so a viral share doesn't hammer Anthropic.
+//
+// `url_hash` = sha256(normalized URL).slice(0, 32) — collision-safe
+// for the corpus we'd ever cache, and shorter than the full URL on
+// the index. The original URL stays in `original_url` for display.
+export const publicBiblePreviews = pgTable('public_bible_previews', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  urlHash: text('url_hash').notNull().unique(),
+  originalUrl: text('original_url').notNull(),
+  previewArchetype: text('preview_archetype'),
+  previewVoice: text('preview_voice'),
+  previewPillars: jsonb('preview_pillars').$type<string[]>(),
+  previewAudience: text('preview_audience'),
+  previewOneLiner: text('preview_one_liner'),
+  // Tracked so we can spot expensive runs in the future.
+  generationCost: numeric('generation_cost', { precision: 10, scale: 6 }),
+  visitCount: integer('visit_count').default(0).notNull(),
+  lastVisitedAt: timestamp('last_visited_at').defaultNow().notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  expiresAt: timestamp('expires_at'),
+});
+
+// ===== Preview Rate Limits =====
+// PR #34 — per-IP-hash rate limiter for /api/public/preview-bible.
+// Plain hashed IPs (no plaintext) — see lib/landing/rate-limit.ts.
+// Window is 1h; 5 requests/window; 1h block on overflow.
+export const previewRateLimits = pgTable('preview_rate_limits', {
+  ipHash: text('ip_hash').primaryKey(),
+  count: integer('count').notNull().default(0),
+  windowStart: timestamp('window_start').notNull().defaultNow(),
+  blockedUntil: timestamp('blocked_until'),
+});
+
 // ===== Type exports =====
 export type User = typeof users.$inferSelect;
 export type Project = typeof projects.$inferSelect;

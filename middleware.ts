@@ -54,6 +54,11 @@ export async function middleware(request: NextRequest) {
     pathname === '/privacy' ||
     pathname === '/terms';
   const isApiRoute = pathname.startsWith('/api');
+  // PR #34 — Sprint 6.2: /api/public/* is the explicitly anonymous
+  // surface (preview-bible for the landing page). Already covered by
+  // isApiRoute above (the whole /api/* tree skips the auth gate);
+  // we keep this comment so future devs don't add a guard that
+  // breaks the public preview.
 
   // Protect dashboard routes
   if (!user && !isAuthRoute && !isPublicRoute && !isApiRoute) {

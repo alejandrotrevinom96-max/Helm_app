@@ -1,6 +1,11 @@
 'use client';
 
 // PR #33 — Sprint 6.1: dedicated signup page.
+// PR #34 — Sprint 6.2: pre-fill from ?url= so the landing-page hero
+// preview hands off to signup with context. We stash the URL in
+// sessionStorage with a short TTL key the dashboard can read after
+// the user confirms their email — that's where we'll trigger the
+// auto-bible flow once they have a project.
 //
 // Pre-PR-33 there was no /signup — GitHub OAuth doubled as both
 // sign-in and sign-up since the user was created on first OAuth.
@@ -10,21 +15,47 @@
 // On submit we call supabase.auth.signUp + a confirmation email
 // is sent (Supabase default). Show a "check your email" success
 // state until the user clicks the confirmation link.
-import { useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { CheckCircle, Loader2, Mail } from 'lucide-react';
+import { useSearchParams } from 'next/navigation';
+import { CheckCircle, Loader2, Mail, Sparkles } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { OAuthButtons } from '../_oauth-buttons';
 
 const PASSWORD_MIN = 8;
+// sessionStorage key the post-signup onboarding flow reads to seed
+// the auto-bible with the URL the user previewed on the landing.
+const PENDING_BRAND_URL_KEY = 'helm:pendingBrandUrl';
 
-export default function SignupPage() {
+function SignupForm() {
+  const searchParams = useSearchParams();
+  // ?url= comes from the landing-page hero CTA after a successful
+  // preview. We display it inline so the user knows the next step
+  // already has context, and we stash it for the post-confirmation
+  // onboarding to pick up.
+  const prefilledUrl = searchParams.get('url')?.trim() ?? null;
+
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submittedEmail, setSubmittedEmail] = useState<string | null>(null);
+
+  // Persist the URL to sessionStorage as soon as we land on /signup
+  // so a refresh keeps it available. We also overwrite any stale
+  // value from a previous attempt — last URL wins.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (prefilledUrl) {
+      try {
+        window.sessionStorage.setItem(PENDING_BRAND_URL_KEY, prefilledUrl);
+      } catch {
+        // Quota or private mode — ignore; we still try to pass the
+        // URL through Supabase user_metadata below.
+      }
+    }
+  }, [prefilledUrl]);
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -39,7 +70,14 @@ export default function SignupPage() {
       email: email.trim(),
       password,
       options: {
-        data: { full_name: name.trim() },
+        // PR #34 — also stash the brand URL in user_metadata so the
+        // server-side callback (or a future onboarding step) can
+        // read it without depending on browser sessionStorage
+        // surviving a different device confirming the email link.
+        data: {
+          full_name: name.trim(),
+          ...(prefilledUrl ? { pending_brand_url: prefilledUrl } : {}),
+        },
         emailRedirectTo: `${window.location.origin}/auth/callback`,
       },
     });
@@ -113,6 +151,19 @@ export default function SignupPage() {
             Free for the first 20 founders.
           </p>
         </div>
+
+        {/* PR #34 — context banner when arriving from the landing
+            preview. Tells the user their preview URL won't be lost. */}
+        {prefilledUrl && (
+          <div className="mb-4 p-3 bg-accent/10 border border-accent/30 rounded-lg text-xs text-accent flex items-start gap-2">
+            <Sparkles className="w-4 h-4 shrink-0 mt-0.5" />
+            <div>
+              We&apos;ll auto-generate the full brand bible for{' '}
+              <strong className="break-all">{prefilledUrl}</strong> right
+              after you confirm your email.
+            </div>
+          </div>
+        )}
 
         {error && (
           <div className="mb-4 p-3 bg-danger/10 border border-danger/30 rounded-lg text-sm text-danger">
@@ -210,5 +261,15 @@ export default function SignupPage() {
         </p>
       </div>
     </div>
+  );
+}
+
+// PR #34 — useSearchParams must run inside a Suspense boundary in
+// Next 15. Without this Vercel build fails with the bailout error.
+export default function SignupPage() {
+  return (
+    <Suspense fallback={null}>
+      <SignupForm />
+    </Suspense>
   );
 }
