@@ -34,10 +34,6 @@ interface Generation {
   selectedDraftIdx: number;
   error?: string;
   scheduledFor: string; // local datetime-local format
-  // PR #30 — Sprint 5.2: Stories. Per-platform flag toggled by the
-  // StoryToggle in the review panel. Only meaningful when platform
-  // is 'instagram'; ignored elsewhere.
-  isStory: boolean;
 }
 
 // Default: tomorrow 9am local. Returns a YYYY-MM-DDTHH:mm string.
@@ -94,6 +90,13 @@ export function MarketingClient({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
+  // PR #31 — Sprint 5.2.1: top-level Story flag. Pre-PR-31 this lived
+  // inside Generation[] (per-platform, per-tab), which meant the
+  // toggle only appeared AFTER generating drafts — buried in the
+  // review panel and easy to miss. Surfacing it next to the platforms
+  // picker makes the intent visible from the first click and the
+  // schedule POST applies it only to Instagram (FB silently ignores).
+  const [isStory, setIsStory] = useState(false);
 
   // After generation, one entry per platform with its own editable copy
   // and its own scheduled time. activeTab toggles which one is visible.
@@ -133,6 +136,16 @@ export function MarketingClient({
     if (!stillUseful) setSelectedTemplate(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [platforms]);
+
+  // PR #31 — Sprint 5.2.1: reset Story flag when Instagram leaves
+  // the platform set. Otherwise the user could check "Story", swap
+  // to Facebook only, and end up with a flagged-but-impossible
+  // schedule that the server would 400 anyway.
+  useEffect(() => {
+    if (!platforms.includes('instagram') && isStory) {
+      setIsStory(false);
+    }
+  }, [platforms, isStory]);
 
   useBroadcast((event) => {
     if (event.type.startsWith('scheduled-post')) {
@@ -177,7 +190,6 @@ export function MarketingClient({
         selectedDraftIdx: pickBestDraftIdx(g.drafts ?? []),
         error: g.error,
         scheduledFor: defaultTime,
-        isStory: false,
       }));
       setGenerations(next);
       setActiveTab(next[0]?.platform ?? null);
@@ -186,15 +198,6 @@ export function MarketingClient({
     } finally {
       setLoading(false);
     }
-  };
-
-  // PR #30 — Sprint 5.2: per-platform Story toggle. Only meaningful
-  // for Instagram; the StoryToggle component itself is a no-op for
-  // other platforms so this just lives on the state.
-  const updateIsStory = (platform: Platform, isStory: boolean) => {
-    setGenerations((prev) =>
-      prev.map((g) => (g.platform === platform ? { ...g, isStory } : g))
-    );
   };
 
   const updateScheduledFor = (platform: Platform, scheduledFor: string) => {
@@ -486,11 +489,12 @@ export function MarketingClient({
                 scoreBreakdown: sel.scoreBreakdown,
                 visualUrl: sel.visual?.url ?? null,
                 visualPrompt: sel.visual?.prompt ?? null,
-                // PR #30 — Sprint 5.2: per-platform Story flag travels
-                // with the schedule POST. Server re-validates: isStory
-                // requires platform=instagram + visualUrl, otherwise
-                // returns 400.
-                isStory: g.isStory,
+                // PR #31 — Sprint 5.2.1: top-level isStory applies only
+                // to Instagram drafts. Server enforces this too (400
+                // on isStory + non-instagram), but filtering here means
+                // an FB+IG batch with the toggle on schedules cleanly:
+                // FB as feed, IG as Story.
+                isStory: isStory && g.platform === 'instagram',
               }),
             });
             return { platform: g.platform, ok: res.ok };
@@ -577,6 +581,31 @@ export function MarketingClient({
                   ? '1 platform · post will be optimized for it'
                   : `${platforms.length} platforms · each gets its own optimized version`}
               </p>
+
+              {/* PR #31 — Story toggle surfaced next to the platforms
+                  picker. Only renders when Instagram is selected (the
+                  StoryToggle component's own no-op guard handles
+                  this) — visible from the first click instead of
+                  hidden in the post-generation review panel.
+                  imageUrl is null pre-generation; once drafts exist,
+                  we feed the selected Instagram draft's visual so
+                  the dimension-warning fires reactively. */}
+              {platforms.includes('instagram') && (
+                <div className="mt-4">
+                  <StoryToggle
+                    platform="instagram"
+                    imageUrl={(() => {
+                      const igGen = generations.find(
+                        (g) => g.platform === 'instagram'
+                      );
+                      const sel = igGen?.drafts[igGen.selectedDraftIdx];
+                      return sel?.visual?.url ?? null;
+                    })()}
+                    isStory={isStory}
+                    onChange={setIsStory}
+                  />
+                </div>
+              )}
             </div>
 
             <div className="mb-4">
@@ -774,23 +803,11 @@ export function MarketingClient({
                         );
                       })()}
 
-                      {/* PR #30 — Sprint 5.2: Story toggle. Only renders
-                          for Instagram per-platform tabs; no-op for FB,
-                          LinkedIn, Threads, Reddit. The image URL piped
-                          here is from the SELECTED draft's visual so
-                          the dimension validator runs against what the
-                          user actually intends to publish. */}
-                      <StoryToggle
-                        platform={activeGeneration.platform}
-                        imageUrl={
-                          getSelectedDraft(activeGeneration)?.visual?.url ??
-                          null
-                        }
-                        isStory={activeGeneration.isStory}
-                        onChange={(next) =>
-                          updateIsStory(activeGeneration.platform, next)
-                        }
-                      />
+                      {/* PR #31 — StoryToggle moved up next to the
+                          platforms picker so users see the option from
+                          the first click. The toggle below is gone;
+                          schedule per-Instagram-draft reads the
+                          top-level isStory state. */}
 
                       <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
                         <div className="flex-1">
