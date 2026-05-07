@@ -1,10 +1,15 @@
 // PR #34 — Sprint 6.2: per-IP rate limiter for the public preview
 // endpoint. Hashed IP only (privacy + GDPR-friendlier).
+// PR #36 — split into peek + commit so failed-pre-Anthropic
+// requests don't burn the user's hourly cap. Pre-PR-36 a user
+// who typed 5 typos (DNS fails) got blocked for an hour without
+// ever consuming Anthropic credits — terrible UX.
 //
 // Sliding window:
 //   - 5 requests per 1-hour window per ip_hash
-//   - 6th request gets a 1-hour block
-//   - Window resets when no requests for 1h
+//   - 6th committed request gets a 1-hour block
+//   - Window resets when no committed requests for 1h
+//   - peek() never increments; commit() does the real work
 //
 // We don't use Redis or a managed limiter — Postgres handles a few
 // QPS without breaking a sweat for a public endpoint that's already
@@ -58,6 +63,10 @@ export interface RateLimitResult {
   reason?: string;
 }
 
+// Read-only check. Tells us if the IP is currently blocked AND how
+// many slots are left in the current window. Doesn't touch the row
+// — call commitRateLimit() AFTER the request succeeds (or at least
+// reaches the expensive part) to actually consume a slot.
 export async function checkRateLimit(ip: string): Promise<RateLimitResult> {
   const ipHash = hashIp(ip);
   const now = new Date();
@@ -68,7 +77,48 @@ export async function checkRateLimit(ip: string): Promise<RateLimitResult> {
     .where(eq(previewRateLimits.ipHash, ipHash))
     .limit(1);
 
-  // Currently blocked.
+  if (existing?.blockedUntil && existing.blockedUntil > now) {
+    return {
+      allowed: false,
+      remainingRequests: 0,
+      resetAt: existing.blockedUntil,
+      reason: `Too many requests. Try again at ${existing.blockedUntil.toISOString()}.`,
+    };
+  }
+
+  const windowMs = WINDOW_MINUTES * 60 * 1000;
+  const windowExpired =
+    !existing ||
+    now.getTime() - existing.windowStart.getTime() > windowMs;
+
+  // No row, expired window, or non-blocked existing row → still room.
+  // remaining is computed against a hypothetical "if I committed now"
+  // so the UI can preview "X requests left this hour" honestly.
+  const currentCount = windowExpired ? 0 : existing.count;
+  return {
+    allowed: true,
+    remainingRequests: Math.max(0, MAX_REQUESTS_PER_WINDOW - currentCount),
+  };
+}
+
+// Increments the counter. Call ONLY after the endpoint did real work
+// (cache hit return, or about to call Anthropic). Failures that exit
+// before this point (URL invalid, fetch DNS fail, etc.) shouldn't
+// burn the user's cap.
+//
+// Returns allowed=false if this commit would push past the cap. The
+// caller should treat that as 429 (race-condition guard between two
+// concurrent requests in the same second).
+export async function commitRateLimit(ip: string): Promise<RateLimitResult> {
+  const ipHash = hashIp(ip);
+  const now = new Date();
+
+  const [existing] = await db
+    .select()
+    .from(previewRateLimits)
+    .where(eq(previewRateLimits.ipHash, ipHash))
+    .limit(1);
+
   if (existing?.blockedUntil && existing.blockedUntil > now) {
     return {
       allowed: false,
@@ -84,15 +134,9 @@ export async function checkRateLimit(ip: string): Promise<RateLimitResult> {
     now.getTime() - existing.windowStart.getTime() > windowMs;
 
   if (windowExpired) {
-    // Reset the window — first request of a fresh hour.
     await db
       .insert(previewRateLimits)
-      .values({
-        ipHash,
-        count: 1,
-        windowStart: now,
-        blockedUntil: null,
-      })
+      .values({ ipHash, count: 1, windowStart: now, blockedUntil: null })
       .onConflictDoUpdate({
         target: previewRateLimits.ipHash,
         set: { count: 1, windowStart: now, blockedUntil: null },

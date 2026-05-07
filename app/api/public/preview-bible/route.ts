@@ -28,6 +28,7 @@ import * as cheerio from 'cheerio';
 import { anthropic } from '@/lib/ai/claude';
 import {
   checkRateLimit,
+  commitRateLimit,
   getClientIp,
 } from '@/lib/landing/rate-limit';
 import {
@@ -48,6 +49,60 @@ const HAIKU_OUTPUT_COST_PER_TOKEN = 0.000004;
 // pay AI twice for the same site this week" with "the brand voice
 // can drift if you change the homepage".
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+// PR #36: pull the hostname out of a normalized URL for use in
+// human-readable error messages. The URL constructor never throws
+// here because we already validated upstream.
+function parsedHost(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
+}
+
+// PR #36: undici (Node's fetch) wraps every network failure in a
+// generic "fetch failed" Error. The actual cause (DNS, connect
+// refused, TLS, etc) lives on `error.cause`. We unwrap it so the
+// user sees something they can act on.
+//
+// Common cause codes from undici:
+//   ENOTFOUND       — DNS resolution failed (typo / domain doesn't exist)
+//   ECONNREFUSED    — host reachable but port closed
+//   ECONNRESET      — connection dropped mid-flight
+//   ETIMEDOUT       — TCP timeout (different from AbortSignal timeout)
+//   CERT_HAS_EXPIRED / unable to verify  — TLS issue
+function friendlyFetchError(e: unknown, url: string): string {
+  const host = parsedHost(url);
+  // AbortSignal.timeout firing throws a plain Error with name "TimeoutError"
+  if (e instanceof DOMException && e.name === 'TimeoutError') {
+    return `${host} took too long to respond (timed out after 15s). Try again or use a different URL.`;
+  }
+  if (e instanceof Error) {
+    const cause = (e.cause as { code?: string } | undefined) ?? {};
+    const code = cause.code ?? '';
+    if (code === 'ENOTFOUND') {
+      return `Couldn't reach ${host}. Double-check the URL — that domain doesn't seem to resolve.`;
+    }
+    if (code === 'ECONNREFUSED') {
+      return `${host} refused the connection. The server might be down.`;
+    }
+    if (code === 'ECONNRESET' || code === 'EPIPE') {
+      return `${host} closed the connection unexpectedly. Try again.`;
+    }
+    if (code === 'ETIMEDOUT' || code === 'UND_ERR_CONNECT_TIMEOUT') {
+      return `${host} took too long to respond. Try again or use a different URL.`;
+    }
+    if (
+      code === 'CERT_HAS_EXPIRED' ||
+      code === 'UNABLE_TO_VERIFY_LEAF_SIGNATURE' ||
+      code === 'DEPTH_ZERO_SELF_SIGNED_CERT'
+    ) {
+      return `${host} has an SSL certificate issue. Make sure HTTPS is set up correctly.`;
+    }
+  }
+  return `Couldn't reach ${host}. Make sure the site is online and the URL is correct.`;
+}
 
 interface AiPreview {
   archetype: string;
@@ -81,8 +136,10 @@ export async function POST(request: Request) {
     );
   }
 
-  // 1. Rate limit BEFORE any expensive work — we don't want a
-  // hostile caller to burn fal/anthropic credits even once.
+  // 1. Read-only rate-limit check. Reject if already blocked, but
+  // DON'T increment yet — pre-Anthropic failures (invalid URL, DNS
+  // fail, etc.) shouldn't burn the user's hourly cap. We commit the
+  // slot right before the Anthropic call below.
   const ip = getClientIp(request);
   const limit = await checkRateLimit(ip);
   if (!limit.allowed) {
@@ -116,6 +173,20 @@ export async function POST(request: Request) {
     .limit(1);
 
   if (cached && cached.expiresAt && cached.expiresAt > now) {
+    // Cache hit IS a successful "use" of the endpoint — commit a slot.
+    // (Cheap on our side, so we could skip; but a 1000-cache-hits-per-
+    // second flood would still flag as abuse, and counting cache hits
+    // makes the rate limit consistent for the user.)
+    const commit = await commitRateLimit(ip);
+    if (!commit.allowed) {
+      return NextResponse.json(
+        {
+          error: commit.reason ?? 'Rate limit exceeded',
+          resetAt: commit.resetAt?.toISOString(),
+        },
+        { status: 429 }
+      );
+    }
     await db
       .update(publicBiblePreviews)
       .set({
@@ -133,7 +204,7 @@ export async function POST(request: Request) {
         oneLiner: cached.previewOneLiner ?? '',
       },
       url: cached.originalUrl,
-      remainingRequests: limit.remainingRequests,
+      remainingRequests: commit.remainingRequests,
     });
   }
 
@@ -145,7 +216,11 @@ export async function POST(request: Request) {
       .where(eq(publicBiblePreviews.id, cached.id));
   }
 
-  // 4. Fetch the URL.
+  // 4. Fetch the URL with friendly errors.
+  // PR #36: undici's "fetch failed" is opaque to a non-engineer.
+  // We map common cause codes to messages a user can act on. The
+  // pattern lives here (not in lib/landing/) because the
+  // mapping is endpoint-specific UX copy.
   let html: string;
   try {
     const response = await fetch(normalized, {
@@ -157,24 +232,20 @@ export async function POST(request: Request) {
       signal: AbortSignal.timeout(15000),
     });
     if (!response.ok) {
-      return NextResponse.json(
-        {
-          error: `Could not access website (HTTP ${response.status}). Make sure it's public.`,
-        },
-        { status: 400 }
-      );
+      const friendly =
+        response.status === 403 || response.status === 401
+          ? `${parsedHost(normalized)} blocked our request. Some sites block bots — try a different URL or sign up to scan it from your account.`
+          : response.status === 404
+            ? `Page not found at ${parsedHost(normalized)}. Double-check the URL.`
+            : response.status >= 500
+              ? `${parsedHost(normalized)} returned a server error (HTTP ${response.status}). Try again in a moment.`
+              : `${parsedHost(normalized)} responded with HTTP ${response.status}. Make sure the page is public.`;
+      return NextResponse.json({ error: friendly }, { status: 400 });
     }
     html = await response.text();
   } catch (e) {
-    return NextResponse.json(
-      {
-        error:
-          e instanceof Error
-            ? `Fetch failed: ${e.message}`
-            : 'Fetch failed',
-      },
-      { status: 400 }
-    );
+    const friendly = friendlyFetchError(e, normalized);
+    return NextResponse.json({ error: friendly }, { status: 400 });
   }
 
   // 5. Cheerio extract.
@@ -205,6 +276,23 @@ export async function POST(request: Request) {
           'Could not extract content from this site. Make sure it has a title or visible text.',
       },
       { status: 400 }
+    );
+  }
+
+  // PR #36 — Commit a rate-limit slot now that we've successfully
+  // fetched + extracted content. The Anthropic call below is the
+  // expensive part; from here on a slot is consumed regardless of
+  // outcome (Haiku 4xx, JSON parse fail, etc.) because we burned
+  // tokens. Pre-PR-36 we incremented at request entry and DNS-fail
+  // typos counted against the cap.
+  const commit = await commitRateLimit(ip);
+  if (!commit.allowed) {
+    return NextResponse.json(
+      {
+        error: commit.reason ?? 'Rate limit exceeded',
+        resetAt: commit.resetAt?.toISOString(),
+      },
+      { status: 429 }
     );
   }
 
@@ -330,6 +418,6 @@ Rules:
     cached: false,
     preview,
     url: normalized,
-    remainingRequests: limit.remainingRequests,
+    remainingRequests: commit.remainingRequests,
   });
 }
