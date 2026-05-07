@@ -8,13 +8,19 @@ import type { BrandBible } from '@/lib/types/brand';
 import type { BrandProject } from './brand-bible-card';
 import { QuoteVault } from './quote-vault';
 import { AutoGenerateSection } from './auto-generate-section';
+import { ImageValidationSection } from './image-validation-section';
 
-// PR #26 — Sprint 3 added the 'auto' mode for the multi-source
-// auto-generated bible flow. The pre-existing 'discover' mode (single
-// URL → /api/brand/discover) stays — it's faster but only does one
-// page. 'auto' is the multi-source variant that becomes more powerful
-// as Sprint 5 lights up the social channels.
-type Mode = 'overview' | 'discover' | 'refine' | 'quotes' | 'auto';
+// PR #26 — Sprint 3 added 'auto' for multi-source auto-generated bible.
+// PR #27 — Sprint 4 added 'validate' for the post-bible image
+// validation loop. The pre-existing 'discover' mode (single URL →
+// /api/brand/discover) stays — it's faster but only does one page.
+type Mode =
+  | 'overview'
+  | 'discover'
+  | 'refine'
+  | 'quotes'
+  | 'auto'
+  | 'validate';
 
 interface RefineQuestion {
   id: string;
@@ -159,6 +165,7 @@ export function BrandBibleModal({
               {mode === 'refine' && 'Refine your brand'}
               {mode === 'quotes' && 'Quote vault'}
               {mode === 'auto' && 'Auto-generate brand bible'}
+              {mode === 'validate' && 'Validate visually'}
               {mode === 'overview' && (bible?.identity?.name || 'Brand bible')}
             </h2>
           </div>
@@ -176,6 +183,7 @@ export function BrandBibleModal({
             bible={bible}
             onDiscover={() => setMode('discover')}
             onAuto={() => setMode('auto')}
+            onValidate={() => setMode('validate')}
             onRefine={loadRefineQuestions}
             onQuotes={() => setMode('quotes')}
             onClose={onClose}
@@ -199,6 +207,21 @@ export function BrandBibleModal({
                 // pick up the fresh brand_context jsonb.
                 window.location.reload();
               }}
+            />
+          </div>
+        )}
+
+        {mode === 'validate' && (
+          <div>
+            <button
+              onClick={() => setMode('overview')}
+              className="text-xs text-accent mb-4 hover:underline"
+            >
+              ← Back to overview
+            </button>
+            <ImageValidationSection
+              projectId={project.id}
+              enabled={!!bible?.archetype?.primary}
             />
           </div>
         )}
@@ -246,6 +269,7 @@ function OverviewMode({
   bible,
   onDiscover,
   onAuto,
+  onValidate,
   onRefine,
   onQuotes,
   onClose,
@@ -253,6 +277,7 @@ function OverviewMode({
   bible: BrandBible | null;
   onDiscover: () => void;
   onAuto: () => void;
+  onValidate: () => void;
   onRefine: () => void;
   onQuotes: () => void;
   onClose: () => void;
@@ -350,6 +375,14 @@ function OverviewMode({
         <Button size="sm" onClick={onAuto}>
           ✨ Auto-generate
         </Button>
+        {/* PR #27 — only useful once an archetype is set, otherwise the
+            POST endpoint refuses with 400. Hiding the button when the
+            bible is sparse keeps the affordance honest. */}
+        {bible?.archetype?.primary && (
+          <Button variant="ghost" size="sm" onClick={onValidate}>
+            🖼 Validate visually
+          </Button>
+        )}
         <Button variant="ghost" size="sm" onClick={onDiscover}>
           Quick discovery
         </Button>

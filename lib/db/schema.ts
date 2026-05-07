@@ -457,6 +457,47 @@ export const brandBibleSources = pgTable('brand_bible_sources', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
+// ===== Brand Image Validations =====
+// PR #27 — Sprint 4. After the user applies an auto-generated bible
+// (PR #26), they can ask Helm to render 12 sample images across
+// realistic marketing surfaces (IG cover, LinkedIn header, hero
+// banner, quote tile, etc) and thumbs-up/down each one. The vote
+// data feeds into a future re-generation pass that nudges prompts
+// based on what landed and what didn't.
+//
+// `batch_id` groups the 12 images of a single "Generate" click so the
+// UI can render the latest batch without paginating across history.
+// `vote` is nullable so an image starts unvoted; null vote also lets
+// the user retract a vote later.
+export const brandImageValidations = pgTable('brand_image_validations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  projectId: uuid('project_id')
+    .notNull()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  batchId: uuid('batch_id').notNull(),
+  // 'instagram_cover' | 'linkedin_header' | 'website_hero' |
+  // 'quote_tile' | 'founder_photo' | 'product_mockup' |
+  // 'behind_scenes' | 'testimonial' | 'stats_viz' |
+  // 'announcement' | 'lifestyle' | 'brand_mood'
+  contextType: text('context_type').notNull(),
+  contextLabel: text('context_label').notNull(),
+  contextDimensions: text('context_dimensions').notNull(), // '1:1' | '16:9' | '4:5'
+  prompt: text('prompt').notNull(),
+  imageUrl: text('image_url').notNull(),
+  // Tracked so the UI can show running cost + future cost-cap rules.
+  // Stored as numeric so we don't lose cents to float roundoff.
+  generationCost: numeric('generation_cost', { precision: 10, scale: 4 }),
+  // 'positive' | 'negative' | null
+  vote: text('vote'),
+  votedAt: timestamp('voted_at'),
+  voteReason: text('vote_reason'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
 // ===== Type exports =====
 export type User = typeof users.$inferSelect;
 export type Project = typeof projects.$inferSelect;
@@ -471,3 +512,4 @@ export type ResearchConfig = typeof researchConfig.$inferSelect;
 export type BrandQuote = typeof brandQuotes.$inferSelect;
 export type CompassReadingRow = typeof compassReadings.$inferSelect;
 export type BrandBibleSource = typeof brandBibleSources.$inferSelect;
+export type BrandImageValidation = typeof brandImageValidations.$inferSelect;

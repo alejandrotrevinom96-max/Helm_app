@@ -96,7 +96,8 @@ export function AutoGenerateSection({
   projectId: string;
   projectName: string;
   // Called after the user clicks "Apply to project" so the parent
-  // modal can refresh the bible state and bounce back to overview.
+  // modal can refresh the bible state and bounce back to overview
+  // (or jump straight to the Validate visually flow — PR #27).
   onApplied: () => void;
 }) {
   const [sources, setSources] = useState<SourceRow[]>([]);
