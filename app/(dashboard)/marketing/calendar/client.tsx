@@ -1,22 +1,28 @@
 'use client';
 
-// PR #24 — Sprint 2.3: Calendar funcional.
+// PR #24 — Sprint 2.3 (Calendar funcional).
+// PR #25 — Sprint 2.4 adds the Drafts pool drawer to the right rail
+// and unifies the drag state so chips from EITHER source (the
+// in-calendar grid or the drafts pool) participate in the same drop.
 //
 // Top-level orchestrator for /marketing/calendar:
 //   - week / month toggle
 //   - prev / next navigation
 //   - platform filter
-//   - calendar grid (CalendarView)
-//   - drag-drop -> opens golden-times modal -> PATCHes scheduledFor
+//   - calendar grid (CalendarView) on the left
+//   - drafts pool drawer (DraftsPool) on the right
+//   - drag-drop -> opens golden-times modal -> moves the post
 //
-// The grid itself lives in calendar-view.tsx because the layout for
-// week vs. month diverges (week = 7 tall columns, month = 6×7 grid
-// with greyed-out adjacent month days).
+// Drop branches by source:
+//   - source='scheduled' → PATCH /api/marketing/library/[id] (reschedule)
+//   - source='generated' → POST /api/marketing/library/[id]/schedule
+//                          (insert into scheduled_posts + delete draft)
 import { useEffect, useState, useCallback } from 'react';
 import type { CalendarPost } from '@/app/api/marketing/calendar/route';
-import { CalendarView } from './calendar-view';
+import { CalendarView, type DraggedItem } from './calendar-view';
 import { CalendarFilters } from './calendar-filters';
 import { GoldenTimesModal } from './golden-times-modal';
+import { DraftsPool } from './drafts-pool';
 
 type ViewMode = 'week' | 'month';
 
@@ -93,9 +99,26 @@ export function CalendarClient({
   const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState({ platform: '' });
   const [pendingDrop, setPendingDrop] = useState<{
-    post: CalendarPost;
+    item: DraggedItem;
     date: Date;
   } | null>(null);
+
+  // PR #25: lifted drag state. Both CalendarView's chips and the
+  // DraftsPool's chips push into this; CalendarView's drop handler
+  // reads from here. Without lifting, a draft from the pool couldn't
+  // be picked up by the calendar's drop target because each component
+  // owned its own draggedPost.
+  const [draggedItem, setDraggedItem] = useState<DraggedItem | null>(null);
+  const [dragOverKey, setDragOverKey] = useState<string | null>(null);
+
+  // Drafts pool drawer state. Open by default — the user pidió el pool
+  // visible explícitamente. The collapsed state is a 48px-wide vertical
+  // strip with the count, so even when collapsed the drawer announces
+  // itself.
+  const [draftsPoolOpen, setDraftsPoolOpen] = useState(true);
+  // Bumped after a successful schedule so DraftsPool refetches and the
+  // just-scheduled draft disappears from the list.
+  const [draftsRefreshKey, setDraftsRefreshKey] = useState(0);
 
   const fetchPosts = useCallback(async () => {
     setLoading(true);
@@ -129,60 +152,111 @@ export function CalendarClient({
     fetchPosts();
   }, [fetchPosts]);
 
+  const handleDragStart = (item: DraggedItem) => {
+    setDraggedItem(item);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedItem(null);
+    setDragOverKey(null);
+  };
+
   // Called by CalendarView when the user drops a post on a day. We
   // don't reschedule directly — the user picks a time first via the
   // GoldenTimesModal. This avoids accidentally rescheduling to 00:00
   // when the drop happens.
-  const handleDrop = (post: CalendarPost, date: Date) => {
-    setPendingDrop({ post, date });
+  const handleDrop = (item: DraggedItem, date: Date) => {
+    setPendingDrop({ item, date });
+    // Don't clear draggedItem yet — the modal close path handles that.
+    setDragOverKey(null);
   };
 
   // Called by the modal when the user picks a time. We compose the
   // final timestamp client-side (drop date + chosen time of day) and
-  // PATCH the scheduled_post. Optimistic update keeps the UI snappy;
-  // we revert on error.
+  // dispatch to the right endpoint based on the dragged item's source.
   const handleConfirmTime = async (time: string) => {
     if (!pendingDrop) return;
-    const { post, date } = pendingDrop;
+    const { item, date } = pendingDrop;
     const [hours, minutes] = time.split(':').map(Number);
     const newDateTime = new Date(date);
     newDateTime.setHours(hours, minutes ?? 0, 0, 0);
 
-    const previousIso = post.scheduledFor;
-    // Optimistic: move the post in local state immediately.
-    setPosts((prev) =>
-      prev.map((p) =>
-        p.id === post.id
-          ? { ...p, scheduledFor: newDateTime.toISOString() }
-          : p
-      )
-    );
     setPendingDrop(null);
+    setDraggedItem(null);
 
-    try {
-      const res = await fetch(`/api/marketing/library/${post.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scheduledFor: newDateTime.toISOString() }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        // Revert.
-        setPosts((prev) =>
-          prev.map((p) =>
-            p.id === post.id ? { ...p, scheduledFor: previousIso } : p
-          )
-        );
-        setError(data?.error ?? 'Reschedule failed');
-      }
-    } catch (e) {
+    if (item.source === 'scheduled') {
+      // ===== Reschedule existing scheduled post =====
+      const previousIso = item.scheduledFor;
+      // Optimistic: move the post in local state immediately.
       setPosts((prev) =>
         prev.map((p) =>
-          p.id === post.id ? { ...p, scheduledFor: previousIso } : p
+          p.id === item.id
+            ? { ...p, scheduledFor: newDateTime.toISOString() }
+            : p
         )
       );
+
+      try {
+        const res = await fetch(`/api/marketing/library/${item.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ scheduledFor: newDateTime.toISOString() }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          // Revert.
+          setPosts((prev) =>
+            prev.map((p) =>
+              p.id === item.id
+                ? { ...p, scheduledFor: previousIso ?? p.scheduledFor }
+                : p
+            )
+          );
+          setError(data?.error ?? 'Reschedule failed');
+        }
+      } catch (e) {
+        setPosts((prev) =>
+          prev.map((p) =>
+            p.id === item.id
+              ? { ...p, scheduledFor: previousIso ?? p.scheduledFor }
+              : p
+          )
+        );
+        setError(e instanceof Error ? e.message : 'Network error');
+      }
+      return;
+    }
+
+    // ===== Schedule a draft (move generated_posts → scheduled_posts) =====
+    try {
+      const res = await fetch(
+        `/api/marketing/library/${item.id}/schedule`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ scheduledFor: newDateTime.toISOString() }),
+        }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data?.error ?? 'Schedule failed');
+        return;
+      }
+      // Refresh the calendar so the newly-scheduled post shows in its day.
+      // We could splice locally but the server is the source of truth
+      // for the new id, scheduledFor canonical form, etc — refetch is
+      // simpler and the response is small.
+      fetchPosts();
+      // Bump the drafts pool so the row disappears from there.
+      setDraftsRefreshKey((k) => k + 1);
+    } catch (e) {
       setError(e instanceof Error ? e.message : 'Network error');
     }
+  };
+
+  const cancelPendingDrop = () => {
+    setPendingDrop(null);
+    setDraggedItem(null);
   };
 
   return (
@@ -212,63 +286,97 @@ export function CalendarClient({
         </div>
       </div>
 
-      <div className="flex items-center justify-between gap-3">
-        <button
-          type="button"
-          onClick={() => setCurrentDate(navigate(currentDate, viewMode, -1))}
-          className="px-3 py-2 text-sm text-text-2 hover:text-text-1 hover:bg-bg-elev rounded-lg transition-colors"
-        >
-          ← Previous
-        </button>
+      {/* Layout split: calendar grid on the left, drafts pool drawer on
+          the right. On mobile we stack — the drawer floats below the
+          calendar. The lg:items-stretch keeps the drawer's height
+          aligned with the calendar grid. */}
+      <div className="flex flex-col lg:flex-row gap-4 lg:items-stretch">
+        <div className="flex-1 min-w-0 space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <button
+              type="button"
+              onClick={() =>
+                setCurrentDate(navigate(currentDate, viewMode, -1))
+              }
+              className="px-3 py-2 text-sm text-text-2 hover:text-text-1 hover:bg-bg-elev rounded-lg transition-colors"
+            >
+              ← Previous
+            </button>
 
-        <h3 className="font-display text-xl text-center">
-          {formatPeriod(currentDate, viewMode)}
-        </h3>
+            <h3 className="font-display text-xl text-center">
+              {formatPeriod(currentDate, viewMode)}
+            </h3>
 
-        <button
-          type="button"
-          onClick={() => setCurrentDate(navigate(currentDate, viewMode, 1))}
-          className="px-3 py-2 text-sm text-text-2 hover:text-text-1 hover:bg-bg-elev rounded-lg transition-colors"
-        >
-          Next →
-        </button>
-      </div>
+            <button
+              type="button"
+              onClick={() =>
+                setCurrentDate(navigate(currentDate, viewMode, 1))
+              }
+              className="px-3 py-2 text-sm text-text-2 hover:text-text-1 hover:bg-bg-elev rounded-lg transition-colors"
+            >
+              Next →
+            </button>
+          </div>
 
-      <div className="flex flex-wrap items-center gap-3">
-        <CalendarFilters filters={filters} onChange={setFilters} />
-        <button
-          type="button"
-          onClick={() => setCurrentDate(new Date())}
-          className="text-xs text-text-3 hover:text-accent underline"
-        >
-          Jump to today
-        </button>
-      </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <CalendarFilters filters={filters} onChange={setFilters} />
+            <button
+              type="button"
+              onClick={() => setCurrentDate(new Date())}
+              className="text-xs text-text-3 hover:text-accent underline"
+            >
+              Jump to today
+            </button>
+          </div>
 
-      {error && (
-        <div className="p-3 border border-danger/30 bg-danger/10 rounded-lg text-sm text-danger">
-          {error}
+          {error && (
+            <div className="p-3 border border-danger/30 bg-danger/10 rounded-lg text-sm text-danger">
+              {error}
+            </div>
+          )}
+
+          {loading ? (
+            <div className="text-center py-12 text-text-3 text-sm">
+              Loading calendar…
+            </div>
+          ) : (
+            <CalendarView
+              posts={posts}
+              currentDate={currentDate}
+              viewMode={viewMode}
+              draggedItem={draggedItem}
+              dragOverKey={dragOverKey}
+              onDragStart={handleDragStart}
+              onDragEnd={handleDragEnd}
+              onDragOverDay={setDragOverKey}
+              onDrop={handleDrop}
+            />
+          )}
         </div>
-      )}
 
-      {loading ? (
-        <div className="text-center py-12 text-text-3 text-sm">
-          Loading calendar…
-        </div>
-      ) : (
-        <CalendarView
-          posts={posts}
-          currentDate={currentDate}
-          viewMode={viewMode}
-          onDrop={handleDrop}
+        <DraftsPool
+          projectId={projectId}
+          isOpen={draftsPoolOpen}
+          onToggle={() => setDraftsPoolOpen((v) => !v)}
+          onDragStart={(draft) =>
+            handleDragStart({
+              id: draft.id,
+              source: 'generated',
+              platform: draft.platform,
+              content: draft.content,
+              scheduledFor: null,
+            })
+          }
+          onDragEnd={handleDragEnd}
+          refreshKey={draftsRefreshKey}
         />
-      )}
+      </div>
 
       {pendingDrop && (
         <GoldenTimesModal
           date={pendingDrop.date}
           onConfirm={handleConfirmTime}
-          onCancel={() => setPendingDrop(null)}
+          onCancel={cancelPendingDrop}
         />
       )}
     </div>

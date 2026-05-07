@@ -159,3 +159,11 @@ body {
     opacity: 0.5;
   }
 }
+
+/* PR #25 — Sprint 2.4. Used by the collapsed Drafts pool drawer label
+   so "Drafts" reads top-to-bottom on the narrow vertical strip without
+   stacking letters on separate lines. */
+.writing-vertical {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+}

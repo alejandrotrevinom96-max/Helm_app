@@ -1,29 +1,43 @@
 'use client';
 
-// PR #24 — Sprint 2.3.
+// PR #24 — Sprint 2.3 (initial drag-drop within the calendar).
+// PR #25 — Sprint 2.4 lifts drag state up to CalendarClient so the
+// Drafts pool drawer can participate in the same drag operation.
 //
 // Calendar grid. Two layouts share most of the logic:
 //   - Week view:  7 columns × 1 tall row (200px+ per cell)
 //   - Month view: 6 rows × 7 cols, smaller cells, shows up to 3 posts
 //                 per day with a "+N more" overflow indicator
 //
-// Drag handling uses the native HTML5 DnD API (no library):
-//   - dragstart on a post chip stashes the post in component state
-//   - dragover on a day cell highlights the cell (must preventDefault
-//     for drop to fire)
-//   - drop fires onDrop(post, date) — parent opens the time picker
-//
-// Mobile touch devices don't fire HTML5 DnD events; the user can still
-// open a post by clicking and reschedule via the existing modal. Touch
-// reorder via long-press is a future-PR pattern.
-import { useState } from 'react';
+// Drag handling uses the native HTML5 DnD API (no library). Internal
+// chips (already-scheduled posts) AND external chips (drafts from the
+// pool) push themselves into the parent's `draggedItem` state via
+// `onDragStart`. `handleDrop` reads from props, not local state, so
+// the source of the drag is irrelevant to this component — onDrop
+// fires for both.
 import type { CalendarPost } from '@/app/api/marketing/calendar/route';
+
+// Minimal shape used for drags — supports both already-scheduled
+// CalendarPost rows and generated_posts drafts. The `source`
+// discriminator tells the parent which API to call after the drop.
+export interface DraggedItem {
+  id: string;
+  source: 'scheduled' | 'generated';
+  platform: string;
+  content: string;
+  scheduledFor: string | null;
+}
 
 interface Props {
   posts: CalendarPost[];
   currentDate: Date;
   viewMode: 'week' | 'month';
-  onDrop: (post: CalendarPost, date: Date) => void;
+  draggedItem: DraggedItem | null;
+  dragOverKey: string | null;
+  onDragStart: (item: DraggedItem) => void;
+  onDragEnd: () => void;
+  onDragOverDay: (key: string | null) => void;
+  onDrop: (item: DraggedItem, date: Date) => void;
 }
 
 const PLATFORM_COLOR: Record<string, string> = {
@@ -84,15 +98,27 @@ function generateDays(date: Date, mode: 'week' | 'month'): Date[] {
   return days;
 }
 
+function calendarPostToDragItem(post: CalendarPost): DraggedItem {
+  return {
+    id: post.id,
+    source: 'scheduled',
+    platform: post.platform,
+    content: post.content,
+    scheduledFor: post.scheduledFor,
+  };
+}
+
 export function CalendarView({
   posts,
   currentDate,
   viewMode,
+  draggedItem,
+  dragOverKey,
+  onDragStart,
+  onDragEnd,
+  onDragOverDay,
   onDrop,
 }: Props) {
-  const [draggedPost, setDraggedPost] = useState<CalendarPost | null>(null);
-  const [dragOverKey, setDragOverKey] = useState<string | null>(null);
-
   const days = generateDays(currentDate, viewMode);
   const today = new Date();
 
@@ -102,56 +128,52 @@ export function CalendarView({
   const dayKey = (d: Date) =>
     `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 
-  const handleDragStart = (
+  const handleChipDragStart = (
     e: React.DragEvent<HTMLDivElement>,
     post: CalendarPost
   ) => {
-    setDraggedPost(post);
     e.dataTransfer.effectAllowed = 'move';
-    // Some browsers need a payload set or the drag is cancelled.
     e.dataTransfer.setData('text/plain', post.id);
+    onDragStart(calendarPostToDragItem(post));
   };
 
-  const handleDragEnd = () => {
-    setDraggedPost(null);
-    setDragOverKey(null);
-  };
-
-  const handleDragOver = (
+  const handleDayDragOver = (
     e: React.DragEvent<HTMLDivElement>,
     key: string
   ) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
-    if (dragOverKey !== key) setDragOverKey(key);
+    if (dragOverKey !== key) onDragOverDay(key);
   };
 
-  const handleDragLeave = (
+  const handleDayDragLeave = (
     e: React.DragEvent<HTMLDivElement>,
     key: string
   ) => {
     // Only clear if we're actually leaving this cell (not just moving
     // into a child of the cell).
     if (e.currentTarget.contains(e.relatedTarget as Node)) return;
-    if (dragOverKey === key) setDragOverKey(null);
+    if (dragOverKey === key) onDragOverDay(null);
   };
 
-  const handleDrop = (
+  const handleDayDrop = (
     e: React.DragEvent<HTMLDivElement>,
     date: Date
   ) => {
     e.preventDefault();
-    setDragOverKey(null);
-    if (!draggedPost) return;
-    // Don't trigger reschedule if the user dropped on the same day —
-    // they probably grabbed the wrong cell. The Library modal is the
-    // path for "edit time only".
-    if (isSameDay(new Date(draggedPost.scheduledFor), date)) {
-      setDraggedPost(null);
+    onDragOverDay(null);
+    if (!draggedItem) return;
+    // Drop on the same day a scheduled post is already on = no-op (the
+    // user probably grabbed the wrong cell). Drafts have scheduledFor
+    // null so this guard never fires for pool drops.
+    if (
+      draggedItem.scheduledFor &&
+      isSameDay(new Date(draggedItem.scheduledFor), date)
+    ) {
+      onDragEnd();
       return;
     }
-    onDrop(draggedPost, date);
-    setDraggedPost(null);
+    onDrop(draggedItem, date);
   };
 
   // ===== WEEK VIEW =====
@@ -166,9 +188,9 @@ export function CalendarView({
           return (
             <div
               key={k}
-              onDragOver={(e) => handleDragOver(e, k)}
-              onDragLeave={(e) => handleDragLeave(e, k)}
-              onDrop={(e) => handleDrop(e, day)}
+              onDragOver={(e) => handleDayDragOver(e, k)}
+              onDragLeave={(e) => handleDayDragLeave(e, k)}
+              onDrop={(e) => handleDayDrop(e, day)}
               className={`
                 min-h-[200px] p-3 rounded-lg border transition-colors
                 ${
@@ -197,8 +219,8 @@ export function CalendarView({
                   <div
                     key={post.id}
                     draggable
-                    onDragStart={(e) => handleDragStart(e, post)}
-                    onDragEnd={handleDragEnd}
+                    onDragStart={(e) => handleChipDragStart(e, post)}
+                    onDragEnd={onDragEnd}
                     className={`
                       p-2 border-l-2 ${PLATFORM_COLOR[post.platform] ?? 'border-l-text-3'}
                       border border-border rounded text-xs cursor-move hover:border-border-bright hover:bg-bg
@@ -250,9 +272,9 @@ export function CalendarView({
           return (
             <div
               key={k}
-              onDragOver={(e) => handleDragOver(e, k)}
-              onDragLeave={(e) => handleDragLeave(e, k)}
-              onDrop={(e) => handleDrop(e, day)}
+              onDragOver={(e) => handleDayDragOver(e, k)}
+              onDragLeave={(e) => handleDayDragLeave(e, k)}
+              onDrop={(e) => handleDayDrop(e, day)}
               className={`
                 min-h-[100px] p-2 rounded border transition-colors
                 ${
@@ -278,8 +300,8 @@ export function CalendarView({
                   <div
                     key={post.id}
                     draggable
-                    onDragStart={(e) => handleDragStart(e, post)}
-                    onDragEnd={handleDragEnd}
+                    onDragStart={(e) => handleChipDragStart(e, post)}
+                    onDragEnd={onDragEnd}
                     title={post.content}
                     className={`
                       px-1.5 py-1 border-l-2 ${PLATFORM_COLOR[post.platform] ?? 'border-l-text-3'}
