@@ -325,8 +325,29 @@ export function PostDetailModal({
               <div className="space-y-2">
                 <div className="flex items-center gap-2 text-sm text-emerald-500">
                   <span>✓</span>
-                  <span>Published successfully</span>
+                  <span>
+                    {post.isStory
+                      ? 'Story published successfully'
+                      : 'Published successfully'}
+                  </span>
                 </div>
+                {post.isStory && post.storyExpiresAt && (
+                  <div className="text-xs">
+                    {new Date(post.storyExpiresAt) > new Date() ? (
+                      <span className="text-pink-500">
+                        Expires{' '}
+                        {new Date(post.storyExpiresAt).toLocaleString()}
+                      </span>
+                    ) : (
+                      <span className="text-text-3">
+                        Expired on{' '}
+                        {new Date(post.storyExpiresAt).toLocaleString()}.
+                        The permalink may no longer work unless you
+                        archived this Story to a Highlight on Instagram.
+                      </span>
+                    )}
+                  </div>
+                )}
                 {post.publishedAt && (
                   <div className="text-xs text-text-3">
                     {new Date(post.publishedAt).toLocaleString()}

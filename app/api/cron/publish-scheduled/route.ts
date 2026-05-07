@@ -70,6 +70,11 @@ export async function GET(request: Request) {
   const results = {
     processed: 0,
     published: 0,
+    // PR #30 — Sprint 5.2: track Stories separately. `published` stays
+    // the count of regular feed posts; `publishedAsStory` increments
+    // when a Story-flagged row makes it through. Easier to spot Story-
+    // specific failure patterns in the cron response logs.
+    publishedAsStory: 0,
     failed: 0,
     retrying: 0,
     skipped: 0,
@@ -107,7 +112,14 @@ export async function GET(request: Request) {
                 publishNextRetryAt: null,
               })
               .where(eq(scheduledPosts.id, post.id));
-            results.published += 1;
+            // PR #30 — separate counter for Stories so the response
+            // surfaces "X feed posts + Y stories" instead of one
+            // amalgamated number.
+            if (post.isStory) {
+              results.publishedAsStory += 1;
+            } else {
+              results.published += 1;
+            }
           } else {
             const newRetryCount = (post.publishRetryCount ?? 0) + 1;
             const shouldRetry =

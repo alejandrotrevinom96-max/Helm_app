@@ -13,6 +13,7 @@ import { DraftCard, type Draft } from './draft-card';
 import { DriftAlert } from './drift-alert';
 import { PerformanceInsights } from './performance-insights';
 import { SmartTemplatesSection } from './smart-templates-section';
+import { StoryToggle } from './story-toggle';
 
 const PLATFORMS = [
   { id: 'instagram', label: 'Instagram', color: '#e1306c' },
@@ -33,6 +34,10 @@ interface Generation {
   selectedDraftIdx: number;
   error?: string;
   scheduledFor: string; // local datetime-local format
+  // PR #30 — Sprint 5.2: Stories. Per-platform flag toggled by the
+  // StoryToggle in the review panel. Only meaningful when platform
+  // is 'instagram'; ignored elsewhere.
+  isStory: boolean;
 }
 
 // Default: tomorrow 9am local. Returns a YYYY-MM-DDTHH:mm string.
@@ -172,6 +177,7 @@ export function MarketingClient({
         selectedDraftIdx: pickBestDraftIdx(g.drafts ?? []),
         error: g.error,
         scheduledFor: defaultTime,
+        isStory: false,
       }));
       setGenerations(next);
       setActiveTab(next[0]?.platform ?? null);
@@ -180,6 +186,15 @@ export function MarketingClient({
     } finally {
       setLoading(false);
     }
+  };
+
+  // PR #30 — Sprint 5.2: per-platform Story toggle. Only meaningful
+  // for Instagram; the StoryToggle component itself is a no-op for
+  // other platforms so this just lives on the state.
+  const updateIsStory = (platform: Platform, isStory: boolean) => {
+    setGenerations((prev) =>
+      prev.map((g) => (g.platform === platform ? { ...g, isStory } : g))
+    );
   };
 
   const updateScheduledFor = (platform: Platform, scheduledFor: string) => {
@@ -471,6 +486,11 @@ export function MarketingClient({
                 scoreBreakdown: sel.scoreBreakdown,
                 visualUrl: sel.visual?.url ?? null,
                 visualPrompt: sel.visual?.prompt ?? null,
+                // PR #30 — Sprint 5.2: per-platform Story flag travels
+                // with the schedule POST. Server re-validates: isStory
+                // requires platform=instagram + visualUrl, otherwise
+                // returns 400.
+                isStory: g.isStory,
               }),
             });
             return { platform: g.platform, ok: res.ok };
@@ -753,6 +773,24 @@ export function MarketingClient({
                           </div>
                         );
                       })()}
+
+                      {/* PR #30 — Sprint 5.2: Story toggle. Only renders
+                          for Instagram per-platform tabs; no-op for FB,
+                          LinkedIn, Threads, Reddit. The image URL piped
+                          here is from the SELECTED draft's visual so
+                          the dimension validator runs against what the
+                          user actually intends to publish. */}
+                      <StoryToggle
+                        platform={activeGeneration.platform}
+                        imageUrl={
+                          getSelectedDraft(activeGeneration)?.visual?.url ??
+                          null
+                        }
+                        isStory={activeGeneration.isStory}
+                        onChange={(next) =>
+                          updateIsStory(activeGeneration.platform, next)
+                        }
+                      />
 
                       <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
                         <div className="flex-1">

@@ -147,6 +147,11 @@ export const generatedPosts = pgTable('generated_posts', {
   // original (could be in scheduled_posts OR generated_posts — no FK
   // because the reference crosses tables).
   clonedFromId: uuid('cloned_from_id'),
+  // PR #30 — Sprint 5.2. The "post as Story" intent travels with the
+  // draft so the founder can mark it once in Generate and have the
+  // flag preserved if the draft sits in the pool before scheduling.
+  // The schedule-from-draft endpoint copies this into scheduled_posts.
+  isStory: boolean('is_story').default(false).notNull(),
 });
 
 // ===== Research Findings =====
@@ -385,6 +390,14 @@ export const scheduledPosts = pgTable('scheduled_posts', {
   metaPermalink: text('meta_permalink'),
   metaTargetType: text('meta_target_type'),
   metaContainerId: text('meta_container_id'),
+  // PR #30 — Sprint 5.2: Instagram Stories. When isStory is true the
+  // publisher uses the STORIES container path instead of the regular
+  // feed media call. storyExpiresAt is set to publishedAt + 24h so
+  // the UI can flag a row as "expired" — Stories disappear from the
+  // public IG view 24h after posting; the permalink may 404 after
+  // that unless the founder archived it as a Highlight manually.
+  isStory: boolean('is_story').default(false).notNull(),
+  storyExpiresAt: timestamp('story_expires_at'),
 });
 
 // ===== Meta Integrations =====

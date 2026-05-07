@@ -182,16 +182,25 @@ export async function publishPost(postId: string): Promise<PublishResult> {
         };
       }
 
-      // Reuse a previously-created container if a prior attempt got
-      // that far — saves a call on retry and avoids burning the
-      // 24h container window twice.
+      // PR #30 — Sprint 5.2: Stories. When isStory is true we hit
+      // the STORIES container path, otherwise the regular feed
+      // path (Sprint 5.1 behaviour). Both flows share the
+      // 2-step container + media_publish + permalink-fetch shape;
+      // the differences are baked into the Graph client methods.
+      const isStory = post.isStory === true;
+
       let containerId = post.metaContainerId ?? null;
       if (!containerId) {
-        const container = await client.createInstagramContainer(
-          integration.instagramBusinessId,
-          post.visualUrl,
-          post.content
-        );
+        const container = isStory
+          ? await client.createInstagramStoryContainer(
+              integration.instagramBusinessId,
+              post.visualUrl
+            )
+          : await client.createInstagramContainer(
+              integration.instagramBusinessId,
+              post.visualUrl,
+              post.content
+            );
         containerId = container.id;
         // Persist immediately so a crash mid-publish doesn't lose it.
         await db
@@ -211,17 +220,41 @@ export async function publishPost(postId: string): Promise<PublishResult> {
         };
       }
 
-      const published = await client.publishInstagramContainer(
-        integration.instagramBusinessId,
-        containerId
-      );
+      const published = isStory
+        ? await client.publishInstagramStory(
+            integration.instagramBusinessId,
+            containerId
+          )
+        : await client.publishInstagramContainer(
+            integration.instagramBusinessId,
+            containerId
+          );
+
       let permalink: string | undefined;
       try {
-        const link = await client.getInstagramMediaPermalink(published.id);
+        const link = isStory
+          ? await client.getInstagramStoryPermalink(published.id)
+          : await client.getInstagramMediaPermalink(published.id);
         permalink = link.permalink;
       } catch {
         // best-effort
       }
+
+      // For Stories we also stamp the row with the 24h expiration
+      // and the targetType so the Library + cron can distinguish.
+      if (isStory) {
+        const storyExpiresAt = new Date(
+          Date.now() + 24 * 60 * 60 * 1000
+        );
+        await db
+          .update(scheduledPosts)
+          .set({
+            storyExpiresAt,
+            metaTargetType: 'instagram_story',
+          })
+          .where(eq(scheduledPosts.id, postId));
+      }
+
       return { success: true, metaPostId: published.id, permalink };
     }
 

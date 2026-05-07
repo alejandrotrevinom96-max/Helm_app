@@ -1,8 +1,9 @@
 'use client';
 
 // PR #23 — Sprint 2.2.
-// Search-by-text + platform select. Lightweight controlled component
-// that mirrors its state to the parent so the parent owns the request.
+// Search-by-text + platform select. PR #30 — Sprint 5.2 added a
+// type select (post / story / both) so the user can subset the grid
+// by post type independently of the active status tab.
 const PLATFORMS = [
   'instagram',
   'facebook',
@@ -12,8 +13,12 @@ const PLATFORMS = [
 ] as const;
 
 interface Props {
-  filters: { platform: string; search: string };
-  onChange: (next: { platform: string; search: string }) => void;
+  filters: {
+    platform: string;
+    search: string;
+    type: '' | 'post' | 'story';
+  };
+  onChange: (next: Props['filters']) => void;
 }
 
 export function LibraryFilters({ filters, onChange }: Props) {
@@ -26,6 +31,21 @@ export function LibraryFilters({ filters, onChange }: Props) {
         onChange={(e) => onChange({ ...filters, search: e.target.value })}
         className="flex-1 px-3 py-2 bg-bg-elev border border-border rounded-lg text-sm outline-none focus:border-accent"
       />
+
+      <select
+        value={filters.type}
+        onChange={(e) =>
+          onChange({
+            ...filters,
+            type: e.target.value as '' | 'post' | 'story',
+          })
+        }
+        className="px-3 py-2 bg-bg-elev border border-border rounded-lg text-sm outline-none focus:border-accent"
+      >
+        <option value="">All types</option>
+        <option value="post">Regular posts</option>
+        <option value="story">📸 Stories</option>
+      </select>
 
       <select
         value={filters.platform}

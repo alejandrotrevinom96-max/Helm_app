@@ -27,6 +27,7 @@ export async function POST(request: Request) {
     scoreBreakdown,
     visualUrl,
     visualPrompt,
+    isStory,
   } = await request.json();
 
   if (!projectId || !platform || !content || !scheduledFor) {
@@ -37,6 +38,29 @@ export async function POST(request: Request) {
   }
   if (!VALID_PLATFORMS.has(platform)) {
     return NextResponse.json({ error: 'Invalid platform' }, { status: 400 });
+  }
+
+  // PR #30 — Sprint 5.2: Stories validation. Server-side fail-safe;
+  // the StoryToggle UI also enforces these but we never trust the
+  // client. Image-dimension check stays client-only — that needs the
+  // bytes, the schedule API doesn't have them.
+  const wantsStory = isStory === true;
+  if (wantsStory) {
+    if (platform !== 'instagram') {
+      return NextResponse.json(
+        {
+          error:
+            'Stories are only supported on Instagram. Uncheck "Post as Story" or change the platform.',
+        },
+        { status: 400 }
+      );
+    }
+    if (!visualUrl || typeof visualUrl !== 'string') {
+      return NextResponse.json(
+        { error: 'Stories require an image. Add a visual before scheduling.' },
+        { status: 400 }
+      );
+    }
   }
 
   // Anti-tampering: verify the project belongs to this user.
@@ -93,6 +117,7 @@ export async function POST(request: Request) {
       visualUrl: safeVisualUrl,
       visualPrompt: safeVisualPrompt,
       visualType: safeVisualUrl ? 'image' : null,
+      isStory: wantsStory,
     })
     .returning();
 

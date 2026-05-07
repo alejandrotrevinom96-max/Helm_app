@@ -97,6 +97,21 @@ export function LibraryPostCard({ post, onClick }: Props) {
               Failed
             </span>
           )}
+          {/* PR #30 — Story badge. Pink to match Instagram's brand
+              accent. The "Expired" sub-badge fades in once the 24h
+              window passes — UI honest about what's still viewable. */}
+          {post.isStory && (
+            <span className="text-[10px] font-mono uppercase tracking-[0.1em] px-2 py-0.5 rounded bg-pink-500/15 text-pink-500">
+              📸 Story
+            </span>
+          )}
+          {post.isStory &&
+            post.storyExpiresAt &&
+            new Date(post.storyExpiresAt) < new Date() && (
+              <span className="text-[10px] font-mono uppercase tracking-[0.1em] px-2 py-0.5 rounded bg-text-3/15 text-text-3">
+                Expired
+              </span>
+            )}
         </div>
         <span className="text-[10px] font-mono uppercase tracking-[0.1em] text-text-3">
           {post.platform}

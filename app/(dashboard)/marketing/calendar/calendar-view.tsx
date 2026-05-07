@@ -230,6 +230,16 @@ export function CalendarView({
                   >
                     <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-text-3 mb-1 flex items-center gap-1">
                       <span>{fmtTime(post.scheduledFor)} · {post.platform}</span>
+                      {/* PR #30 — Story marker. Pink to match IG. */}
+                      {post.isStory && (
+                        <span
+                          className="text-pink-500"
+                          title="Instagram Story"
+                          aria-label="Instagram Story"
+                        >
+                          📸
+                        </span>
+                      )}
                       {/* PR #29 — auto-publish indicator. Tiny so it
                           doesn't dominate the chip. */}
                       {post.publishStatus === 'published' && (
@@ -331,6 +341,14 @@ export function CalendarView({
                     `}
                   >
                     <span>{fmtTime(post.scheduledFor)} {post.platform}</span>
+                    {post.isStory && (
+                      <span
+                        className="text-pink-500 ml-1"
+                        aria-label="Instagram Story"
+                      >
+                        📸
+                      </span>
+                    )}
                     {post.publishStatus === 'published' && (
                       <span className="text-emerald-500 ml-1" aria-label="Published">✓</span>
                     )}

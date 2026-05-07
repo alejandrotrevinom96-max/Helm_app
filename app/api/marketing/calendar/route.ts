@@ -30,6 +30,10 @@ export interface CalendarPost {
   // small ✓ on success and ⚠ on failure so the user spots problems
   // at a glance without opening each post.
   publishStatus: string | null;
+  // PR #30 — Sprint 5.2: Stories. Calendar chips render a 📸 marker
+  // when isStory is true so the user spots them on the grid.
+  isStory: boolean;
+  storyExpiresAt: string | null;
 }
 
 export async function GET(request: Request) {
@@ -105,6 +109,8 @@ export async function GET(request: Request) {
     visualUrl: r.visualUrl ?? null,
     consistencyScore: r.consistencyScore ?? null,
     publishStatus: r.publishStatus ?? null,
+    isStory: r.isStory ?? false,
+    storyExpiresAt: r.storyExpiresAt?.toISOString() ?? null,
   }));
 
   return NextResponse.json({ posts });

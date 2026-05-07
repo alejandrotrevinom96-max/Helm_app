@@ -54,6 +54,12 @@ export interface LibraryPost {
   publishRetryCount: number;
   metaPermalink: string | null; // public URL on FB/IG once published
   metaPostId: string | null;
+  // PR #30 — Sprint 5.2: Stories. isStory carries from generated_posts
+  // for drafts and from scheduled_posts for everything else; the UI
+  // uses it to badge cards and filter the "Stories" tab. storyExpiresAt
+  // is null on drafts (set only when the publisher actually fires).
+  isStory: boolean;
+  storyExpiresAt: string | null;
 }
 
 const VALID_STATUSES: LibraryStatus[] = [
@@ -86,6 +92,12 @@ export async function GET(request: Request) {
     | 'all';
   const platform = searchParams.get('platform') ?? '';
   const search = searchParams.get('search') ?? '';
+  // PR #30 — Sprint 5.2: filter by post type. 'story' isolates the
+  // is_story=true rows; 'post' excludes them; '' / undefined returns
+  // both (the default the Library tab uses).
+  const typeRaw = searchParams.get('type') ?? '';
+  const typeFilter: 'story' | 'post' | null =
+    typeRaw === 'story' ? 'story' : typeRaw === 'post' ? 'post' : null;
 
   if (!projectId) {
     return NextResponse.json(
@@ -128,6 +140,11 @@ export async function GET(request: Request) {
     if (search) {
       draftFilters.push(ilike(generatedPosts.content, `%${search}%`));
     }
+    if (typeFilter === 'story') {
+      draftFilters.push(eq(generatedPosts.isStory, true));
+    } else if (typeFilter === 'post') {
+      draftFilters.push(eq(generatedPosts.isStory, false));
+    }
     const draftRows = await db
       .select()
       .from(generatedPosts)
@@ -158,6 +175,8 @@ export async function GET(request: Request) {
       publishRetryCount: 0,
       metaPermalink: null,
       metaPostId: null,
+      isStory: r.isStory ?? false,
+      storyExpiresAt: null,
     }));
   }
 
@@ -184,6 +203,11 @@ export async function GET(request: Request) {
     }
     if (search) {
       schedFilters.push(ilike(scheduledPosts.content, `%${search}%`));
+    }
+    if (typeFilter === 'story') {
+      schedFilters.push(eq(scheduledPosts.isStory, true));
+    } else if (typeFilter === 'post') {
+      schedFilters.push(eq(scheduledPosts.isStory, false));
     }
 
     const schedRows = await db
@@ -226,6 +250,8 @@ export async function GET(request: Request) {
         publishRetryCount: r.publishRetryCount ?? 0,
         metaPermalink: r.metaPermalink ?? null,
         metaPostId: r.metaPostId ?? null,
+        isStory: r.isStory ?? false,
+        storyExpiresAt: r.storyExpiresAt?.toISOString() ?? null,
       };
     });
   }

@@ -215,6 +215,51 @@ export class MetaGraphClient {
     return this.request(`/${mediaId}?fields=permalink`);
   }
 
+  // ============ INSTAGRAM STORIES ============
+  // Same 2-step pattern as feed posts (container → media_publish),
+  // but the container is created with media_type=STORIES. Only image
+  // stories ship in PR #30 — video stories share the API surface but
+  // need extra polling and metadata, deferred to Sprint 5.3 (Reels).
+  //
+  // Caveats baked into the integration's design:
+  //   - 9:16 aspect ratio recommended; non-9:16 images get center-
+  //     cropped or fit with bars by IG.
+  //   - The story permalink is valid for ~24h; after that the URL
+  //     can 404 unless the founder archived the story manually.
+  //   - No text overlay via API — caption gets posted as the first
+  //     comment instead, which IG renders as a tappable sticker.
+
+  async createInstagramStoryContainer(
+    igBusinessId: string,
+    imageUrl: string
+  ): Promise<{ id: string }> {
+    return this.request(`/${igBusinessId}/media`, {
+      method: 'POST',
+      body: JSON.stringify({
+        image_url: imageUrl,
+        media_type: 'STORIES',
+      }),
+    });
+  }
+
+  async publishInstagramStory(
+    igBusinessId: string,
+    containerId: string
+  ): Promise<{ id: string }> {
+    // /media_publish is the same endpoint feed posts use — the
+    // STORIES type lives on the container, not the publish call.
+    return this.request(`/${igBusinessId}/media_publish`, {
+      method: 'POST',
+      body: JSON.stringify({ creation_id: containerId }),
+    });
+  }
+
+  async getInstagramStoryPermalink(
+    mediaId: string
+  ): Promise<{ permalink: string }> {
+    return this.request(`/${mediaId}?fields=permalink`);
+  }
+
   // ============ HEALTH CHECK ============
 
   async validateToken(): Promise<boolean> {

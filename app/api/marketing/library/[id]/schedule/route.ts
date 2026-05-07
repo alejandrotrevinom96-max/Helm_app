@@ -60,13 +60,15 @@ export async function POST(
   }
 
   // Verify ownership through the parent project — generated_posts has
-  // no user_id column.
+  // no user_id column. PR #30 also pulls is_story so the flag travels
+  // from the draft pool into scheduled_posts unchanged.
   const [draft] = await db
     .select({
       id: generatedPosts.id,
       projectId: generatedPosts.projectId,
       platform: generatedPosts.platform,
       content: generatedPosts.content,
+      isStory: generatedPosts.isStory,
     })
     .from(generatedPosts)
     .innerJoin(projects, eq(projects.id, generatedPosts.projectId))
@@ -76,6 +78,29 @@ export async function POST(
     .limit(1);
   if (!draft) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
+
+  // PR #30 — Stories validation when promoting a draft. The draft
+  // has no visual_url column today (drafts don't carry images), so
+  // a Story-flagged draft cannot be scheduled directly — the user
+  // must regenerate with an image. Surface that clearly.
+  if (draft.isStory) {
+    if (draft.platform !== 'instagram') {
+      return NextResponse.json(
+        {
+          error:
+            'Story flag is set but platform is not Instagram. Stories only ship to Instagram.',
+        },
+        { status: 400 }
+      );
+    }
+    return NextResponse.json(
+      {
+        error:
+          'This draft is flagged as a Story but has no image attached. Regenerate it with an image, then schedule.',
+      },
+      { status: 400 }
+    );
   }
 
   // Insert the new scheduled post FIRST. If something fails, the
@@ -89,6 +114,7 @@ export async function POST(
       content: draft.content,
       scheduledFor: when,
       status: 'scheduled',
+      isStory: draft.isStory,
     })
     .returning();
 
