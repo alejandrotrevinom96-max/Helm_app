@@ -417,6 +417,46 @@ export const compassReadings = pgTable('compass_readings', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
+// ===== Brand Bible Sources =====
+// PR #26 — Sprint 3. Multi-source feed for the auto-generated brand
+// bible. Each row is one connected channel (website / FB page / IG
+// business / etc) tied to a project. We store the raw analysis output
+// in `analysis_result` so the auto-generation step can consume signals
+// from every connected source without re-scraping.
+//
+// `access_token` is plain-text for now; OAuth + encryption land in
+// Sprint 5 when the Meta integration ships. Keeping the column there
+// today means no follow-up migration is needed.
+export const brandBibleSources = pgTable('brand_bible_sources', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  projectId: uuid('project_id')
+    .notNull()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  // 'website' | 'facebook_page' | 'instagram_business' | 'linkedin' | 'twitter'
+  // Only 'website' is wired up server-side today; the rest return 501
+  // until OAuth ships in Sprint 5.
+  sourceType: text('source_type').notNull(),
+  sourceUrl: text('source_url'), // for 'website'
+  sourceExternalId: text('source_external_id'), // Meta page id, etc
+  sourceHandle: text('source_handle'), // @username
+  // 'pending' | 'analyzing' | 'analyzed' | 'failed' | 'disconnected'
+  status: text('status').notNull().default('pending'),
+  // Raw output of the per-source analysis (WebScrapingResult shape for
+  // 'website'; per-platform shape for the rest later).
+  analysisResult: jsonb('analysis_result'),
+  // OAuth fields — unused until Sprint 5; kept here so the schema is
+  // stable when that PR lands.
+  accessToken: text('access_token'),
+  tokenExpiresAt: timestamp('token_expires_at'),
+  lastAnalyzedAt: timestamp('last_analyzed_at'),
+  errorMessage: text('error_message'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
 // ===== Type exports =====
 export type User = typeof users.$inferSelect;
 export type Project = typeof projects.$inferSelect;
@@ -430,3 +470,4 @@ export type ScheduledPost = typeof scheduledPosts.$inferSelect;
 export type ResearchConfig = typeof researchConfig.$inferSelect;
 export type BrandQuote = typeof brandQuotes.$inferSelect;
 export type CompassReadingRow = typeof compassReadings.$inferSelect;
+export type BrandBibleSource = typeof brandBibleSources.$inferSelect;

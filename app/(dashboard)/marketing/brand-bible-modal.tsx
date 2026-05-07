@@ -7,8 +7,14 @@ import { Skeleton } from '@/components/ui/skeleton';
 import type { BrandBible } from '@/lib/types/brand';
 import type { BrandProject } from './brand-bible-card';
 import { QuoteVault } from './quote-vault';
+import { AutoGenerateSection } from './auto-generate-section';
 
-type Mode = 'overview' | 'discover' | 'refine' | 'quotes';
+// PR #26 — Sprint 3 added the 'auto' mode for the multi-source
+// auto-generated bible flow. The pre-existing 'discover' mode (single
+// URL → /api/brand/discover) stays — it's faster but only does one
+// page. 'auto' is the multi-source variant that becomes more powerful
+// as Sprint 5 lights up the social channels.
+type Mode = 'overview' | 'discover' | 'refine' | 'quotes' | 'auto';
 
 interface RefineQuestion {
   id: string;
@@ -152,6 +158,7 @@ export function BrandBibleModal({
               {mode === 'discover' && 'Discover your brand'}
               {mode === 'refine' && 'Refine your brand'}
               {mode === 'quotes' && 'Quote vault'}
+              {mode === 'auto' && 'Auto-generate brand bible'}
               {mode === 'overview' && (bible?.identity?.name || 'Brand bible')}
             </h2>
           </div>
@@ -168,10 +175,32 @@ export function BrandBibleModal({
           <OverviewMode
             bible={bible}
             onDiscover={() => setMode('discover')}
+            onAuto={() => setMode('auto')}
             onRefine={loadRefineQuestions}
             onQuotes={() => setMode('quotes')}
             onClose={onClose}
           />
+        )}
+
+        {mode === 'auto' && (
+          <div>
+            <button
+              onClick={() => setMode('overview')}
+              className="text-xs text-accent mb-4 hover:underline"
+            >
+              ← Back to overview
+            </button>
+            <AutoGenerateSection
+              projectId={project.id}
+              projectName={project.name}
+              onApplied={() => {
+                // Bible was just merged on the server — easiest to do a
+                // hard reload so the marketing card + downstream readers
+                // pick up the fresh brand_context jsonb.
+                window.location.reload();
+              }}
+            />
+          </div>
         )}
 
         {mode === 'discover' && (
@@ -216,23 +245,33 @@ export function BrandBibleModal({
 function OverviewMode({
   bible,
   onDiscover,
+  onAuto,
   onRefine,
   onQuotes,
   onClose,
 }: {
   bible: BrandBible | null;
   onDiscover: () => void;
+  onAuto: () => void;
   onRefine: () => void;
   onQuotes: () => void;
   onClose: () => void;
 }) {
   if (!bible || !bible.meta) {
     return (
-      <div className="text-center py-8">
-        <p className="text-text-2 mb-4">
+      <div className="text-center py-8 space-y-4">
+        <p className="text-text-2">
           No brand bible yet. Let&apos;s create one.
         </p>
-        <Button onClick={onDiscover}>Start discovery</Button>
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          {/* PR #26: 'Auto-generate' is the new headline path — multi-
+              source aware, builds toward the Helm v2.0 wedge. The
+              single-URL Discover stays as a fast fallback. */}
+          <Button onClick={onAuto}>✨ Auto-generate from website</Button>
+          <Button variant="ghost" onClick={onDiscover}>
+            Quick discovery (single URL)
+          </Button>
+        </div>
       </div>
     );
   }
@@ -308,17 +347,20 @@ function OverviewMode({
       </div>
 
       <div className="flex flex-wrap gap-2 pt-4 border-t border-border">
+        <Button size="sm" onClick={onAuto}>
+          ✨ Auto-generate
+        </Button>
         <Button variant="ghost" size="sm" onClick={onDiscover}>
-          Re-run discovery
+          Quick discovery
         </Button>
         <Button variant="ghost" size="sm" onClick={onRefine}>
           Refine remaining gaps
         </Button>
         <Button variant="ghost" size="sm" onClick={onQuotes}>
-          Manage quote vault →
+          Quote vault →
         </Button>
         <div className="flex-1" />
-        <Button size="sm" onClick={onClose}>
+        <Button variant="ghost" size="sm" onClick={onClose}>
           Done
         </Button>
       </div>
