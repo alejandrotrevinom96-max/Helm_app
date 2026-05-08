@@ -1,4 +1,13 @@
 // PR #42 — Sprint 6.7: per-draft voting.
+// PR #48 — Sprint 6.7.6: harden the UPDATE so silent failures
+// can't masquerade as 200 OK. Pre-PR-48 the route was fire-
+// and-forget (`.update(...).set(...).where(...)` with no
+// `.returning()`); a 0-row UPDATE returned success to the
+// client, the founder saw the optimistic vote toggle, but
+// `user_vote` stayed null in the DB. Reload erased the vote
+// → "el like no persiste". Now we read back the affected rows,
+// 500 + log diagnostics if the count is zero, and the response
+// echoes the persisted state so the client can sanity-check.
 //
 // POST /api/marketing/posts/[id]/vote
 // Body: { vote: 'liked' | 'disliked' }
@@ -62,7 +71,12 @@ export async function POST(
     return NextResponse.json({ error: 'Draft not found' }, { status: 404 });
   }
 
-  await db
+  // PR #48 — Sprint 6.7.6: read back the affected rows so we
+  // can detect a silent 0-row UPDATE. If the previous SELECT
+  // located the row, this should always affect 1 row; logging
+  // a zero would point to a column-name / Drizzle-mapping
+  // mismatch we'd never spot otherwise.
+  const updated = await db
     .update(generatedPosts)
     .set({
       userVote: vote,
@@ -71,7 +85,25 @@ export async function POST(
       // a previously-disliked draft brings it back.
       visibleInLibrary: vote === 'liked',
     })
-    .where(eq(generatedPosts.id, id));
+    .where(eq(generatedPosts.id, id))
+    .returning({
+      id: generatedPosts.id,
+      userVote: generatedPosts.userVote,
+      votedAt: generatedPosts.votedAt,
+      visibleInLibrary: generatedPosts.visibleInLibrary,
+    });
+
+  if (updated.length === 0) {
+    console.error('[VOTE] UPDATE affected 0 rows', {
+      draftId: id,
+      userId: user.id,
+      vote,
+    });
+    return NextResponse.json(
+      { error: 'Vote could not be saved. Please retry.' },
+      { status: 500 }
+    );
+  }
 
   // PR #46 — Sprint 6.7.4: server-side cache invalidation. Pairs
   // with the client-side router.refresh() in MarketingClient as
@@ -82,9 +114,15 @@ export async function POST(
   revalidatePath('/marketing/calendar');
   revalidatePath('/marketing/generate');
 
+  // PR #48 — return the persisted values so the client can
+  // verify the round-trip without an extra read. If the founder
+  // ever sees a Like that "doesn't stick" again, this gives QA
+  // a single response to point at.
   return NextResponse.json({
     success: true,
-    vote,
-    visibleInLibrary: vote === 'liked',
+    vote: updated[0].userVote,
+    votedAt: updated[0].votedAt,
+    visibleInLibrary: updated[0].visibleInLibrary,
+    rowsAffected: updated.length,
   });
 }

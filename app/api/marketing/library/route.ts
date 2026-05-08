@@ -68,6 +68,12 @@ export interface LibraryPost {
   videoSizeBytes: number | null;
   reelProcessingStatus: string | null;
   reelProcessingError: string | null;
+  // PR #48 — Sprint 6.7.6: surface vote state so the client can
+  // verify a Like persisted server-side without an extra
+  // round-trip. Always null for source='scheduled' (votes apply
+  // to drafts only). Returned for source='generated' even when
+  // null (unvoted) so the type is consistent.
+  userVote: string | null;
 }
 
 const VALID_STATUSES: LibraryStatus[] = [
@@ -221,6 +227,8 @@ export async function GET(request: Request) {
       videoSizeBytes: null,
       reelProcessingStatus: null,
       reelProcessingError: null,
+      // PR #48 — Sprint 6.7.6: surface vote state.
+      userVote: r.userVote ?? null,
     }));
   }
 
@@ -305,6 +313,10 @@ export async function GET(request: Request) {
         videoSizeBytes: r.videoSizeBytes ?? null,
         reelProcessingStatus: r.reelProcessingStatus ?? null,
         reelProcessingError: r.reelProcessingError ?? null,
+        // PR #48 — votes are draft-only; scheduled rows always
+        // null here. Including the field keeps the LibraryPost
+        // shape consistent across both source branches.
+        userVote: null,
       };
     });
   }
