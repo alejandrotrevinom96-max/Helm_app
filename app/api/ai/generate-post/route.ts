@@ -8,8 +8,12 @@ import {
   computeConsistencyScore,
   type ScoreBreakdown,
 } from '@/lib/ai/consistency-score';
-import { generateVisual } from '@/lib/visuals/generate';
-import { uploadVisualFromUrl } from '@/lib/visuals/storage';
+// PR #47 — Sprint 6.7.5: removed `generateVisual` /
+// `uploadVisualFromUrl` imports along with the auto-visual
+// block they served. Visuals now go exclusively through
+// /api/visuals/generate, which both persists to DB and uploads
+// to Supabase Storage in one place. See route handler comment
+// near the (former) auto-visual block for the full rationale.
 import { NextResponse } from 'next/server';
 import type { BrandBible, BrandPillar } from '@/lib/types/brand';
 
@@ -406,47 +410,28 @@ Don't quote this verbatim — instead, channel its spirit, energy, and specific 
             persistableDrafts[i].id = row.id;
           });
         }
-        // Track the best-by-score draft separately for visual gen
-        // (only auto-generate a visual for the leader to cap cost;
-        // others get visuals lazily via /api/visuals/generate when
-        // the user clicks "add visual" on them).
-        const sortedNonError = [...persistableDrafts].sort(
-          (a, b) => b.consistencyScore - a.consistencyScore
-        );
-        const best = sortedNonError[0];
-
-        // Auto-generate a visual for the best draft only. Other drafts get
-        // visuals lazily if the user selects them. Cost-cap: $0.05 × N
-        // platforms instead of $0.05 × N × 3. Fail-soft: if fal.ai/Storage
-        // fails, the draft just ships without a visual.
-        if (best && process.env.FAL_API_KEY) {
-          try {
-            const visual = await generateVisual({
-              platform: p,
-              postContent: best.content,
-              brandBible: bible,
-            });
-            if (visual) {
-              const uploaded = await uploadVisualFromUrl(
-                visual.url,
-                user.id,
-                `draft-${p}-${Date.now()}`
-              );
-              const bestIdxInDrafts = drafts.indexOf(best);
-              if (bestIdxInDrafts >= 0) {
-                drafts[bestIdxInDrafts].visual = {
-                  url: uploaded?.publicUrl ?? visual.url,
-                  prompt: visual.prompt,
-                };
-              }
-            }
-          } catch (visualErr) {
-            console.error(
-              `[GENERATE POST] visual gen failed for ${p}`,
-              visualErr
-            );
-          }
-        }
+        // PR #47 — Sprint 6.7.5: removed auto-visual generation.
+        //
+        // Pre-PR-47 we auto-generated a fal.ai image for the
+        // highest-scoring draft per platform and attached it to
+        // `drafts[best].visual.url` IN MEMORY ONLY — no UPDATE
+        // touched generated_posts.image_url. The client rendered
+        // the visual; the founder Liked the draft; Library +
+        // Calendar pulled from DB and saw image_url=NULL → no
+        // thumbnail. The UX appeared as "the image disappears
+        // when I Like a draft" and resisted three rounds of
+        // cache-invalidation fixes (6.7.1 / 6.7.2 / 6.7.4).
+        //
+        // The actual data was never in the DB to begin with.
+        //
+        // Fix per founder decision (Plan #47, "DECISIÓN MI VOTO:
+        // B"): visuals are explicit only. The "+ Add visual"
+        // button on each DraftCard calls /api/visuals/generate
+        // with draftId, that route persists imageUrl + imagePrompt
+        // on the row (PR #43 / Sprint 6.7.1), and Library reads
+        // image_url back as visualUrl. Single, persisted path.
+        // Cost benefit: drafts that the founder doesn't intend
+        // to ship don't burn $0.05 each on speculative imagery.
 
         return { platform: p, drafts };
       } catch (err) {
