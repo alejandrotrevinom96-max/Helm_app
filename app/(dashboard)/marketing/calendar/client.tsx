@@ -261,6 +261,31 @@ export function CalendarClient({
 
   return (
     <div className="space-y-6">
+      {/* PR #38 — Sprint 6.4: V3 disclaimer banner. Pre-PR-38 the
+          calendar implied posts auto-publish at scheduledFor; in
+          reality auto-publish is gated by Meta App Review which is
+          blocked. Until V3 ships, the calendar is a planning tool
+          and the Share button on each post does the actual
+          shipping. We surface that contract here so testers don't
+          schedule a post and then wonder why nothing got posted. */}
+      <div className="p-4 bg-accent/10 border border-accent/30 rounded-lg">
+        <div className="flex items-start gap-3">
+          <span className="text-xl shrink-0" aria-hidden>
+            🚀
+          </span>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-medium mb-1">
+              Auto-post to Meta is coming in V3
+            </div>
+            <div className="text-xs text-text-2 leading-relaxed">
+              For now, schedule posts here as your editorial calendar — open
+              any post and tap <span className="font-medium">Share</span> to
+              publish to Instagram, Facebook, X, or anywhere in 1 tap.
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <p className="text-sm text-text-2">
           Drag posts to reschedule for{' '}

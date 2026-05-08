@@ -11,16 +11,20 @@ import './globals.css';
 // (marketing)/page.tsx metadata override still wins for /, but this
 // default applies to every other route that doesn't supply its own
 // (auth pages, dashboard, etc).
+//
+// PR #38 — Sprint 6.4: copy pivot. Auto-post to Meta is gated by
+// App Review (blocked), so the SEO/share previews now match the
+// real shipping path: "Tap to share anywhere".
 export const metadata: Metadata = {
   title:
-    'Helm — Brand-aware content that sounds like you. Posted automatically.',
+    'Helm — Brand-aware content that sounds like you. Ship it your way.',
   description:
-    'AI marketing suite for indie founders. Auto-generate a brand bible from your website, write posts that fit your voice, and auto-publish to Meta. Free for the first 20 founders.',
+    'AI marketing suite for indie founders. Generate brand-aligned posts that sound like you. 1 tap to share to Instagram, Facebook, X, anywhere. Free for the first 20 founders.',
   openGraph: {
     title:
-      'Helm — Brand-aware content that sounds like you. Posted automatically.',
+      'Helm — Brand-aware content that sounds like you. Ship it your way.',
     description:
-      'AI marketing suite for indie founders. Free for the first 20 founders.',
+      'AI marketing suite for indie founders. Tap to share anywhere. Free for the first 20 founders.',
     url: 'https://trythelm.com',
     siteName: 'Helm',
     type: 'website',

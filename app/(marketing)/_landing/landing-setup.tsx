@@ -2,6 +2,10 @@
 // minimal pricing/CTA block. We don't have prices yet — the honest
 // answer is "free until launch", which doubles as a soft scarcity
 // signal for the first-20-founders pitch.
+//
+// PR #38 — Sprint 6.4: trust line dropped the "Connect Meta to
+// auto-post" promise (blocked behind App Review). New trust line
+// reflects the actual shipping path: "1 tap to share anywhere".
 import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
 
@@ -32,7 +36,7 @@ function LandingCTA() {
         </Link>
 
         <p className="text-xs text-text-3 mt-5">
-          No credit card · 30-second setup · Connect Meta to auto-post
+          No credit card · 30-second setup · 1 tap to share anywhere
         </p>
       </div>
     </section>

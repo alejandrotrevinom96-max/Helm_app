@@ -25,6 +25,17 @@
 // same preview shape, with "Generated from your description"
 // instead of a URL.
 //
+// PR #38 — Sprint 6.4: copy pivot. Pre-PR-38 the H1 closed with
+// "Posted automatically." — that promised native auto-publishing
+// to Meta, which is blocked behind App Review (requires MX fiscal
+// address the user doesn't have, 4–6 week timeline). New pitch is
+// "Ship it your way." + a 1-tap share affordance that works TODAY
+// across every platform via Web Share API. Auto-post to Meta
+// stays on the roadmap as V3 — the share button buys us the
+// shipping window. Subhead also reframed: instead of "Schedules
+// and publishes to Meta" we now say "1 tap to share to Instagram,
+// Facebook, X, anywhere".
+//
 // Implementation notes:
 //   - One client-side fetch to /api/public/preview-bible. That
 //     route handles rate limits, URL validation, anti-SSRF, IG
@@ -190,12 +201,13 @@ export function LandingHero() {
           <br />
           that sounds like <em className="editorial-italic">you</em>.
           <br />
-          <span className="text-text-3">Posted automatically.</span>
+          <span className="text-text-3">Ship it your way.</span>
         </h1>
 
         <p className="text-base md:text-lg text-text-2 max-w-2xl mx-auto mb-10 leading-relaxed">
           AI reads your existing brand. Generates posts that fit your voice.
-          Schedules and publishes to Meta. Built for founders who ship.
+          1 tap to share to Instagram, Facebook, X, anywhere. Built for
+          founders who ship.
         </p>
 
         {!preview ? (

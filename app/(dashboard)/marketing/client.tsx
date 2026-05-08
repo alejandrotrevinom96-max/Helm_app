@@ -16,6 +16,7 @@ import { SmartTemplatesSection } from './smart-templates-section';
 import { StoryToggle } from './story-toggle';
 import { ReelToggle } from './reel-toggle';
 import type { VideoMetadata } from '@/lib/meta/video-validator';
+import { ShareButton } from '@/components/share/share-button';
 
 const PLATFORMS = [
   { id: 'instagram', label: 'Instagram', color: '#e1306c' },
@@ -899,7 +900,26 @@ export function MarketingClient({
                             className="bg-bg-elev border border-border rounded-lg px-3 py-2 text-sm text-text-1 [color-scheme:dark]"
                           />
                         </div>
-                        <div className="flex gap-2">
+                        <div className="flex flex-wrap gap-2">
+                          {/* PR #38 — Sprint 6.4: Share button next to
+                              the per-platform actions. Reads from the
+                              currently-selected draft so the user shares
+                              the version they actually picked. Mobile
+                              fires the OS share sheet; desktop opens the
+                              fallback modal with copy + downloads +
+                              platform links. */}
+                          {(() => {
+                            const sel = getSelectedDraft(activeGeneration);
+                            if (!sel?.content) return null;
+                            return (
+                              <ShareButton
+                                caption={sel.content}
+                                imageUrl={sel.visual?.url ?? null}
+                                variant="primary"
+                                label="Share now"
+                              />
+                            );
+                          })()}
                           <Button
                             variant="secondary"
                             size="sm"

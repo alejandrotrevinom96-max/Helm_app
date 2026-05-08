@@ -2,6 +2,12 @@
 // linear "How it works" timeline. Same file path so the route
 // group keeps its existing structure; the export is renamed to
 // LandingHowItWorks and aliased as LandingWorkspace for back-compat.
+//
+// PR #38 — Sprint 6.4: step 4 reframed. Pre-PR-38 we promised
+// "Helm publishes when scheduled" — that hinges on Meta App
+// Review (blocked). New copy: "Schedule or share now — 1 tap to
+// Instagram, Facebook, anywhere." with the V3 auto-post promise
+// kept as a teaser so early adopters know what's coming.
 
 interface Step {
   number: string;
@@ -30,9 +36,9 @@ const STEPS: Step[] = [
   },
   {
     number: '04',
-    title: 'Schedule and ship',
+    title: 'Schedule or share now',
     description:
-      'Drag drafts onto the calendar. Pick a golden time. Connect Meta, Helm publishes when scheduled. Stories and Reels work too.',
+      'Drag drafts onto the calendar. Pick a golden time. 1 tap to share to Instagram, Facebook, X, anywhere — works today on every platform. Auto-post to Meta coming in V3.',
   },
 ];
 

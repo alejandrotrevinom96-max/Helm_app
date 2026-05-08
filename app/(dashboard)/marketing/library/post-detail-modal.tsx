@@ -14,6 +14,7 @@
 // Clone issues POST /api/marketing/library/[id]/clone and redirects.
 import { useState } from 'react';
 import type { LibraryPost } from '@/app/api/marketing/library/route';
+import { ShareButton } from '@/components/share/share-button';
 
 interface Props {
   post: LibraryPost;
@@ -551,6 +552,19 @@ export function PostDetailModal({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            {/* PR #38 — Sprint 6.4: Share from the detail modal
+                covers both Library and Calendar (calendar opens
+                this same modal when wired). videoUrl rides along
+                so Reels share with the video on platforms that
+                accept it (mobile native share). */}
+            <ShareButton
+              caption={post.content}
+              imageUrl={post.visualUrl}
+              videoUrl={post.videoUrl}
+              variant="secondary"
+              label="Share"
+            />
+
             <button
               type="button"
               onClick={handleClone}

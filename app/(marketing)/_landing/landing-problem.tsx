@@ -20,15 +20,16 @@ const PILLARS: Pillar[] = [
   {
     icon: Megaphone,
     label: 'Marketing Suite',
-    title: 'Generate. Schedule. Auto-post.',
+    title: 'Generate. Schedule. Share.',
     description:
-      'AI generates posts brand-aligned to your voice. Calendar with golden times. Auto-publish to Facebook + Instagram (Stories + Reels too).',
+      'AI generates posts brand-aligned to your voice. Calendar with golden times. 1-tap share to Instagram, Facebook, X, anywhere — auto-post to Meta coming in V3.',
     features: [
       'Auto-generate brand bible from your website',
       '12-image visual validation loop',
       'Multi-platform post generation',
       'Drag-and-drop calendar with drafts pool',
-      'Stories + Reels auto-posting',
+      '1-tap share to Instagram, Facebook, X, more',
+      'Auto-post to Meta coming in V3',
     ],
   },
   {

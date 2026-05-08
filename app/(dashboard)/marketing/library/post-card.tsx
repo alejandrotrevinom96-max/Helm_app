@@ -6,6 +6,7 @@
 // here on purpose because the cards become noisy fast and the modal
 // already handles every action.
 import type { LibraryPost } from '@/app/api/marketing/library/route';
+import { ShareButton } from '@/components/share/share-button';
 
 interface Props {
   post: LibraryPost;
@@ -158,25 +159,36 @@ export function LibraryPostCard({ post, onClick }: Props) {
 
       <div className="flex items-center justify-between text-xs text-text-3 gap-2">
         <span className="truncate">{dateLabel}</span>
-        {/* PR #29 — when the post made it to Meta we show a permalink
-            chip the user can click to view the live post. stopPropagation
-            so the card-click (open modal) doesn't fire too. */}
-        {post.metaPermalink && (
-          <a
-            href={post.metaPermalink}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={(e) => e.stopPropagation()}
-            className="text-[10px] font-mono uppercase tracking-[0.1em] px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-500 hover:bg-emerald-500/25 transition-colors shrink-0"
-          >
-            View ↗
-          </a>
-        )}
-        {post.performanceRating && RATING_EMOJI[post.performanceRating] && (
-          <span aria-label={post.performanceRating} title={post.performanceRating}>
-            {RATING_EMOJI[post.performanceRating]}
-          </span>
-        )}
+        <div className="flex items-center gap-1 shrink-0">
+          {/* PR #29 — when the post made it to Meta we show a permalink
+              chip the user can click to view the live post. stopPropagation
+              so the card-click (open modal) doesn't fire too. */}
+          {post.metaPermalink && (
+            <a
+              href={post.metaPermalink}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="text-[10px] font-mono uppercase tracking-[0.1em] px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-500 hover:bg-emerald-500/25 transition-colors"
+            >
+              View ↗
+            </a>
+          )}
+          {post.performanceRating && RATING_EMOJI[post.performanceRating] && (
+            <span aria-label={post.performanceRating} title={post.performanceRating}>
+              {RATING_EMOJI[post.performanceRating]}
+            </span>
+          )}
+          {/* PR #38 — Sprint 6.4: quick-share without opening the
+              detail modal. ShareButton's onClick stopPropagation
+              keeps the card-click from firing alongside. */}
+          <ShareButton
+            caption={post.content}
+            imageUrl={post.visualUrl}
+            variant="icon"
+            label="Share"
+          />
+        </div>
       </div>
     </button>
   );

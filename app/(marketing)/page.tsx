@@ -7,16 +7,21 @@ import { LandingPage } from './_landing/landing-page';
 // hackers", "stop juggling 7 tabs"). The product is now a marketing
 // suite — the new copy matches the Hero tagline and what a visitor
 // will actually see/do.
+//
+// PR #38 — Sprint 6.4: copy pivot. "Posted automatically" promised
+// native Meta auto-publishing which is gated by App Review (blocked
+// 4–6 weeks). New copy reflects the ship-today path: "Ship it your
+// way" + 1-tap share via Web Share API. Auto-post stays as V3.
 export const metadata = {
   title:
-    'Helm — Brand-aware content that sounds like you. Posted automatically.',
+    'Helm — Brand-aware content that sounds like you. Ship it your way.',
   description:
-    'AI marketing suite for indie founders. Auto-generate a brand bible from your website, write posts that fit your voice, and auto-publish to Meta. Free for the first 20 founders.',
+    'AI marketing suite for indie founders. Generate brand-aligned posts that sound like you. 1 tap to share to Instagram, Facebook, X, anywhere. Free for the first 20 founders.',
   openGraph: {
     title:
-      'Helm — Brand-aware content that sounds like you. Posted automatically.',
+      'Helm — Brand-aware content that sounds like you. Ship it your way.',
     description:
-      'AI marketing suite for indie founders. Free for the first 20 founders.',
+      'AI marketing suite for indie founders. Tap to share anywhere. Free for the first 20 founders.',
     url: 'https://trythelm.com',
     siteName: 'Helm',
     type: 'website',
@@ -24,7 +29,7 @@ export const metadata = {
   twitter: {
     card: 'summary_large_image' as const,
     title: 'Helm — Brand-aware content that sounds like you',
-    description: 'Posted automatically.',
+    description: 'Ship it your way.',
   },
 };
 
