@@ -48,11 +48,16 @@ export async function middleware(request: NextRequest) {
   // Meta App Review and Vercel's robots both crawl them anonymously.
   // Hiding them behind /login fails Meta's review. /w/* are the
   // public waitlist pages from Sprint 1.
+  // PR #39 — /security is the public disclosure policy and
+  // /.well-known/* (security.txt + future robots/well-known) MUST
+  // be reachable anonymously per RFC 9116.
   const isPublicRoute =
     pathname === '/' ||
     pathname.startsWith('/w/') ||
     pathname === '/privacy' ||
-    pathname === '/terms';
+    pathname === '/terms' ||
+    pathname === '/security' ||
+    pathname.startsWith('/.well-known/');
   const isApiRoute = pathname.startsWith('/api');
   // PR #34 — Sprint 6.2: /api/public/* is the explicitly anonymous
   // surface (preview-bible for the landing page). Already covered by
