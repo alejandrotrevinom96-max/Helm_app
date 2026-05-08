@@ -140,5 +140,18 @@ export async function POST(request: Request) {
 
   await db.insert(scheduledPosts).values(inserts);
 
+  // PR #43 — Sprint 6.7.1: flip the source draft's status to
+  // 'scheduled' so it stops appearing in the Library Drafts tab
+  // and the Calendar drafts pool. Pre-PR-43 we left status='draft'
+  // and the row showed up in BOTH "Drafts" and "Scheduled" — the
+  // founder reported this as duplicate posts in Library. The
+  // scheduled_post itself is the authoritative copy from now on
+  // (it carries the scheduledFor + auto-publish lifecycle); the
+  // generated_post sticks around for analytics + clone-and-remix.
+  await db
+    .update(generatedPosts)
+    .set({ status: 'scheduled' })
+    .where(inArray(generatedPosts.id, ids));
+
   return NextResponse.json({ success: true, count: inserts.length });
 }

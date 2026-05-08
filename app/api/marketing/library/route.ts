@@ -114,6 +114,12 @@ export async function GET(request: Request) {
         : typeRaw === 'post'
           ? 'post'
           : null;
+  // PR #43 — Sprint 6.7.1: opt-in filter for drafts the user has
+  // explicitly liked (userVote='liked'). The Calendar drafts pool
+  // uses likedOnly=true so it surfaces only the "schedulable"
+  // queue; the Library page leaves it false so unvoted drafts
+  // are still browsable.
+  const likedOnly = searchParams.get('likedOnly') === 'true';
 
   if (!projectId) {
     return NextResponse.json(
@@ -155,6 +161,9 @@ export async function GET(request: Request) {
       // draft from the generate page voting UI.
       eq(generatedPosts.visibleInLibrary, true),
     ];
+    if (likedOnly) {
+      draftFilters.push(eq(generatedPosts.userVote, 'liked'));
+    }
     if (platform) {
       draftFilters.push(eq(generatedPosts.platform, platform));
     }
@@ -185,7 +194,12 @@ export async function GET(request: Request) {
       prompt: r.prompt,
       scheduledFor: null,
       publishedAt: null,
-      visualUrl: null,
+      // PR #43 — Sprint 6.7.1: drafts now persist their visual
+      // (PR #42 only persisted the row; pre-PR-43 the visualUrl
+      // column on generated_posts didn't exist and we hardcoded
+      // null here). Surfacing the column lets refreshed Library
+      // rows + Drafts pool chips keep their image.
+      visualUrl: r.imageUrl ?? null,
       performanceRating: null,
       performanceNote: null,
       metricsImpressions: null,

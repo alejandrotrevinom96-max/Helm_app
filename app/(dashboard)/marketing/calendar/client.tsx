@@ -23,6 +23,7 @@ import { CalendarView, type DraggedItem } from './calendar-view';
 import { CalendarFilters } from './calendar-filters';
 import { GoldenTimesModal } from './golden-times-modal';
 import { DraftsPool } from './drafts-pool';
+import { CalendarPostModal } from './calendar-post-modal';
 
 type ViewMode = 'week' | 'month';
 
@@ -110,6 +111,14 @@ export function CalendarClient({
   // owned its own draggedPost.
   const [draggedItem, setDraggedItem] = useState<DraggedItem | null>(null);
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
+
+  // PR #43 — Sprint 6.7.1: detail modal state. Set when a chip is
+  // clicked; cleared on close. We hold the full CalendarPost
+  // (rather than just an id) because the calendar already has
+  // every field the modal needs in `posts` — no extra fetch.
+  const [selectedPost, setSelectedPost] = useState<CalendarPost | null>(
+    null
+  );
 
   // Drafts pool drawer state. Open by default — the user pidió el pool
   // visible explícitamente. The collapsed state is a 48px-wide vertical
@@ -375,6 +384,7 @@ export function CalendarClient({
               onDragEnd={handleDragEnd}
               onDragOverDay={setDragOverKey}
               onDrop={handleDrop}
+              onPostClick={setSelectedPost}
             />
           )}
         </div>
@@ -404,6 +414,14 @@ export function CalendarClient({
           onCancel={cancelPendingDrop}
         />
       )}
+
+      {/* PR #43 — Sprint 6.7.1: detail modal. Mounted at root so
+          its overlay covers the whole calendar. Closes on click-
+          outside / X / Escape (handled inside the component). */}
+      <CalendarPostModal
+        post={selectedPost}
+        onClose={() => setSelectedPost(null)}
+      />
     </div>
   );
 }

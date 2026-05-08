@@ -174,6 +174,16 @@ export const generatedPosts = pgTable('generated_posts', {
   userVote: text('user_vote'), // 'liked' | 'disliked' | null
   votedAt: timestamp('voted_at'),
   visibleInLibrary: boolean('visible_in_library').default(true).notNull(),
+  // PR #43 — Sprint 6.7.1: persist visual on the draft itself.
+  // Pre-PR-43 a generated visual lived only in client memory
+  // (DraftCard.draft.visual.url). If the founder hit "Like"
+  // without first hitting "Use this draft → Schedule", the
+  // visual was orphaned and the draft showed up image-less in
+  // the Library. Now the visuals/generate endpoint writes URL
+  // + prompt back here when called with a draftId, so a
+  // refreshed Library row carries its image.
+  imageUrl: text('image_url'),
+  imagePrompt: text('image_prompt'),
 });
 
 // ===== Research Findings =====

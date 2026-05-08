@@ -381,6 +381,11 @@ export function MarketingClient({
           projectId: project.id,
           platform,
           postContent: draft.content,
+          // PR #43 — Sprint 6.7.1: passing the draft id lets the
+          // server persist image_url + image_prompt back on the
+          // draft row, so a Liked draft keeps its visual on
+          // refresh / in Library.
+          draftId: draft.id,
         }),
       });
 
@@ -595,6 +600,11 @@ export function MarketingClient({
                 scoreBreakdown: sel.scoreBreakdown,
                 visualUrl: sel.visual?.url ?? null,
                 visualPrompt: sel.visual?.prompt ?? null,
+                // PR #43 — Sprint 6.7.1: identify the source draft
+                // so the server can flip its status to 'scheduled'
+                // and stop showing it in Drafts. Pre-PR-43 every
+                // schedule left an orphan "Drafts" entry behind.
+                sourceDraftId: sel.id,
                 // PR #31 — Sprint 5.2.1: top-level isStory applies only
                 // to Instagram drafts. Server enforces this too (400
                 // on isStory + non-instagram), but filtering here means
@@ -822,48 +832,59 @@ export function MarketingClient({
                   setSelectedTemplate(null);
                 }}
                 fallbackContent={
-                  <div className="space-y-3">
-                    <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3">
+                  <div>
+                    {/* PR #43 — Sprint 6.7.1: flatten templates into a
+                        single 2-col grid. Pre-PR-43 we grouped by
+                        category — for projects with one template per
+                        category that meant a column with one card +
+                        an empty cell next to it, repeated 5×. The
+                        category is still legible: it now appears as
+                        a uppercase mini-tag at the top of each card. */}
+                    <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-3">
                       Choose a template (optional)
                     </div>
-                    {categories.map((cat) => {
-                      const inCat = templates.filter(
-                        (t) =>
-                          t.category === cat &&
-                          platforms.some((p) =>
-                            (t.bestFor as readonly string[]).includes(p)
-                          )
+                    {(() => {
+                      const applicable = templates.filter((t) =>
+                        platforms.some((p) =>
+                          (t.bestFor as readonly string[]).includes(p)
+                        )
                       );
-                      if (inCat.length === 0) return null;
-                      return (
-                        <div key={cat}>
-                          <div className="text-xs text-text-3 mb-2">{cat}</div>
-                          <div className="flex flex-wrap gap-2">
-                            {inCat.map((t) => {
-                              const active = selectedTemplate === t.id;
-                              return (
-                                <button
-                                  key={t.id}
-                                  onClick={() =>
-                                    setSelectedTemplate(active ? null : t.id)
-                                  }
-                                  className={`text-left px-3 py-2 rounded-lg border text-xs transition-colors max-w-[260px] ${
-                                    active
-                                      ? 'border-accent bg-accent-soft text-accent'
-                                      : 'border-border hover:border-border-bright text-text-2'
-                                  }`}
-                                >
-                                  <div className="font-medium">{t.title}</div>
-                                  <div className="text-text-3 mt-0.5 line-clamp-2">
-                                    {t.description}
-                                  </div>
-                                </button>
-                              );
-                            })}
+                      if (applicable.length === 0) {
+                        return (
+                          <div className="text-xs text-text-3 italic">
+                            No templates match your platform mix.
                           </div>
+                        );
+                      }
+                      return (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                          {applicable.map((t) => {
+                            const active = selectedTemplate === t.id;
+                            return (
+                              <button
+                                key={t.id}
+                                onClick={() =>
+                                  setSelectedTemplate(active ? null : t.id)
+                                }
+                                className={`text-left px-3 py-2.5 rounded-lg border text-xs transition-colors ${
+                                  active
+                                    ? 'border-accent bg-accent-soft text-accent'
+                                    : 'border-border hover:border-border-bright text-text-2'
+                                }`}
+                              >
+                                <div className="text-[9px] font-mono uppercase tracking-[0.1em] text-text-3 mb-1">
+                                  {t.category}
+                                </div>
+                                <div className="font-medium text-sm">{t.title}</div>
+                                <div className="text-text-3 mt-0.5 line-clamp-2">
+                                  {t.description}
+                                </div>
+                              </button>
+                            );
+                          })}
                         </div>
                       );
-                    })}
+                    })()}
                   </div>
                 }
               />

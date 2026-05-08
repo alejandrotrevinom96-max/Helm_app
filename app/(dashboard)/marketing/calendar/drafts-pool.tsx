@@ -54,9 +54,16 @@ export function DraftsPool({
     const fetchDrafts = async () => {
       setLoading(true);
       try {
+        // PR #43 — Sprint 6.7.1: drafts pool only shows drafts
+        // the user has explicitly Liked. Pre-PR-43 this
+        // surfaced every draft the user had ever generated
+        // (13+ chips on a busy session), defeating the point
+        // of the voting UI on the Generate page. likedOnly=true
+        // narrows to "what I've blessed for the calendar".
         const params = new URLSearchParams({
           projectId,
           status: 'draft',
+          likedOnly: 'true',
         });
         const res = await fetch(`/api/marketing/library?${params}`);
         const data: { posts?: LibraryPost[] } = await res.json();

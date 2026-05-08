@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { db } from '@/lib/db';
-import { projects, scheduledPosts } from '@/lib/db/schema';
+import { generatedPosts, projects, scheduledPosts } from '@/lib/db/schema';
 import { eq, and, asc, inArray } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 
@@ -36,6 +36,15 @@ export async function POST(request: Request) {
     videoDurationSeconds,
     videoSizeBytes,
     videoAspectRatio,
+    // PR #43 — Sprint 6.7.1: optional. When the caller is the
+    // Generate page's "Schedule all" flow it now has a real
+    // generated_posts.id for the selected draft (Sprint 6.7
+    // started persisting all drafts). Passing it lets us flip
+    // status='scheduled' so the row stops showing in the Drafts
+    // tab + Drafts pool. Legacy callers that don't supply it
+    // continue to work unchanged (the scheduled_post still
+    // lands; the source draft just isn't auto-archived).
+    sourceDraftId,
   } = await request.json();
 
   if (!projectId || !platform || !content || !scheduledFor) {
@@ -195,6 +204,28 @@ export async function POST(request: Request) {
       reelProcessingStatus: wantsReel ? 'uploaded' : null,
     })
     .returning();
+
+  // PR #43 — Sprint 6.7.1: archive the source draft so it stops
+  // double-counting in Library. Only runs when the caller passed
+  // sourceDraftId; we still scope the UPDATE by projectId so a
+  // forged id from another project can't be flipped.
+  if (typeof sourceDraftId === 'string' && sourceDraftId.length > 0) {
+    try {
+      await db
+        .update(generatedPosts)
+        .set({ status: 'scheduled' })
+        .where(
+          and(
+            eq(generatedPosts.id, sourceDraftId),
+            eq(generatedPosts.projectId, projectId)
+          )
+        );
+    } catch (e) {
+      // Non-fatal: the scheduled_post is the authoritative copy
+      // either way. Logging so we notice if it ever drifts.
+      console.error('[SCHEDULE] failed to archive source draft', e);
+    }
+  }
 
   return NextResponse.json(scheduled);
 }

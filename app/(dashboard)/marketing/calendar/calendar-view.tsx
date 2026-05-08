@@ -39,6 +39,13 @@ interface Props {
   onDragEnd: () => void;
   onDragOverDay: (key: string | null) => void;
   onDrop: (item: DraggedItem, date: Date) => void;
+  // PR #43 — Sprint 6.7.1: click handler. Calendar chips were
+  // drag-only pre-PR-43; the founder reported that clicking a
+  // post should open a detail modal with the caption + visual +
+  // share button. We pass the click up to CalendarClient which
+  // owns the modal state. Only chips with a real id call this
+  // (drafts pool chips have their own drag wiring).
+  onPostClick?: (post: CalendarPost) => void;
 }
 
 // PR #42 — Sprint 6.7: brand-color borders on calendar chips.
@@ -117,6 +124,7 @@ export function CalendarView({
   onDragEnd,
   onDragOverDay,
   onDrop,
+  onPostClick,
 }: Props) {
   const days = generateDays(currentDate, viewMode);
   const today = new Date();
@@ -222,9 +230,21 @@ export function CalendarView({
                     draggable
                     onDragStart={(e) => handleChipDragStart(e, post)}
                     onDragEnd={onDragEnd}
+                    onClick={() => onPostClick?.(post)}
+                    role={onPostClick ? 'button' : undefined}
+                    tabIndex={onPostClick ? 0 : undefined}
+                    onKeyDown={(e) => {
+                      if (
+                        onPostClick &&
+                        (e.key === 'Enter' || e.key === ' ')
+                      ) {
+                        e.preventDefault();
+                        onPostClick(post);
+                      }
+                    }}
                     className={`
                       p-2 border-l-4
-                      border border-border rounded text-xs cursor-move hover:border-border-bright hover:bg-bg
+                      border border-border rounded text-xs cursor-pointer hover:border-border-bright hover:bg-bg
                       transition-colors
                       ${STATUS_TINT[post.status] ?? 'bg-bg'}
                     `}
@@ -352,10 +372,22 @@ export function CalendarView({
                     draggable
                     onDragStart={(e) => handleChipDragStart(e, post)}
                     onDragEnd={onDragEnd}
+                    onClick={() => onPostClick?.(post)}
+                    role={onPostClick ? 'button' : undefined}
+                    tabIndex={onPostClick ? 0 : undefined}
+                    onKeyDown={(e) => {
+                      if (
+                        onPostClick &&
+                        (e.key === 'Enter' || e.key === ' ')
+                      ) {
+                        e.preventDefault();
+                        onPostClick(post);
+                      }
+                    }}
                     title={post.content}
                     className={`
                       px-1.5 py-1 border-l-4
-                      border border-border rounded text-[10px] cursor-move
+                      border border-border rounded text-[10px] cursor-pointer
                       hover:border-border-bright hover:bg-bg truncate transition-colors
                       ${STATUS_TINT[post.status] ?? 'bg-bg'}
                     `}

@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { db } from '@/lib/db';
-import { projects } from '@/lib/db/schema';
+import { generatedPosts, projects } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 import {
@@ -70,12 +70,25 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json().catch(() => ({}));
-    const { projectId, platform, postContent, style, aspectRatio } = body as {
+    const {
+      projectId,
+      platform,
+      postContent,
+      style,
+      aspectRatio,
+      // PR #43 — Sprint 6.7.1: when the client passes the
+      // generated_posts.id of the draft this visual belongs to,
+      // we persist the resulting URL + prompt back onto that
+      // row. Optional so legacy callers (and any non-draft
+      // visual flow) keep working.
+      draftId,
+    } = body as {
       projectId?: string;
       platform?: string;
       postContent?: string;
       style?: ImageStyle;
       aspectRatio?: AspectRatio;
+      draftId?: string;
     };
 
     if (!projectId || !platform || !postContent) {
@@ -146,10 +159,44 @@ export async function POST(request: Request) {
       tempPostId
     ).catch(() => null);
 
+    const finalUrl = uploaded?.publicUrl ?? result.url;
+
+    // PR #43 — Sprint 6.7.1: persist the visual onto the draft
+    // row when the client asked us to. Ownership is verified
+    // through the project ownership check above (the project
+    // row was already fetched by the project-bound visual gen
+    // helper); we additionally constrain by projectId so a
+    // forged draftId from a different project can't be written.
+    if (draftId) {
+      try {
+        await db
+          .update(generatedPosts)
+          .set({
+            imageUrl: finalUrl,
+            imagePrompt: result.prompt,
+          })
+          .where(
+            and(
+              eq(generatedPosts.id, draftId),
+              eq(generatedPosts.projectId, projectId)
+            )
+          );
+      } catch (persistErr) {
+        // Persistence failure shouldn't fail the whole request
+        // — the user already has the visual in client memory.
+        // Log + carry on; refresh might lose the visual but
+        // the live session still has it.
+        console.error(
+          '[VISUALS GENERATE] failed to persist on draft:',
+          persistErr
+        );
+      }
+    }
+
     return NextResponse.json({
       ok: true,
       visual: {
-        url: uploaded?.publicUrl ?? result.url,
+        url: finalUrl,
         prompt: result.prompt,
         width: result.width,
         height: result.height,
