@@ -78,7 +78,13 @@ export function LibraryClient({
     // ever becomes a problem.
     try {
       const params = new URLSearchParams({ projectId, status: 'all' });
-      const res = await fetch(`/api/marketing/library?${params}`);
+      const res = await fetch(`/api/marketing/library?${params}`, {
+        // PR #46 — Sprint 6.7.4: defense-in-depth against any
+        // browser HTTP-cache layer that might serve stale
+        // /api/marketing/library responses after a vote /
+        // schedule mutation invalidates the Router Cache.
+        cache: 'no-store',
+      });
       const data: { posts?: LibraryPost[] } = await res.json();
       const all = data.posts ?? [];
       setCounts({
@@ -119,7 +125,13 @@ export function LibraryClient({
       } else if (filters.type) {
         params.set('type', filters.type);
       }
-      const res = await fetch(`/api/marketing/library?${params}`);
+      const res = await fetch(`/api/marketing/library?${params}`, {
+        // PR #46 — Sprint 6.7.4: defense-in-depth against any
+        // browser HTTP-cache layer that might serve stale
+        // /api/marketing/library responses after a vote /
+        // schedule mutation invalidates the Router Cache.
+        cache: 'no-store',
+      });
       const data: { posts?: LibraryPost[]; error?: string } = await res.json();
       if (!res.ok) {
         setError(data.error ?? 'Failed to load library');

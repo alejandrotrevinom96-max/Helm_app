@@ -140,7 +140,12 @@ export function CalendarClient({
         endDate: end.toISOString(),
       });
       if (filters.platform) params.set('platform', filters.platform);
-      const res = await fetch(`/api/marketing/calendar?${params}`);
+      const res = await fetch(`/api/marketing/calendar?${params}`, {
+        // PR #46 — Sprint 6.7.4: bypass any browser HTTP cache
+        // so a fresh navigation after a schedule mutation pulls
+        // the new posts immediately.
+        cache: 'no-store',
+      });
       const data: { posts?: CalendarPost[]; error?: string } =
         await res.json();
       if (!res.ok) {

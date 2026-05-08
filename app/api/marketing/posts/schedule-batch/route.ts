@@ -16,6 +16,7 @@
 // enforced via project → user join, same pattern as the vote
 // endpoint.
 import { NextResponse } from 'next/server';
+import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 import { db } from '@/lib/db';
 import {
@@ -152,6 +153,13 @@ export async function POST(request: Request) {
     .update(generatedPosts)
     .set({ status: 'scheduled' })
     .where(inArray(generatedPosts.id, ids));
+
+  // PR #46 — Sprint 6.7.4: invalidate Library + Calendar caches.
+  // Library Drafts tab loses N rows; Calendar gains N posts on
+  // their respective scheduled days; Calendar drafts pool loses
+  // N entries. All three paths need a cache bust.
+  revalidatePath('/marketing/library');
+  revalidatePath('/marketing/calendar');
 
   return NextResponse.json({ success: true, count: inserts.length });
 }

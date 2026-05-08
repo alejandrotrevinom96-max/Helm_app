@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { generatedPosts, projects, scheduledPosts } from '@/lib/db/schema';
 import { eq, and, asc, inArray } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
+import { revalidatePath } from 'next/cache';
 
 const VALID_PLATFORMS = new Set([
   'instagram',
@@ -226,6 +227,12 @@ export async function POST(request: Request) {
       console.error('[SCHEDULE] failed to archive source draft', e);
     }
   }
+
+  // PR #46 — Sprint 6.7.4: cache bust on all three pages that
+  // surface this row. Library Drafts loses 1, Library Scheduled
+  // gains 1, Calendar gains a chip.
+  revalidatePath('/marketing/library');
+  revalidatePath('/marketing/calendar');
 
   return NextResponse.json(scheduled);
 }

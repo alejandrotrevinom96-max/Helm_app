@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { generatedPosts, projects } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
+import { revalidatePath } from 'next/cache';
 import {
   generateVisual,
   type AspectRatio,
@@ -181,6 +182,14 @@ export async function POST(request: Request) {
               eq(generatedPosts.projectId, projectId)
             )
           );
+        // PR #46 — Sprint 6.7.4: invalidate Library + Calendar
+        // server caches now that this draft has a persisted
+        // image. Without this, prefetched RSC payloads in those
+        // routes would still report visualUrl=null until the
+        // 30s router cache TTL expires.
+        revalidatePath('/marketing/library');
+        revalidatePath('/marketing/calendar');
+        revalidatePath('/marketing/generate');
       } catch (persistErr) {
         // Persistence failure shouldn't fail the whole request
         // — the user already has the visual in client memory.

@@ -65,7 +65,12 @@ export function DraftsPool({
           status: 'draft',
           likedOnly: 'true',
         });
-        const res = await fetch(`/api/marketing/library?${params}`);
+        const res = await fetch(`/api/marketing/library?${params}`, {
+          // PR #46 — Sprint 6.7.4: ensure the drafts pool
+          // refetch after a schedule mutation hits the API,
+          // not a stale browser-cached response.
+          cache: 'no-store',
+        });
         const data: { posts?: LibraryPost[] } = await res.json();
         if (!cancelled) {
           setDrafts(data.posts ?? []);

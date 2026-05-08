@@ -12,6 +12,7 @@
 // Auth: must own the project the draft belongs to. Drafts have
 // project_id (not user_id directly), so we join through projects.
 import { NextResponse } from 'next/server';
+import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 import { db } from '@/lib/db';
 import { generatedPosts, projects } from '@/lib/db/schema';
@@ -71,6 +72,15 @@ export async function POST(
       visibleInLibrary: vote === 'liked',
     })
     .where(eq(generatedPosts.id, id));
+
+  // PR #46 — Sprint 6.7.4: server-side cache invalidation. Pairs
+  // with the client-side router.refresh() in MarketingClient as
+  // defense in depth — revalidatePath drops the per-route data
+  // cache so even users who land via a fresh page load (no
+  // Router Cache hit) get the fresh count after a vote.
+  revalidatePath('/marketing/library');
+  revalidatePath('/marketing/calendar');
+  revalidatePath('/marketing/generate');
 
   return NextResponse.json({
     success: true,

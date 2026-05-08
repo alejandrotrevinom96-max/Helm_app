@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import type { Project } from '@/lib/db/schema';
 import { BrandBibleCard } from './brand-bible-card';
 import type { BrandBible } from '@/lib/types/brand';
@@ -92,6 +93,17 @@ export function MarketingClient({
   userId: string;
   visualsAvailable: boolean;
 }) {
+  // PR #46 — Sprint 6.7.4: router.refresh() invalidates the
+  // Next.js Router Cache (the client-side RSC payload cache,
+  // 30s default TTL). Pre-PR-46 a vote / add-visual / schedule
+  // mutation persisted to DB but the Library + Calendar
+  // prefetched payloads stayed stale; the founder reported
+  // "ahorita veo 1, después veo 2" — that's the cache
+  // invalidating in background after the user navigated. Now
+  // every mutation handler explicitly refreshes so the next
+  // navigation hits fresh data.
+  const router = useRouter();
+
   // Multi-select platforms; we enforce at least 1 selected at all times.
   const [platforms, setPlatforms] = useState<Platform[]>(['instagram']);
   const [prompt, setPrompt] = useState('');
@@ -317,6 +329,10 @@ export function MarketingClient({
             : g
         )
       );
+      // PR #46 — Sprint 6.7.4: invalidate Library + Calendar
+      // prefetched payloads so the next navigation reflects
+      // the new userVote / visibleInLibrary state.
+      router.refresh();
       showToast(
         vote === 'liked' ? 'Sent to library' : 'Hidden from library',
         vote === 'liked' ? 'success' : 'info'
@@ -410,6 +426,11 @@ export function MarketingClient({
           visual: { url: data.visual.url, prompt: data.visual.prompt },
           visualLoading: false,
         });
+        // PR #46 — Sprint 6.7.4: the server just persisted
+        // image_url + image_prompt onto the draft row. Refresh
+        // so Library / Calendar prefetched payloads pick it up
+        // when the user navigates over.
+        if (draft.id) router.refresh();
       } else {
         patchDraft(platform, draftIdx, {
           visualLoading: false,
@@ -700,6 +721,12 @@ export function MarketingClient({
           ),
         }))
       );
+      // PR #46 — Sprint 6.7.4: invalidate Library + Calendar
+      // prefetch caches so the user lands on fresh "scheduled"
+      // counts when they navigate over (the Calendar drafts
+      // pool should be empty, the calendar grid should show
+      // the new posts).
+      router.refresh();
     } catch (e) {
       showToast(
         e instanceof Error ? e.message : 'Could not schedule liked drafts',
