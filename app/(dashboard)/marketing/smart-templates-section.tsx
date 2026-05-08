@@ -137,17 +137,20 @@ export function SmartTemplatesSection({
     );
   }
 
-  const byCategory = (templates ?? []).reduce<Record<string, SmartTemplate[]>>(
-    (acc, t) => {
-      if (!acc[t.category]) acc[t.category] = [];
-      acc[t.category].push(t);
-      return acc;
-    },
-    {}
-  );
+  // PR #44 — Sprint 6.7.2: flatten the smart-templates grid.
+  // Pre-PR-44 we grouped by category here, which meant a project
+  // with one template per category produced 5 separate one-card
+  // grids stacked vertically — lots of dead space, ugly on
+  // desktop. Sprint 6.7.1 tried to fix this in client.tsx's
+  // `fallbackContent` prop, but that branch only renders when
+  // the AI returns ZERO templates (i.e. almost never in
+  // production). Now we render flat here, with the category as
+  // a uppercase mini-tag at the top of each card so the
+  // information isn't lost.
+  const flatTemplates = templates ?? [];
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <div className="flex justify-between items-center gap-2">
         <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3">
           Choose a template (optional)
@@ -161,23 +164,25 @@ export function SmartTemplatesSection({
         </button>
       </div>
 
-      {Object.entries(byCategory).map(([category, items]) => (
-        <div key={category}>
-          <div className="text-xs text-text-3 mb-2">{category}</div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-            {items.map((t, i) => (
-              <button
-                key={`${category}-${i}`}
-                onClick={() => onSelect(t.promptStarter, t.category)}
-                className="text-left p-3 rounded-lg border border-border hover:border-accent transition-colors"
-              >
-                <div className="text-sm font-medium mb-1">{t.title}</div>
-                <div className="text-xs text-text-3">{t.description}</div>
-              </button>
-            ))}
-          </div>
-        </div>
-      ))}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+        {flatTemplates.map((t, i) => (
+          <button
+            key={`${t.category}-${i}`}
+            onClick={() => onSelect(t.promptStarter, t.category)}
+            className="text-left p-3 rounded-lg border border-border hover:border-accent transition-colors bg-bg-elev/50"
+          >
+            <div className="text-[9px] font-mono uppercase tracking-[0.1em] text-text-3 mb-1">
+              {t.category}
+            </div>
+            <div className="text-sm font-medium text-text-1 mb-1">
+              {t.title}
+            </div>
+            <div className="text-xs text-text-3 leading-snug">
+              {t.description}
+            </div>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

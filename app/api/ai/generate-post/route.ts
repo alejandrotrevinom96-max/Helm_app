@@ -370,6 +370,20 @@ Don't quote this verbatim — instead, channel its spirit, energy, and specific 
         // to keep both. Now all 4 land in generated_posts with
         // userVote=null + visibleInLibrary=true; voting flips them
         // to liked / disliked and library filters disliked ones out.
+        //
+        // PR #44 — Sprint 6.7.2: zip ids back by INDEX, not by
+        // content. Pre-PR-44 we matched the inserted row to a draft
+        // via `d.content === row.content`, which silently dropped
+        // any draft whose content collided with another already-
+        // matched one (Haiku at 4 drafts/post occasionally produces
+        // near-identical short drafts for terse prompts). Drafts
+        // without an id then sent `draftId: undefined` to
+        // /api/visuals/generate, the server skipped the imageUrl
+        // persist, and the founder's image disappeared on Like /
+        // refresh. `db.insert(...).returning()` preserves input
+        // order; persistableDrafts is itself a stable filter of
+        // drafts (filter preserves order). Zipping by index is
+        // both simpler and guaranteed correct.
         const persistableDrafts = drafts.filter(
           (d) => !d.error && d.content
         );
@@ -384,17 +398,13 @@ Don't quote this verbatim — instead, channel its spirit, energy, and specific 
                 prompt,
               }))
             )
-            .returning({ id: generatedPosts.id, content: generatedPosts.content });
-          // Map each persisted row's id back onto the matching draft
-          // in `drafts` (preserving original draft order for the
-          // client's grid). Match by content because insert preserves
-          // input order but we only persisted non-errored drafts.
-          for (const row of inserted) {
-            const target = drafts.find(
-              (d) => !d.id && !d.error && d.content === row.content
-            );
-            if (target) target.id = row.id;
-          }
+            .returning({ id: generatedPosts.id });
+          inserted.forEach((row, i) => {
+            // persistableDrafts[i] holds the same object reference
+            // as the corresponding entry in drafts[]; mutating its
+            // id updates the array in place.
+            persistableDrafts[i].id = row.id;
+          });
         }
         // Track the best-by-score draft separately for visual gen
         // (only auto-generate a visual for the leader to cap cost;
