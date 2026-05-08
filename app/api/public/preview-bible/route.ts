@@ -49,6 +49,7 @@ import {
   hashUrl,
   validatePublicUrl,
 } from '@/lib/landing/url-validator';
+import { assertSafeUrl } from '@/lib/security/url-validator';
 import { detectInputType } from '@/lib/landing/input-detector';
 import {
   instagramDataToContext,
@@ -374,16 +375,71 @@ NOTE: Source is the founder's own description (no website or social profile scra
     displayUrl = `https://www.instagram.com/${normalized}/`;
   } else {
     // Website path (original PR #34 / PR #36 friendly-error logic).
+    //
+    // PR #39 Sprint 6.5: layer the DNS-resolved SSRF check on top
+    // of the synchronous validatePublicUrl that already ran above.
+    // The sync check stops obvious literal-IP attempts; this one
+    // catches DNS rebinding (e.g. evil.com → 127.0.0.1).
+    const safe = await assertSafeUrl(normalized);
+    if (!safe.valid || !safe.url) {
+      return NextResponse.json(
+        { error: safe.reason ?? 'URL refused for safety reasons.' },
+        { status: 400 }
+      );
+    }
+    // We loop the SSRF gate on each redirect hop — undici's default
+    // is up to 20 redirects; we cap at 5 since we're scraping landing
+    // pages, not following arbitrary chains. Each hop is re-validated
+    // through assertSafeUrl so a 302 to http://127.0.0.1/ would be
+    // refused on the redirect rather than blindly followed.
+    let fetchUrl = safe.url;
+
     let html: string;
     try {
-      const response = await fetch(normalized, {
-        headers: {
-          'User-Agent':
-            'Mozilla/5.0 (compatible; HelmBot/1.0; +https://trythelm.com)',
-          Accept: 'text/html,application/xhtml+xml',
-        },
-        signal: AbortSignal.timeout(15000),
-      });
+      let hops = 0;
+      const MAX_HOPS = 5;
+      let response: Response | null = null;
+      while (hops < MAX_HOPS) {
+        response = await fetch(fetchUrl, {
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0 (compatible; HelmBot/1.0; +https://trythelm.com)',
+            Accept: 'text/html,application/xhtml+xml',
+          },
+          signal: AbortSignal.timeout(15000),
+          redirect: 'manual',
+        });
+        if (response.status < 300 || response.status >= 400) break;
+        const loc = response.headers.get('location');
+        if (!loc) break;
+        let target: string;
+        try {
+          target = new URL(loc, fetchUrl).toString();
+        } catch {
+          return NextResponse.json(
+            { error: 'Site redirected to an invalid URL.' },
+            { status: 400 }
+          );
+        }
+        const hop = await assertSafeUrl(target);
+        if (!hop.valid || !hop.url) {
+          return NextResponse.json(
+            {
+              error:
+                hop.reason ?? 'Site redirected to a private address.',
+            },
+            { status: 400 }
+          );
+        }
+        fetchUrl = hop.url;
+        hops += 1;
+      }
+      if (!response) {
+        return NextResponse.json(
+          { error: 'Could not fetch site (no response).' },
+          { status: 400 }
+        );
+      }
       if (!response.ok) {
         const friendly =
           response.status === 403 || response.status === 401

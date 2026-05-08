@@ -1,0 +1,6 @@
+Contact: mailto:security@trythelm.com
+Expires: 2027-05-08T00:00:00.000Z
+Acknowledgments: https://trythelm.com/security
+Preferred-Languages: en, es
+Policy: https://trythelm.com/security
+Canonical: https://trythelm.com/.well-known/security.txt

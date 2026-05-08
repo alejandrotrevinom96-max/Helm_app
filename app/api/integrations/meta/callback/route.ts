@@ -23,6 +23,7 @@ import { eq, and } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 import { MetaGraphClient } from '@/lib/meta/graph-client';
 import { encryptToken } from '@/lib/crypto/token-encryption';
+import { verifyState } from '@/lib/security/oauth-state';
 
 const STATE_TTL_MS = 10 * 60 * 1000; // 10 min
 const DEFAULT_LONG_LIVED_EXPIRES_S = 60 * 24 * 60 * 60; // 60 days
@@ -48,23 +49,23 @@ interface DecodedState {
   timestamp: number;
 }
 
+// PR #39 Sprint 6.5: state is now HMAC-signed via
+// lib/security/oauth-state. Pre-PR-39 it was just base64(JSON);
+// callback authentication relied on the Supabase session check
+// + userId equality. Signing means we refuse forged states
+// before we even look at the DB.
 function decodeState(state: string): DecodedState | null {
-  try {
-    const parsed = JSON.parse(
-      Buffer.from(state, 'base64url').toString('utf8')
-    ) as DecodedState;
-    if (
-      typeof parsed.userId !== 'string' ||
-      typeof parsed.projectId !== 'string' ||
-      typeof parsed.timestamp !== 'number'
-    ) {
-      return null;
-    }
-    if (Date.now() - parsed.timestamp > STATE_TTL_MS) return null;
-    return parsed;
-  } catch {
+  const parsed = verifyState<DecodedState>(state);
+  if (!parsed) return null;
+  if (
+    typeof parsed.userId !== 'string' ||
+    typeof parsed.projectId !== 'string' ||
+    typeof parsed.timestamp !== 'number'
+  ) {
     return null;
   }
+  if (Date.now() - parsed.timestamp > STATE_TTL_MS) return null;
+  return parsed;
 }
 
 export async function GET(request: Request) {

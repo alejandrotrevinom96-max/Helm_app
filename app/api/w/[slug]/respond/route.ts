@@ -7,14 +7,50 @@ import {
 import { eq, and } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 import { createHash } from 'crypto';
+import {
+  checkRateLimit,
+  commitRateLimit,
+  getClientIp,
+} from '@/lib/landing/rate-limit';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// PR #39 Sprint 6.5: per-IP rate limit on the waitlist response
+// endpoint. Pre-PR-39 the only protection was per-page IP-hash
+// dedup, so an attacker rotating IPs across many pages could
+// flood waitlist_responses unbounded. 30/hour per IP keeps
+// genuine users (someone hitting a few pages they were emailed)
+// comfortably above the cap while stopping scripted floods. We
+// share the existing previewRateLimits table with a "wl:" prefix
+// — different namespace, same Postgres infra.
+const WAITLIST_RATE_LIMIT_PREFIX = 'wl:';
+const WAITLIST_MAX_PER_HOUR = 30;
 
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ slug: string }> }
 ) {
   const { slug } = await params;
+
+  // Rate limit BEFORE we touch the DB. Same shape as the public
+  // preview endpoint — check is read-only; we commit only after
+  // the work succeeds (so a 404-page-not-found doesn't burn a
+  // legit user's cap).
+  const ip = getClientIp(request);
+  const limit = await checkRateLimit(ip, {
+    keyPrefix: WAITLIST_RATE_LIMIT_PREFIX,
+    maxPerWindow: WAITLIST_MAX_PER_HOUR,
+  });
+  if (!limit.allowed) {
+    return NextResponse.json(
+      {
+        error: limit.reason ?? 'Rate limit exceeded',
+        resetAt: limit.resetAt?.toISOString(),
+      },
+      { status: 429 }
+    );
+  }
+
   const body = await request.json().catch(() => ({}));
   const { email, responses, template } = body as {
     email?: string;
@@ -42,11 +78,10 @@ export async function POST(
   }
 
   // Hash IP+slug so the same person submitting twice on the same page is
-  // detectable without storing raw IPs.
-  const ip =
-    request.headers.get('x-forwarded-for')?.split(',')[0].trim() ||
-    request.headers.get('x-real-ip') ||
-    'unknown';
+  // detectable without storing raw IPs. (Note: the rate-limit IP hash
+  // above uses the global ip+salt prefix; this dedup hash uses ip+slug
+  // so the same IP gets one row per page. Different purposes, different
+  // hashes.)
   const ipHash = createHash('sha256').update(ip + slug).digest('hex');
 
   // Dedup: if this IP already responded on this page, return the same
@@ -63,8 +98,20 @@ export async function POST(
     )
     .limit(1);
   if (existing) {
+    // Dedup hit. Still consume a rate-limit slot (a flood of dedup
+    // hits from rotating slugs would otherwise be free).
+    await commitRateLimit(ip, {
+      keyPrefix: WAITLIST_RATE_LIMIT_PREFIX,
+      maxPerWindow: WAITLIST_MAX_PER_HOUR,
+    });
     return NextResponse.json({ ok: true });
   }
+
+  // Commit a rate-limit slot — we're about to write to the DB.
+  await commitRateLimit(ip, {
+    keyPrefix: WAITLIST_RATE_LIMIT_PREFIX,
+    maxPerWindow: WAITLIST_MAX_PER_HOUR,
+  });
 
   await db.insert(waitlistResponses).values({
     waitlistPageId: page.id,

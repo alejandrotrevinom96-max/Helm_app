@@ -17,9 +17,21 @@ import { sendWebhook } from '@/lib/webhooks/send';
 import { NextResponse } from 'next/server';
 
 export async function GET(request: Request) {
-  // Verify cron secret
+  // PR #39 Sprint 6.5: pre-PR-39 we compared the bearer header
+  // against `Bearer ${process.env.CRON_SECRET}` directly. If the
+  // env var was missing the comparison string was `Bearer
+  // undefined`, and a request with that literal header would pass
+  // — turning a config drift into a public endpoint. Refuse if
+  // the secret is missing or empty before doing the comparison.
+  const expected = process.env.CRON_SECRET;
+  if (!expected) {
+    return NextResponse.json(
+      { error: 'CRON_SECRET not configured on server' },
+      { status: 503 }
+    );
+  }
   const auth = request.headers.get('authorization');
-  if (auth !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (auth !== `Bearer ${expected}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

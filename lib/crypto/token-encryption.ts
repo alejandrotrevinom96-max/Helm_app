@@ -30,22 +30,30 @@ const ALGORITHM = 'aes-256-gcm';
 const IV_BYTES = 16; // GCM standard
 const FALLBACK_DEV_KEY = 'fallback-dev-only-do-not-use-in-prod';
 
+// PR #39 Sprint 6.5: pre-PR-39 we warned and continued when
+// TOKEN_ENCRYPTION_KEY was missing in production. That's a
+// security smoke alarm at best — anyone who got their hands on
+// the codebase could decrypt OAuth tokens by hashing the literal
+// fallback string. Now we hard-fail in prod. Migrations and
+// startup paths that legitimately need a crypto handle MUST set
+// the env var (already documented in SETUP.md).
 function getKey(): Buffer {
   const secret =
     process.env.TOKEN_ENCRYPTION_KEY ??
     process.env.NEXTAUTH_SECRET ??
     FALLBACK_DEV_KEY;
-  if (
-    secret === FALLBACK_DEV_KEY &&
-    process.env.NODE_ENV === 'production'
-  ) {
-    // Loud warning — encrypting prod data with the dev fallback would
-    // make rotation painful. We don't throw because the function is
-    // sometimes called from migrations / startup paths where a hard
-    // fail would brick deploys; the warning is enough signal.
-    console.warn(
-      '[token-encryption] TOKEN_ENCRYPTION_KEY is not set in production. Using fallback key — set a real value via openssl rand -hex 32.'
-    );
+  if (secret === FALLBACK_DEV_KEY) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error(
+        '[token-encryption] TOKEN_ENCRYPTION_KEY (or NEXTAUTH_SECRET) MUST be set in production. Refusing to encrypt with the public fallback key. Generate one with `openssl rand -hex 32` and set it on Vercel.'
+      );
+    }
+    // Dev-mode signal: still loud, but doesn't brick local boots.
+    if (process.env.NODE_ENV !== 'test') {
+      console.warn(
+        '[token-encryption] Using FALLBACK_DEV_KEY. Set TOKEN_ENCRYPTION_KEY for any data you intend to keep across restarts.'
+      );
+    }
   }
   return createHash('sha256').update(secret).digest();
 }

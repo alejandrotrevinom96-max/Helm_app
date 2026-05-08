@@ -4,6 +4,14 @@
 // Inline content is sanitized: we only emit anchor/strong/em/code wrappers
 // from a controlled set of patterns. We escape < & > before applying
 // patterns to prevent injection from arbitrary AI output.
+//
+// PR #39 Sprint 6.5 audit: confirmed safe.
+//   - escapeHtml() runs FIRST so `<script>` from AI output becomes
+//     `&lt;script&gt;` before any pattern match.
+//   - The link regex hardcodes `https?://` so `javascript:` URLs
+//     can't slip through.
+//   - rel upgraded from `noopener` to `noopener noreferrer` so the
+//     opened tab can't read document.referrer.
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, '&amp;')
@@ -22,7 +30,7 @@ function parseInline(s: string): string {
     )
     .replace(
       /\[(.+?)\]\((https?:\/\/[^)]+)\)/g,
-      '<a href="$2" target="_blank" rel="noopener" class="text-accent hover:underline">$1</a>'
+      '<a href="$2" target="_blank" rel="noopener noreferrer" class="text-accent hover:underline">$1</a>'
     );
 }
 

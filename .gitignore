@@ -10,3 +10,11 @@ drizzle/
 *.tsbuildinfo
 
 .vercel
+
+# PR #39 Sprint 6.5: internal security audit notes — written for
+# operators, not for the public. The public disclosure copy lives
+# at app/security/page.tsx instead.
+SECURITY_AUDIT.md
+
+# Local Claude Code state (lock files, scheduled tasks).
+.claude/

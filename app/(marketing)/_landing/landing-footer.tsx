@@ -47,6 +47,15 @@ export function LandingFooter() {
           <Link href="/terms" className="hover:text-text-1 transition-colors">
             Terms
           </Link>
+          {/* PR #39 — Sprint 6.5: public security disclosure
+              policy. Linked here + at /.well-known/security.txt
+              so researchers have an advertised path. */}
+          <Link
+            href="/security"
+            className="hover:text-text-1 transition-colors"
+          >
+            Security
+          </Link>
           <Link href="/login" className="hover:text-text-1 transition-colors">
             Sign in
           </Link>

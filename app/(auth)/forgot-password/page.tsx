@@ -1,11 +1,14 @@
 'use client';
 
 // PR #33 — Sprint 6.1: forgot password page.
-//
-// Email-only flow. We deliberately don't tell the user whether the
-// address actually exists in our system — same "if an account
-// exists, we sent a link" message either way to avoid leaking
-// account enumeration. Supabase honors this on its end.
+// PR #39 Sprint 6.5: enumeration audit — pre-PR-39 the page
+// surfaced `resetError.message` from Supabase if the call
+// errored. Supabase doesn't return errors for non-existent
+// emails (so "not found" can't leak directly), but rate-limit /
+// validation errors COULD vary by email and were still a thin
+// side channel. Now we silently swallow Supabase errors and
+// always render the same "if an account exists" copy regardless
+// of outcome — true zero enumeration.
 import { useState } from 'react';
 import Link from 'next/link';
 import { Loader2 } from 'lucide-react';
@@ -15,23 +18,22 @@ export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [sent, setSent] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
-    setError(null);
     const supabase = createClient();
-    const { error: resetError } = await supabase.auth.resetPasswordForEmail(
-      email.trim(),
-      {
+    // PR #39 Sprint 6.5: fire-and-forget. Whether or not the
+    // email exists, whether or not Supabase rate-limits us,
+    // whether or not the network blew up — the user sees the
+    // same "if an account exists" message. Real errors land in
+    // server logs; the UX side never branches on email validity.
+    try {
+      await supabase.auth.resetPasswordForEmail(email.trim(), {
         redirectTo: `${window.location.origin}/reset-password`,
-      }
-    );
-    if (resetError) {
-      setError(resetError.message);
-      setSubmitting(false);
-      return;
+      });
+    } catch {
+      // Swallow — see comment above.
     }
     setSent(true);
     setSubmitting(false);
@@ -50,8 +52,8 @@ export default function ForgotPasswordPage() {
               Check your email
             </h1>
             <p className="text-sm text-text-2 mb-6">
-              If an account exists with <strong>{email}</strong>, we sent
-              a reset link.
+              If an account exists with that email, we sent a reset link.
+              Check your inbox (and spam folder) in the next few minutes.
             </p>
             <Link
               href="/login"
@@ -72,11 +74,6 @@ export default function ForgotPasswordPage() {
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-4">
-              {error && (
-                <div className="p-3 bg-danger/10 border border-danger/30 rounded-lg text-sm text-danger">
-                  {error}
-                </div>
-              )}
               <div>
                 <label className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2 block">
                   Email

@@ -4,10 +4,15 @@
 // requests don't burn the user's hourly cap. Pre-PR-36 a user
 // who typed 5 typos (DNS fails) got blocked for an hour without
 // ever consuming Anthropic credits — terrible UX.
+// PR #39 Sprint 6.5 — generalized so other public endpoints can
+// reuse the same Postgres-backed sliding-window. Caller passes
+// an opaque key prefix + a max-per-window number; defaults
+// preserve the original 5/hour preview-bible behavior so
+// existing call sites don't need to change.
 //
 // Sliding window:
-//   - 5 requests per 1-hour window per ip_hash
-//   - 6th committed request gets a 1-hour block
+//   - N requests per 1-hour window per (prefix + ip_hash)
+//   - (N+1)th committed request gets a 1-hour block
 //   - Window resets when no committed requests for 1h
 //   - peek() never increments; commit() does the real work
 //
@@ -24,6 +29,15 @@ const WINDOW_MINUTES = 60;
 const MAX_REQUESTS_PER_WINDOW = 5;
 const BLOCK_DURATION_MINUTES = 60;
 
+export interface RateLimitOptions {
+  /** Per-namespace prefix mixed into the ip_hash so two endpoints
+   *  with their own quotas don't share a counter. Empty string
+   *  preserves the legacy single-namespace behavior. */
+  keyPrefix?: string;
+  /** Override max requests per window. */
+  maxPerWindow?: number;
+}
+
 // IP_HASH_SALT is a separate env var (not the same as the token
 // encryption key) so rotating it doesn't invalidate stored tokens.
 // Falls back to NEXTAUTH_SECRET in dev.
@@ -35,9 +49,9 @@ function ipHashSalt(): string {
   );
 }
 
-export function hashIp(ip: string): string {
+export function hashIp(ip: string, prefix = ''): string {
   return createHash('sha256')
-    .update(ip + ipHashSalt())
+    .update(prefix + ip + ipHashSalt())
     .digest('hex')
     .slice(0, 32);
 }
@@ -67,8 +81,12 @@ export interface RateLimitResult {
 // many slots are left in the current window. Doesn't touch the row
 // — call commitRateLimit() AFTER the request succeeds (or at least
 // reaches the expensive part) to actually consume a slot.
-export async function checkRateLimit(ip: string): Promise<RateLimitResult> {
-  const ipHash = hashIp(ip);
+export async function checkRateLimit(
+  ip: string,
+  opts: RateLimitOptions = {}
+): Promise<RateLimitResult> {
+  const max = opts.maxPerWindow ?? MAX_REQUESTS_PER_WINDOW;
+  const ipHash = hashIp(ip, opts.keyPrefix ?? '');
   const now = new Date();
 
   const [existing] = await db
@@ -97,7 +115,7 @@ export async function checkRateLimit(ip: string): Promise<RateLimitResult> {
   const currentCount = windowExpired ? 0 : existing.count;
   return {
     allowed: true,
-    remainingRequests: Math.max(0, MAX_REQUESTS_PER_WINDOW - currentCount),
+    remainingRequests: Math.max(0, max - currentCount),
   };
 }
 
@@ -109,8 +127,12 @@ export async function checkRateLimit(ip: string): Promise<RateLimitResult> {
 // Returns allowed=false if this commit would push past the cap. The
 // caller should treat that as 429 (race-condition guard between two
 // concurrent requests in the same second).
-export async function commitRateLimit(ip: string): Promise<RateLimitResult> {
-  const ipHash = hashIp(ip);
+export async function commitRateLimit(
+  ip: string,
+  opts: RateLimitOptions = {}
+): Promise<RateLimitResult> {
+  const max = opts.maxPerWindow ?? MAX_REQUESTS_PER_WINDOW;
+  const ipHash = hashIp(ip, opts.keyPrefix ?? '');
   const now = new Date();
 
   const [existing] = await db
@@ -143,12 +165,12 @@ export async function commitRateLimit(ip: string): Promise<RateLimitResult> {
       });
     return {
       allowed: true,
-      remainingRequests: MAX_REQUESTS_PER_WINDOW - 1,
+      remainingRequests: max - 1,
     };
   }
 
   const newCount = existing.count + 1;
-  if (newCount > MAX_REQUESTS_PER_WINDOW) {
+  if (newCount > max) {
     const blockedUntil = new Date(
       now.getTime() + BLOCK_DURATION_MINUTES * 60 * 1000
     );
@@ -160,7 +182,7 @@ export async function commitRateLimit(ip: string): Promise<RateLimitResult> {
       allowed: false,
       remainingRequests: 0,
       resetAt: blockedUntil,
-      reason: `Rate limit exceeded (${MAX_REQUESTS_PER_WINDOW}/hour). Try again in 1 hour.`,
+      reason: `Rate limit exceeded (${max}/hour). Try again in 1 hour.`,
     };
   }
 
@@ -171,6 +193,6 @@ export async function commitRateLimit(ip: string): Promise<RateLimitResult> {
 
   return {
     allowed: true,
-    remainingRequests: MAX_REQUESTS_PER_WINDOW - newCount,
+    remainingRequests: max - newCount,
   };
 }

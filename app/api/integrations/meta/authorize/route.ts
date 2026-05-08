@@ -17,6 +17,7 @@ import { db } from '@/lib/db';
 import { projects } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
+import { signState } from '@/lib/security/oauth-state';
 
 // Scopes — keep this list MINIMAL. Meta App Review explicitly rejects
 // apps that request permissions they don't exercise.
@@ -66,13 +67,16 @@ export async function GET(request: Request) {
     );
   }
 
-  const state = Buffer.from(
-    JSON.stringify({
-      userId: user.id,
-      projectId,
-      timestamp: Date.now(),
-    })
-  ).toString('base64url');
+  // PR #39 Sprint 6.5: HMAC-sign the state. Pre-PR-39 the state
+  // was a plain base64-encoded JSON blob — defended by the
+  // callback's userId / Supabase-session check, but unsigned. Now
+  // we sign with HMAC-SHA256 so the callback refuses any state
+  // that didn't come from this server.
+  const state = signState({
+    userId: user.id,
+    projectId,
+    timestamp: Date.now(),
+  });
 
   const authUrl = new URL('https://www.facebook.com/v21.0/dialog/oauth');
   authUrl.searchParams.set('client_id', process.env.META_APP_ID);
