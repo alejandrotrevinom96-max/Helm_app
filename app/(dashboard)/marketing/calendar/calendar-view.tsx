@@ -16,6 +16,7 @@
 // the source of the drag is irrelevant to this component — onDrop
 // fires for both.
 import type { CalendarPost } from '@/app/api/marketing/calendar/route';
+import { getPlatformStyle } from '@/lib/platforms/colors';
 
 // Minimal shape used for drags — supports both already-scheduled
 // CalendarPost rows and generated_posts drafts. The `source`
@@ -40,13 +41,11 @@ interface Props {
   onDrop: (item: DraggedItem, date: Date) => void;
 }
 
-const PLATFORM_COLOR: Record<string, string> = {
-  instagram: 'border-l-pink-500',
-  facebook: 'border-l-blue-600',
-  linkedin: 'border-l-sky-700',
-  threads: 'border-l-text-2',
-  reddit: 'border-l-orange-500',
-};
+// PR #42 — Sprint 6.7: brand-color borders on calendar chips.
+// Pre-PR-42 we used Tailwind palette approximations (pink-500 for
+// IG, etc.); now we share the canonical brand color map with the
+// drafts pool + library + share modal so a post visually
+// identifies as the same "Instagram pink" everywhere it appears.
 
 const STATUS_TINT: Record<string, string> = {
   scheduled: 'bg-bg',
@@ -215,18 +214,21 @@ export function CalendarView({
               </div>
 
               <div className="space-y-2">
-                {dayPosts.map((post) => (
+                {dayPosts.map((post) => {
+                  const style = getPlatformStyle(post.platform);
+                  return (
                   <div
                     key={post.id}
                     draggable
                     onDragStart={(e) => handleChipDragStart(e, post)}
                     onDragEnd={onDragEnd}
                     className={`
-                      p-2 border-l-2 ${PLATFORM_COLOR[post.platform] ?? 'border-l-text-3'}
+                      p-2 border-l-4
                       border border-border rounded text-xs cursor-move hover:border-border-bright hover:bg-bg
                       transition-colors
                       ${STATUS_TINT[post.status] ?? 'bg-bg'}
                     `}
+                    style={{ borderLeftColor: style.brand }}
                   >
                     <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-text-3 mb-1 flex items-center gap-1">
                       <span>{fmtTime(post.scheduledFor)} · {post.platform}</span>
@@ -280,7 +282,8 @@ export function CalendarView({
                       {post.content}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
                 {dayPosts.length === 0 && (
                   <div className="text-[10px] text-text-3 italic">
                     No posts
@@ -341,7 +344,9 @@ export function CalendarView({
                 {day.getDate()}
               </div>
               <div className="space-y-1">
-                {dayPosts.slice(0, 3).map((post) => (
+                {dayPosts.slice(0, 3).map((post) => {
+                  const style = getPlatformStyle(post.platform);
+                  return (
                   <div
                     key={post.id}
                     draggable
@@ -349,11 +354,12 @@ export function CalendarView({
                     onDragEnd={onDragEnd}
                     title={post.content}
                     className={`
-                      px-1.5 py-1 border-l-2 ${PLATFORM_COLOR[post.platform] ?? 'border-l-text-3'}
+                      px-1.5 py-1 border-l-4
                       border border-border rounded text-[10px] cursor-move
                       hover:border-border-bright hover:bg-bg truncate transition-colors
                       ${STATUS_TINT[post.status] ?? 'bg-bg'}
                     `}
+                    style={{ borderLeftColor: style.brand }}
                   >
                     <span>{fmtTime(post.scheduledFor)} {post.platform}</span>
                     {post.isStory && (
@@ -379,7 +385,8 @@ export function CalendarView({
                       <span className="text-danger ml-1" aria-label="Publishing failed">⚠</span>
                     )}
                   </div>
-                ))}
+                  );
+                })}
                 {dayPosts.length > 3 && (
                   <div className="text-[10px] text-text-3">
                     +{dayPosts.length - 3} more

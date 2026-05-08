@@ -17,9 +17,16 @@
 //
 // `refreshKey` is a parent-controlled counter: bump it to force a refetch
 // after a drop succeeds (the just-scheduled draft should disappear).
-import { useEffect, useState } from 'react';
+//
+// PR #42 — Sprint 6.7: drafts now group into per-platform
+// collapsible sections with brand-color tinted headers (Instagram
+// pink, Facebook blue, Reddit orange, etc). The flat list pattern
+// stopped scaling once a session generated 4+ drafts × 3+
+// platforms = 12+ chips with no obvious organization.
+import { useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, Inbox } from 'lucide-react';
 import type { LibraryPost } from '@/app/api/marketing/library/route';
+import { getPlatformStyle } from '@/lib/platforms/colors';
 
 interface Props {
   projectId: string;
@@ -75,6 +82,39 @@ export function DraftsPool({
         d.content.toLowerCase().includes(search.trim().toLowerCase())
       )
     : drafts;
+
+  // PR #42 — Sprint 6.7: group filtered drafts by platform so the
+  // pool can show collapsible sections with brand colors. Insertion
+  // order of platform keys is preserved so a session that generated
+  // Instagram → Facebook → LinkedIn shows them in that order, not
+  // alphabetically.
+  const grouped = useMemo(() => {
+    const map = new Map<string, LibraryPost[]>();
+    for (const d of filtered) {
+      const key = d.platform.toLowerCase();
+      const arr = map.get(key) ?? [];
+      arr.push(d);
+      map.set(key, arr);
+    }
+    return Array.from(map.entries());
+  }, [filtered]);
+
+  // Track which platform sections are open. Default = all open
+  // (founder review pattern: see everything, collapse what you've
+  // already triaged).
+  const [openPlatforms, setOpenPlatforms] = useState<Set<string>>(
+    new Set()
+  );
+  useEffect(() => {
+    setOpenPlatforms(new Set(grouped.map(([k]) => k)));
+  }, [grouped]);
+  const togglePlatform = (key: string) =>
+    setOpenPlatforms((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
 
   // ===== COLLAPSED =====
   if (!isOpen) {
@@ -152,14 +192,55 @@ export function DraftsPool({
             {search.trim() ? 'No drafts match search' : 'No drafts yet'}
           </div>
         ) : (
-          filtered.map((draft) => (
-            <DraftChip
-              key={draft.id}
-              draft={draft}
-              onDragStart={() => onDragStart(draft)}
-              onDragEnd={onDragEnd}
-            />
-          ))
+          grouped.map(([platformKey, items]) => {
+            const style = getPlatformStyle(platformKey);
+            const isOpen = openPlatforms.has(platformKey);
+            return (
+              <div
+                key={platformKey}
+                className="rounded-lg overflow-hidden border border-border"
+              >
+                <button
+                  type="button"
+                  onClick={() => togglePlatform(platformKey)}
+                  className="w-full px-3 py-2 flex items-center justify-between hover:bg-bg-elev transition-colors"
+                  style={{ backgroundColor: style.tint }}
+                  aria-expanded={isOpen}
+                >
+                  <div className="flex items-center gap-2">
+                    <ChevronRight
+                      className={`w-4 h-4 transition-transform ${
+                        isOpen ? 'rotate-90' : ''
+                      }`}
+                      style={{ color: style.text }}
+                    />
+                    <span
+                      className="text-xs font-mono uppercase tracking-wider font-medium"
+                      style={{ color: style.text }}
+                    >
+                      {style.label}
+                    </span>
+                    <span className="text-xs text-text-3">
+                      ({items.length})
+                    </span>
+                  </div>
+                </button>
+                {isOpen && (
+                  <div className="p-2 space-y-2 bg-bg">
+                    {items.map((draft) => (
+                      <DraftChip
+                        key={draft.id}
+                        draft={draft}
+                        accentColor={style.brand}
+                        onDragStart={() => onDragStart(draft)}
+                        onDragEnd={onDragEnd}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })
         )}
       </div>
 
@@ -175,10 +256,12 @@ export function DraftsPool({
 
 function DraftChip({
   draft,
+  accentColor,
   onDragStart,
   onDragEnd,
 }: {
   draft: LibraryPost;
+  accentColor: string;
   onDragStart: () => void;
   onDragEnd: () => void;
 }) {
@@ -194,15 +277,10 @@ function DraftChip({
         onDragStart();
       }}
       onDragEnd={onDragEnd}
-      className="
-        group p-3 bg-bg border border-border rounded-lg cursor-move
-        hover:border-accent hover:bg-bg-elev transition-colors
-      "
+      className="group p-3 bg-bg-elev rounded-lg cursor-move hover:bg-bg-elev/80 transition-colors border-l-4"
+      style={{ borderLeftColor: accentColor }}
     >
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-[9px] font-mono uppercase tracking-[0.1em] text-text-3 bg-bg-elev px-1.5 py-0.5 rounded">
-          {draft.platform}
-        </span>
+      <div className="flex items-center justify-end mb-1.5">
         <div
           className="text-text-3 group-hover:text-accent text-xs"
           aria-hidden

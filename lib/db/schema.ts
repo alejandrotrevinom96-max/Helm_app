@@ -159,6 +159,21 @@ export const generatedPosts = pgTable('generated_posts', {
   // scheduled_posts because that's where they affect publish behaviour.
   isReel: boolean('is_reel').default(false).notNull(),
   videoUrl: text('video_url'),
+  // PR #42 — Sprint 6.7: per-draft voting. Pre-PR-42 only the
+  // "best by consistency score" draft per platform was persisted;
+  // others died in client memory and the founder couldn't keep
+  // multiple good drafts from one generate run. New flow saves
+  // every draft and lets the user 👍 / 👎 each one.
+  //   - userVote: null while unvoted; 'liked' or 'disliked' once
+  //     the user clicks. Drafts can move between states.
+  //   - votedAt: when the most recent vote happened (for future
+  //     fine-tuning + analytics).
+  //   - visibleInLibrary: defaults true. Soft-deleted (false)
+  //     when disliked, so the data survives for learning while
+  //     disappearing from the user's Library + drafts pool.
+  userVote: text('user_vote'), // 'liked' | 'disliked' | null
+  votedAt: timestamp('voted_at'),
+  visibleInLibrary: boolean('visible_in_library').default(true).notNull(),
 });
 
 // ===== Research Findings =====

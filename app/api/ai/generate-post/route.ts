@@ -32,7 +32,11 @@ function isPlatform(p: unknown): p is Platform {
   return typeof p === 'string' && VALID_PLATFORM_SET.has(p as Platform);
 }
 
-const PILLAR_VARIANTS_COUNT = 3;
+// PR #42 — Sprint 6.7: bumped 3 → 4 so the generate page can show
+// drafts in a balanced 2-column grid (4 → 2×2). Founder feedback:
+// "I had 2 good ones and could only save 1" — voting fixes the
+// "save 1" problem; 4 drafts give a fairer pool to vote across.
+const PILLAR_VARIANTS_COUNT = 4;
 
 const PLATFORM_GUIDANCE: Record<Platform, string> = {
   instagram:
@@ -48,6 +52,13 @@ const PLATFORM_GUIDANCE: Record<Platform, string> = {
 };
 
 interface Draft {
+  // PR #42 — Sprint 6.7: every draft is now persisted to
+  // generated_posts before the response returns, so we can hand
+  // back the DB id and let the client vote on each draft
+  // individually. Pre-PR-42 only the best-scoring draft per
+  // platform was persisted; the others died in client memory.
+  // Optional because errored drafts don't get persisted.
+  id?: string;
   content: string;
   pillar: string;
   rationale: string;
@@ -86,6 +97,9 @@ function selectVariantPillars(bible: BrandBible | null): BrandPillar[] {
     { name: 'general', description: 'general approach', weight: 50 },
     { name: 'pragmatic', description: 'practical, no fluff', weight: 50 },
     { name: 'human', description: 'authentic and personal', weight: 50 },
+    // PR #42 — Sprint 6.7: 4th generic pillar so PILLAR_VARIANTS_COUNT=4
+    // never runs short for projects with no bible pillars.
+    { name: 'specific', description: 'concrete and example-driven', weight: 50 },
   ];
   return [...pillars, ...generic].slice(0, PILLAR_VARIANTS_COUNT);
 }
@@ -349,20 +363,47 @@ Don't quote this verbatim — instead, channel its spirit, energy, and specific 
 
         const drafts = await Promise.all(draftPromises);
 
-        // Persist only the highest-scoring non-error draft per platform so
-        // the "Recent generations" list stays meaningful (not 3× cluttered).
-        const sortedNonError = drafts
-          .filter((d) => !d.error && d.content)
-          .sort((a, b) => b.consistencyScore - a.consistencyScore);
-        const best = sortedNonError[0];
-        if (best) {
-          await db.insert(generatedPosts).values({
-            projectId: project.id,
-            platform: p,
-            content: best.content,
-            prompt,
-          });
+        // PR #42 — Sprint 6.7: persist EVERY non-error draft so the
+        // generate page can vote on each one individually. Pre-PR-42
+        // only the best-by-score draft was persisted, which meant a
+        // founder who liked drafts #2 and #3 of 3 had to re-generate
+        // to keep both. Now all 4 land in generated_posts with
+        // userVote=null + visibleInLibrary=true; voting flips them
+        // to liked / disliked and library filters disliked ones out.
+        const persistableDrafts = drafts.filter(
+          (d) => !d.error && d.content
+        );
+        if (persistableDrafts.length > 0) {
+          const inserted = await db
+            .insert(generatedPosts)
+            .values(
+              persistableDrafts.map((d) => ({
+                projectId: project.id,
+                platform: p,
+                content: d.content,
+                prompt,
+              }))
+            )
+            .returning({ id: generatedPosts.id, content: generatedPosts.content });
+          // Map each persisted row's id back onto the matching draft
+          // in `drafts` (preserving original draft order for the
+          // client's grid). Match by content because insert preserves
+          // input order but we only persisted non-errored drafts.
+          for (const row of inserted) {
+            const target = drafts.find(
+              (d) => !d.id && !d.error && d.content === row.content
+            );
+            if (target) target.id = row.id;
+          }
         }
+        // Track the best-by-score draft separately for visual gen
+        // (only auto-generate a visual for the leader to cap cost;
+        // others get visuals lazily via /api/visuals/generate when
+        // the user clicks "add visual" on them).
+        const sortedNonError = [...persistableDrafts].sort(
+          (a, b) => b.consistencyScore - a.consistencyScore
+        );
+        const best = sortedNonError[0];
 
         // Auto-generate a visual for the best draft only. Other drafts get
         // visuals lazily if the user selects them. Cost-cap: $0.05 × N

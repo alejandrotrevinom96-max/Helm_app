@@ -149,6 +149,11 @@ export async function GET(request: Request) {
     const draftFilters = [
       eq(generatedPosts.projectId, projectId),
       eq(generatedPosts.status, 'draft'),
+      // PR #42 — Sprint 6.7: hide soft-deleted (disliked) drafts.
+      // visibleInLibrary defaults true for legacy rows + new
+      // unvoted drafts; flips to false when the user dislikes a
+      // draft from the generate page voting UI.
+      eq(generatedPosts.visibleInLibrary, true),
     ];
     if (platform) {
       draftFilters.push(eq(generatedPosts.platform, platform));

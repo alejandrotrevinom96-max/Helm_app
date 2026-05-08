@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { headers } from 'next/headers';
 import { Analytics } from '@vercel/analytics/next';
 import { getServerTheme } from '@/lib/theme';
+import { ToastContainer } from '@/components/toast/toast';
 import './globals.css';
 
 // PR #36 — Sprint 6.2.1: copy aligned with the landing rebuild
@@ -80,6 +81,11 @@ export default async function RootLayout({
       </head>
       <body className="bg-bg text-text-1 font-sans antialiased">
         {children}
+        {/* PR #42 — Sprint 6.7: in-app toast container. Mounted
+            once at root so any client component can call
+            showToast() without prop-drilling. Renders nothing
+            when the queue is empty. */}
+        <ToastContainer />
         <Analytics />
       </body>
     </html>

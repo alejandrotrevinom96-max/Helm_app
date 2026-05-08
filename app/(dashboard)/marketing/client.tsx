@@ -17,6 +17,7 @@ import { StoryToggle } from './story-toggle';
 import { ReelToggle } from './reel-toggle';
 import type { VideoMetadata } from '@/lib/meta/video-validator';
 import { ShareButton } from '@/components/share/share-button';
+import { showToast } from '@/components/toast/toast';
 
 const PLATFORMS = [
   { id: 'instagram', label: 'Instagram', color: '#e1306c' },
@@ -119,6 +120,8 @@ export function MarketingClient({
   const [activeTab, setActiveTab] = useState<Platform | null>(null);
   const [schedulingAll, setSchedulingAll] = useState(false);
   const [scheduleSummary, setScheduleSummary] = useState<string | null>(null);
+  // PR #42 — Sprint 6.7: separate "Schedule liked" flow.
+  const [schedulingLiked, setSchedulingLiked] = useState(false);
 
   const togglePlatform = (p: Platform) => {
     setPlatforms((prev) => {
@@ -267,6 +270,73 @@ export function MarketingClient({
         g.platform === platform ? { ...g, selectedDraftIdx: idx } : g
       )
     );
+  };
+
+  // PR #42 — Sprint 6.7: per-draft voting. Optimistic update +
+  // server commit + toast feedback. On dislike the draft is
+  // marked but NOT yet removed from local state — the renderer
+  // filters userVote='disliked' out so the user sees an immediate
+  // disappearance, but the row remains queryable in case we
+  // want an "undo" affordance later.
+  const voteDraft = async (
+    platform: Platform,
+    draftId: string,
+    vote: 'liked' | 'disliked'
+  ) => {
+    // Optimistic flag
+    setGenerations((prev) =>
+      prev.map((g) =>
+        g.platform === platform
+          ? {
+              ...g,
+              drafts: g.drafts.map((d) =>
+                d.id === draftId ? { ...d, voting: true } : d
+              ),
+            }
+          : g
+      )
+    );
+    try {
+      const res = await fetch(`/api/marketing/posts/${draftId}/vote`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vote }),
+      });
+      if (!res.ok) throw new Error('Vote failed');
+      setGenerations((prev) =>
+        prev.map((g) =>
+          g.platform === platform
+            ? {
+                ...g,
+                drafts: g.drafts.map((d) =>
+                  d.id === draftId
+                    ? { ...d, voting: false, userVote: vote }
+                    : d
+                ),
+              }
+            : g
+        )
+      );
+      showToast(
+        vote === 'liked' ? 'Sent to library' : 'Hidden from library',
+        vote === 'liked' ? 'success' : 'info'
+      );
+    } catch {
+      // Revert voting flag on failure
+      setGenerations((prev) =>
+        prev.map((g) =>
+          g.platform === platform
+            ? {
+                ...g,
+                drafts: g.drafts.map((d) =>
+                  d.id === draftId ? { ...d, voting: false } : d
+                ),
+              }
+            : g
+        )
+      );
+      showToast('Could not save your vote', 'error');
+    }
   };
 
   // Update one draft inside one platform without losing the rest of the
@@ -571,6 +641,65 @@ export function MarketingClient({
     }
   };
 
+  // PR #42 — Sprint 6.7: schedule every liked draft across all
+  // platforms via the new /api/marketing/posts/schedule-batch
+  // endpoint. Distribution: 1 per day starting tomorrow at 09:00
+  // local time. The user can then drag posts around in the
+  // calendar after the fact. Custom-time mode is deferred to a
+  // follow-up sprint to keep this surface contained.
+  const scheduleLikedBatch = async () => {
+    const liked = generations.flatMap((g) =>
+      g.drafts.filter((d) => d.userVote === 'liked' && d.id)
+    );
+    if (liked.length === 0) return;
+
+    setSchedulingLiked(true);
+    try {
+      // Golden times: tomorrow 09:00 local, then +1 day per draft.
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      tomorrow.setHours(9, 0, 0, 0);
+      const posts = liked.map((d, i) => {
+        const t = new Date(tomorrow);
+        t.setDate(t.getDate() + i);
+        return { id: d.id!, scheduledAt: t.toISOString() };
+      });
+      const res = await fetch('/api/marketing/posts/schedule-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ posts }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data?.error ?? 'Batch schedule failed');
+      }
+      showToast(
+        `Scheduled ${liked.length} post${liked.length === 1 ? '' : 's'}`,
+        'success'
+      );
+      broadcastEvent({ type: 'scheduled-post-created' });
+      // Soft refresh: a hard reload is jarring. Clear the votes so
+      // the buttons reset and the user sees the success state.
+      setGenerations((prev) =>
+        prev.map((g) => ({
+          ...g,
+          drafts: g.drafts.map((d) =>
+            liked.find((l) => l.id === d.id)
+              ? { ...d, userVote: null }
+              : d
+          ),
+        }))
+      );
+    } catch (e) {
+      showToast(
+        e instanceof Error ? e.message : 'Could not schedule liked drafts',
+        'error'
+      );
+    } finally {
+      setSchedulingLiked(false);
+    }
+  };
+
   const copyOne = async (content: string) => {
     try {
       await navigator.clipboard.writeText(content);
@@ -807,47 +936,60 @@ export function MarketingClient({
                     </div>
                   ) : (
                     <>
+                      {/* PR #42 — Sprint 6.7: 4 drafts in a 2×2 grid
+                          (1-col on mobile). Disliked drafts filter
+                          out optimistically — they stay in DB with
+                          visible_in_library=false for future
+                          fine-tuning + undo. */}
                       <p className="text-xs text-text-3">
-                        3 drafts · each leans into a different brand pillar.
-                        Click a card to select.
+                        4 drafts · each leans into a different brand pillar.
+                        Like the ones you want to keep, hide the rest.
                       </p>
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                        {activeGeneration.drafts.map((draft, idx) => {
-                          const platform = activeGeneration.platform;
-                          const supportsCarousel =
-                            platform === 'instagram' || platform === 'linkedin';
-                          return (
-                            <DraftCard
-                              key={idx}
-                              draft={draft}
-                              isSelected={
-                                activeGeneration.selectedDraftIdx === idx
-                              }
-                              onSelect={() => selectDraft(platform, idx)}
-                              onContentChange={(content) =>
-                                updateDraftContent(platform, idx, content)
-                              }
-                              visualsAvailable={visualsAvailable}
-                              onGenerateVisual={
-                                visualsAvailable
-                                  ? () => handleGenerateVisual(platform, idx)
-                                  : undefined
-                              }
-                              onRegenerateVisual={
-                                visualsAvailable
-                                  ? () => handleGenerateVisual(platform, idx)
-                                  : undefined
-                              }
-                              showCarouselButton={
-                                supportsCarousel &&
-                                draft.content.length > 200
-                              }
-                              onGenerateCarousel={() =>
-                                handleGenerateCarousel(platform, idx)
-                              }
-                            />
-                          );
-                        })}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {activeGeneration.drafts
+                          .map((draft, idx) => ({ draft, idx }))
+                          .filter(
+                            ({ draft }) => draft.userVote !== 'disliked'
+                          )
+                          .map(({ draft, idx }) => {
+                            const platform = activeGeneration.platform;
+                            const supportsCarousel =
+                              platform === 'instagram' || platform === 'linkedin';
+                            return (
+                              <DraftCard
+                                key={draft.id ?? idx}
+                                draft={draft}
+                                isSelected={
+                                  activeGeneration.selectedDraftIdx === idx
+                                }
+                                onSelect={() => selectDraft(platform, idx)}
+                                onContentChange={(content) =>
+                                  updateDraftContent(platform, idx, content)
+                                }
+                                onVote={(id, vote) =>
+                                  voteDraft(platform, id, vote)
+                                }
+                                visualsAvailable={visualsAvailable}
+                                onGenerateVisual={
+                                  visualsAvailable
+                                    ? () => handleGenerateVisual(platform, idx)
+                                    : undefined
+                                }
+                                onRegenerateVisual={
+                                  visualsAvailable
+                                    ? () => handleGenerateVisual(platform, idx)
+                                    : undefined
+                                }
+                                showCarouselButton={
+                                  supportsCarousel &&
+                                  draft.content.length > 200
+                                }
+                                onGenerateCarousel={() =>
+                                  handleGenerateCarousel(platform, idx)
+                                }
+                              />
+                            );
+                          })}
                       </div>
 
                       {(() => {
@@ -954,6 +1096,31 @@ export function MarketingClient({
                 {scheduleSummary && (
                   <span className="text-xs text-text-2">{scheduleSummary}</span>
                 )}
+                {/* PR #42 — Sprint 6.7: schedule every liked draft
+                    across all platforms. Distinct from "Schedule all"
+                    which only schedules ONE-PER-PLATFORM (the
+                    selected one). Liked-batch uses golden times
+                    starting tomorrow at 09:00 local, one draft per
+                    day. Founder request: "I had 2 good ones and
+                    could only save 1" — voting + this button fix it. */}
+                {(() => {
+                  const liked = generations.flatMap((g) =>
+                    g.drafts.filter((d) => d.userVote === 'liked' && d.id)
+                  );
+                  if (liked.length === 0) return null;
+                  return (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={scheduleLikedBatch}
+                      disabled={schedulingLiked}
+                    >
+                      {schedulingLiked
+                        ? 'Scheduling…'
+                        : `Schedule liked (${liked.length})`}
+                    </Button>
+                  );
+                })()}
                 <Button
                   size="sm"
                   onClick={scheduleAll}

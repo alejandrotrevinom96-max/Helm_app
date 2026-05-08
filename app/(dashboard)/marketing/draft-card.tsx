@@ -1,10 +1,15 @@
 'use client';
 
 import { useState } from 'react';
+import { ThumbsUp, ThumbsDown } from 'lucide-react';
 import { GlassCard } from '@/components/ui/glass-card';
 import type { ScoreBreakdown } from '@/lib/ai/consistency-score';
 
 export interface Draft {
+  // PR #42 — Sprint 6.7: every draft now has a persisted DB id
+  // when the generate-post endpoint stored it. Optional only
+  // because errored drafts (no content) skip persistence.
+  id?: string;
   content: string;
   pillar: string;
   rationale: string;
@@ -17,6 +22,10 @@ export interface Draft {
   visualLoading?: boolean;
   visualError?: string;
   seededByQuote?: string;
+  // PR #42 — local mirror of generated_posts.user_vote so the
+  // grid can filter disliked drafts out without a refetch.
+  userVote?: 'liked' | 'disliked' | null;
+  voting?: boolean;
 }
 
 interface Props {
@@ -29,6 +38,12 @@ interface Props {
   visualsAvailable?: boolean;
   showCarouselButton?: boolean;
   onGenerateCarousel?: () => void;
+  // PR #42 — voting handler. Called with the persisted draft id
+  // (which is why `draft.id` must be present). Parent is
+  // responsible for the optimistic state update + filter on
+  // dislike. The handler returns void so it can fire-and-forget;
+  // toast feedback lives in the parent.
+  onVote?: (id: string, vote: 'liked' | 'disliked') => void;
 }
 
 const SCORE_WEIGHTS: Record<keyof ScoreBreakdown, number> = {
@@ -57,6 +72,7 @@ export function DraftCard({
   visualsAvailable = false,
   showCarouselButton = false,
   onGenerateCarousel,
+  onVote,
 }: Props) {
   const [showBreakdown, setShowBreakdown] = useState(false);
 
@@ -245,6 +261,48 @@ export function DraftCard({
         >
           Convert to 5-slide carousel
         </button>
+      )}
+
+      {/* PR #42 — Sprint 6.7: per-draft voting. Liked drafts get
+          flagged for the upcoming "schedule N liked" batch flow.
+          Disliked drafts soft-delete (parent removes from grid).
+          Hidden when the draft hasn't been persisted yet (id
+          missing — should be rare; only happens on error rows). */}
+      {onVote && draft.id && (
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() => onVote(draft.id!, 'liked')}
+            disabled={draft.voting}
+            className={`text-xs py-2 rounded-lg border transition-colors flex items-center justify-center gap-1.5 ${
+              draft.userVote === 'liked'
+                ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-500'
+                : 'border-border text-text-2 hover:border-emerald-500/40 hover:text-emerald-500'
+            } disabled:opacity-50`}
+            aria-pressed={draft.userVote === 'liked'}
+            aria-label={
+              draft.userVote === 'liked' ? 'Liked' : 'Like this draft'
+            }
+          >
+            <ThumbsUp className="w-3.5 h-3.5" />
+            {draft.userVote === 'liked' ? 'Liked' : 'Like'}
+          </button>
+          <button
+            type="button"
+            onClick={() => onVote(draft.id!, 'disliked')}
+            disabled={draft.voting}
+            className={`text-xs py-2 rounded-lg border transition-colors flex items-center justify-center gap-1.5 ${
+              draft.userVote === 'disliked'
+                ? 'bg-danger/10 border-danger/40 text-danger'
+                : 'border-border text-text-2 hover:border-danger/40 hover:text-danger'
+            } disabled:opacity-50`}
+            aria-pressed={draft.userVote === 'disliked'}
+            aria-label="Dislike this draft"
+          >
+            <ThumbsDown className="w-3.5 h-3.5" />
+            Hide
+          </button>
+        </div>
       )}
     </GlassCard>
   );
