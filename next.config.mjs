@@ -48,14 +48,29 @@ const securityHeaders = [
     value:
       'camera=(), microphone=(), geolocation=(), interest-cohort=(), payment=()',
   },
+  // PR #40 — Sprint 6.5.1: cross-origin isolation. We deliberately
+  // skip COEP (require-corp) because we render <img> from
+  // Supabase / fal.ai / Meta CDNs heavily; require-corp would
+  // break those without giving us anything we can't get from COOP
+  // alone at our threat level.
+  {
+    key: 'Cross-Origin-Opener-Policy',
+    value: 'same-origin',
+  },
+  {
+    key: 'Cross-Origin-Resource-Policy',
+    value: 'same-site',
+  },
   {
     key: 'Content-Security-Policy',
+    // The CSP that actually ships is the per-request, nonce-based
+    // version assembled in middleware.ts. THIS one is a static
+    // fallback for any path that bypasses middleware (none in
+    // practice — the matcher catches everything except static
+    // assets). It matches the middleware policy minus the nonce
+    // (since static config can't see per-request state).
     value: [
       "default-src 'self'",
-      // unsafe-inline + unsafe-eval are the cost of doing Next.js
-      // 15 App Router with HMR; revisit when next ships nonce
-      // helpers we can wire through middleware. unsafe-eval gets
-      // stripped in production builds anyway.
       "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.vercel.com https://va.vercel-scripts.com https://vercel.live",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "font-src 'self' data: https://fonts.gstatic.com",
@@ -72,6 +87,12 @@ const securityHeaders = [
 ];
 
 const nextConfig = {
+  // PR #40 — Sprint 6.5.1: hide x-powered-by: Next.js. Pre-PR-40
+  // every response advertised the framework + version, which is a
+  // small information leak (lets a scanner skip framework
+  // fingerprinting and jump straight to known-CVE checks). Free
+  // win — toggling this off costs nothing.
+  poweredByHeader: false,
   experimental: {
     serverActions: {
       bodySizeLimit: '2mb',

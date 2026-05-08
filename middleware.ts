@@ -5,11 +5,32 @@ import { NextResponse, type NextRequest } from 'next/server';
 //
 // Why here and not next.config.mjs `headers()`: in initial deploy
 // testing, only HSTS made it through to the browser via the
-// next.config path. Likely a interaction with the App Router
+// next.config path. Likely an interaction with the App Router
 // middleware response chain. Setting headers directly on the
 // middleware response is guaranteed to apply for every route
 // the matcher catches (i.e. everything except /_next/static and
 // image extensions, which don't need CSP anyway).
+//
+// PR #40 — Sprint 6.5.1: three hardening additions on top of 6.5:
+//   1. Cross-Origin-Opener-Policy: same-origin
+//      Mitigates window.opener leak + Spectre cross-origin reads.
+//   2. Cross-Origin-Resource-Policy: same-site
+//      Stops other sites from embedding our resources cross-origin.
+//      We deliberately DO NOT add Cross-Origin-Embedder-Policy
+//      (require-corp) — it would break <img> from Supabase / fal.ai
+//      / Meta CDNs, all of which we render heavily.
+//   3. Per-request nonce-based CSP with 'strict-dynamic'.
+//      Pre-PR-40 script-src had 'unsafe-inline' + 'unsafe-eval',
+//      which neutered the policy (any injected <script> ran).
+//      Now we mint a fresh nonce each request, embed it in the
+//      CSP, and pipe it to the layout via x-nonce so the inline
+//      themeBootScript carries a nonce. 'strict-dynamic' means
+//      any script loaded BY a nonced script is implicitly
+//      trusted — that lets Vercel Analytics's chained loads work
+//      without listing every inner script source. We keep
+//      'unsafe-eval' for one more sprint (some deps may still
+//      require it; remove after a 24h soak with no console
+//      violations).
 //
 // CSP allowlist scoped to actual sources we use:
 //   - Vercel + va.vercel-scripts (analytics + preview)
@@ -18,13 +39,9 @@ import { NextResponse, type NextRequest } from 'next/server';
 //     fetch pattern matchers expect connect-src declared)
 //   - fal.media + fbcdn + cdninstagram + googleusercontent
 //     (image hosts we render in <img> tags)
-//
-// `unsafe-inline` is required for Next 15 App Router's flight
-// payload script. `unsafe-eval` is required ONLY in dev for HMR
-// (Webpack); production builds don't need it but we keep it in
-// the policy because some Vercel preview features rely on it.
-// Revisit when Next ships first-class CSP nonces.
-const SECURITY_HEADERS: Record<string, string> = {
+
+// Static headers — the same value goes out on every response.
+const STATIC_SECURITY_HEADERS: Record<string, string> = {
   'X-DNS-Prefetch-Control': 'on',
   'Strict-Transport-Security':
     'max-age=63072000; includeSubDomains; preload',
@@ -33,9 +50,30 @@ const SECURITY_HEADERS: Record<string, string> = {
   'Referrer-Policy': 'strict-origin-when-cross-origin',
   'Permissions-Policy':
     'camera=(), microphone=(), geolocation=(), interest-cohort=(), payment=()',
-  'Content-Security-Policy': [
+  // PR #40 — Sprint 6.5.1: cross-origin isolation (partial — no
+  // COEP because we render external <img> heavily).
+  'Cross-Origin-Opener-Policy': 'same-origin',
+  'Cross-Origin-Resource-Policy': 'same-site',
+};
+
+// Generate a CSP per-request because we mint a fresh nonce per
+// request. Browsers cache HTML responses with their CSP header, so
+// reusing a nonce across requests would either (a) leak a
+// long-lived nonce or (b) break the cached pages once the nonce
+// rotates. Per-request is the conventional fix.
+function buildCsp(nonce: string): string {
+  return [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.vercel.com https://va.vercel-scripts.com https://vercel.live",
+    // 'strict-dynamic' makes browsers ignore the host allowlist
+    // when they support it; the nonce + transitive trust covers
+    // everything Vercel Analytics chains in. The host list stays
+    // for older browsers (pre-CSP3) as a fallback. 'unsafe-eval'
+    // kept for one sprint while we soak; remove next pass.
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' 'unsafe-eval' https://*.vercel.com https://va.vercel-scripts.com https://vercel.live`,
+    // CSS isn't a code-execution surface in the way <script> is,
+    // so 'unsafe-inline' for styles stays — drops would break
+    // Tailwind's compiled inline @keyframes etc. with no security
+    // gain.
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' data: https://fonts.gstatic.com",
     "img-src 'self' blob: data: https://*.supabase.co https://*.fal.media https://fal.media https://*.fbcdn.net https://*.cdninstagram.com https://scontent-*.cdninstagram.com https://*.googleusercontent.com https://avatars.githubusercontent.com https://lh3.googleusercontent.com",
@@ -46,22 +84,46 @@ const SECURITY_HEADERS: Record<string, string> = {
     "base-uri 'self'",
     "object-src 'none'",
     "upgrade-insecure-requests",
-  ].join('; '),
-};
+  ].join('; ');
+}
 
-function applySecurityHeaders(response: NextResponse): NextResponse {
-  for (const [key, value] of Object.entries(SECURITY_HEADERS)) {
+// Mint a fresh CSP nonce. Edge runtime exposes `crypto` (web
+// crypto) globally; we use 16 random bytes → base64 (~22 chars),
+// well above the 16-byte / 128-bit recommendation.
+function generateNonce(): string {
+  const arr = new Uint8Array(16);
+  crypto.getRandomValues(arr);
+  // btoa with String.fromCharCode is the Edge-friendly way to
+  // produce base64 without pulling in Buffer.
+  let binary = '';
+  for (const byte of arr) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+function applySecurityHeaders(
+  response: NextResponse,
+  nonce: string
+): NextResponse {
+  for (const [key, value] of Object.entries(STATIC_SECURITY_HEADERS)) {
     response.headers.set(key, value);
   }
+  response.headers.set('Content-Security-Policy', buildCsp(nonce));
   return response;
 }
 
 export async function middleware(request: NextRequest) {
+  // PR #40 — Sprint 6.5.1: per-request CSP nonce. Generated FIRST
+  // and stamped onto requestHeaders BEFORE the Supabase client
+  // takes a snapshot of those headers — otherwise the nonce
+  // wouldn't reach server components via `headers()`.
+  const nonce = generateNonce();
+
   // Expose the current pathname to server components via header so they can
   // skip self-redirects (e.g. dashboard layout deciding whether to send the
   // user to /onboarding when they are already on /onboarding).
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set('x-pathname', request.nextUrl.pathname);
+  requestHeaders.set('x-nonce', nonce);
 
   let supabaseResponse = NextResponse.next({ request: { headers: requestHeaders } });
 
@@ -124,17 +186,17 @@ export async function middleware(request: NextRequest) {
   if (!user && !isAuthRoute && !isPublicRoute && !isApiRoute) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
-    return applySecurityHeaders(NextResponse.redirect(url));
+    return applySecurityHeaders(NextResponse.redirect(url), nonce);
   }
 
   // Redirect logged-in users away from login page
   if (user && pathname === '/login') {
     const url = request.nextUrl.clone();
     url.pathname = '/onboarding';
-    return applySecurityHeaders(NextResponse.redirect(url));
+    return applySecurityHeaders(NextResponse.redirect(url), nonce);
   }
 
-  return applySecurityHeaders(supabaseResponse);
+  return applySecurityHeaders(supabaseResponse, nonce);
 }
 
 export const config = {

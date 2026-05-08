@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { headers } from 'next/headers';
 import { Analytics } from '@vercel/analytics/next';
 import { getServerTheme } from '@/lib/theme';
 import './globals.css';
@@ -51,6 +52,15 @@ export default async function RootLayout({
   children: React.ReactNode;
 }) {
   const theme = await getServerTheme();
+  // PR #40 — Sprint 6.5.1: nonce-based CSP. Middleware mints a
+  // fresh nonce per request and pipes it via x-nonce header; the
+  // inline themeBootScript below carries that nonce so it runs
+  // under the strict CSP. Falls through to undefined when the
+  // request didn't go through middleware (extremely rare —
+  // typically only happens for the matcher-excluded static asset
+  // paths, which don't render this layout anyway).
+  const h = await headers();
+  const nonce = h.get('x-nonce') ?? undefined;
   return (
     <html lang="en" data-theme={theme} suppressHydrationWarning>
       <head>
@@ -60,7 +70,10 @@ export default async function RootLayout({
           href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,300;1,9..144,400;1,9..144,500&family=JetBrains+Mono:wght@400;500;600&family=Geist:wght@300;400;500;600;700&display=swap"
           rel="stylesheet"
         />
-        <script dangerouslySetInnerHTML={{ __html: themeBootScript }} />
+        <script
+          nonce={nonce}
+          dangerouslySetInnerHTML={{ __html: themeBootScript }}
+        />
       </head>
       <body className="bg-bg text-text-1 font-sans antialiased">
         {children}
