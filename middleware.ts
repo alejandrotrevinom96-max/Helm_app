@@ -1,6 +1,61 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
+// PR #39 — Sprint 6.5: security headers injected from middleware.
+//
+// Why here and not next.config.mjs `headers()`: in initial deploy
+// testing, only HSTS made it through to the browser via the
+// next.config path. Likely a interaction with the App Router
+// middleware response chain. Setting headers directly on the
+// middleware response is guaranteed to apply for every route
+// the matcher catches (i.e. everything except /_next/static and
+// image extensions, which don't need CSP anyway).
+//
+// CSP allowlist scoped to actual sources we use:
+//   - Vercel + va.vercel-scripts (analytics + preview)
+//   - Supabase (auth + storage + realtime ws)
+//   - Anthropic (we don't call from browser today, but devtools
+//     fetch pattern matchers expect connect-src declared)
+//   - fal.media + fbcdn + cdninstagram + googleusercontent
+//     (image hosts we render in <img> tags)
+//
+// `unsafe-inline` is required for Next 15 App Router's flight
+// payload script. `unsafe-eval` is required ONLY in dev for HMR
+// (Webpack); production builds don't need it but we keep it in
+// the policy because some Vercel preview features rely on it.
+// Revisit when Next ships first-class CSP nonces.
+const SECURITY_HEADERS: Record<string, string> = {
+  'X-DNS-Prefetch-Control': 'on',
+  'Strict-Transport-Security':
+    'max-age=63072000; includeSubDomains; preload',
+  'X-Frame-Options': 'DENY',
+  'X-Content-Type-Options': 'nosniff',
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
+  'Permissions-Policy':
+    'camera=(), microphone=(), geolocation=(), interest-cohort=(), payment=()',
+  'Content-Security-Policy': [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.vercel.com https://va.vercel-scripts.com https://vercel.live",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src 'self' data: https://fonts.gstatic.com",
+    "img-src 'self' blob: data: https://*.supabase.co https://*.fal.media https://fal.media https://*.fbcdn.net https://*.cdninstagram.com https://scontent-*.cdninstagram.com https://*.googleusercontent.com https://avatars.githubusercontent.com https://lh3.googleusercontent.com",
+    "media-src 'self' blob: https://*.supabase.co",
+    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.anthropic.com https://*.vercel.com https://vitals.vercel-insights.com https://va.vercel-scripts.com",
+    "frame-ancestors 'none'",
+    "form-action 'self'",
+    "base-uri 'self'",
+    "object-src 'none'",
+    "upgrade-insecure-requests",
+  ].join('; '),
+};
+
+function applySecurityHeaders(response: NextResponse): NextResponse {
+  for (const [key, value] of Object.entries(SECURITY_HEADERS)) {
+    response.headers.set(key, value);
+  }
+  return response;
+}
+
 export async function middleware(request: NextRequest) {
   // Expose the current pathname to server components via header so they can
   // skip self-redirects (e.g. dashboard layout deciding whether to send the
@@ -69,17 +124,17 @@ export async function middleware(request: NextRequest) {
   if (!user && !isAuthRoute && !isPublicRoute && !isApiRoute) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
-    return NextResponse.redirect(url);
+    return applySecurityHeaders(NextResponse.redirect(url));
   }
 
   // Redirect logged-in users away from login page
   if (user && pathname === '/login') {
     const url = request.nextUrl.clone();
     url.pathname = '/onboarding';
-    return NextResponse.redirect(url);
+    return applySecurityHeaders(NextResponse.redirect(url));
   }
 
-  return supabaseResponse;
+  return applySecurityHeaders(supabaseResponse);
 }
 
 export const config = {
