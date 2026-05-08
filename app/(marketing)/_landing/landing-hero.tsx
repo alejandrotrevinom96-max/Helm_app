@@ -196,18 +196,25 @@ export function LandingHero() {
           </span>
         </div>
 
+        {/* PR #41 — Sprint 6.6: H1 rewrite. Out: "Brand-aware
+            content that sounds like you. Ship it your way." (clichés
+            'sounds like you' + 'ship it your way' + decorative
+            italic on 'you'). In: confessional 3-line opener that
+            names the actual customer (someone who built a thing
+            and now has to sell it) in their own voice. */}
         <h1 className="font-display text-5xl md:text-6xl lg:text-7xl font-light tracking-tight leading-[1.05] mb-6">
-          Brand-aware content
+          You built the thing.
           <br />
-          that sounds like <em className="editorial-italic">you</em>.
+          Now you have to sell it.
           <br />
-          <span className="text-text-3">Ship it your way.</span>
+          <span className="text-text-3">We help with that part.</span>
         </h1>
 
         <p className="text-base md:text-lg text-text-2 max-w-2xl mx-auto mb-10 leading-relaxed">
-          AI reads your existing brand. Generates posts that fit your voice.
-          1 tap to share to Instagram, Facebook, X, anywhere. Built for
-          founders who ship.
+          Paste your website or Instagram. Helm reads what you already
+          built, figures out your voice, and writes posts that sound like
+          you (not like ChatGPT). Tap once to share to Instagram, Facebook,
+          X, or anywhere else.
         </p>
 
         {!preview ? (
@@ -250,13 +257,13 @@ export function LandingHero() {
                     ) : (
                       <>
                         <Sparkles className="w-4 h-4" />
-                        See your brand
+                        See what Helm sees
                       </>
                     )}
                   </button>
                 </div>
                 <p className="text-xs text-text-3 mt-3">
-                  Works with website URLs or Instagram handles · ~30 seconds
+                  Works with any website or Instagram. Takes 30 seconds.
                 </p>
               </>
             ) : (
@@ -313,13 +320,13 @@ export function LandingHero() {
                   ) : (
                     <>
                       <Sparkles className="w-4 h-4" />
-                      See your brand
+                      See what Helm sees
                     </>
                   )}
                 </button>
                 <p className="text-xs text-text-3 mt-3">
-                  Be specific — who you help, what you do, who it&apos;s for.
-                  ~30 seconds.
+                  Be specific. Who you help, what you do, who it&apos;s for.
+                  Takes about 30 seconds.
                 </p>
               </>
             )}

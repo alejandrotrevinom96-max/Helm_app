@@ -15,30 +15,36 @@ interface Step {
   description: string;
 }
 
+// PR #41 — Sprint 6.6: step rewrite. Out: 4 em-dashes, "AI extracts"
+// AI-talk, "From X to Y in minutes" cliché. In: imperative voice
+// in step titles, plain prose in descriptions, parens where the
+// em-dashes used to gloss, honest about Meta App Review as a
+// blocker on step 04 (versus the previous "auto-post coming in
+// V3" hand-wave).
 const STEPS: Step[] = [
   {
     number: '01',
-    title: 'Connect your website',
+    title: 'Paste your website',
     description:
-      'Paste your URL or sign up with Google / GitHub / email. Helm reads your existing brand presence — the same way the landing preview already showed you.',
+      "Or your Instagram handle. Helm reads what's there. You saw the preview already, that's the actual product.",
   },
   {
     number: '02',
-    title: 'Auto-generate your brand bible',
+    title: 'Get your brand bible',
     description:
-      'AI extracts your archetype, voice, pillars, and audience. Validate visually with a 12-image batch. Refine or accept — it lives with your project.',
+      "Helm pulls your archetype, voice, content pillars, and audience into one document. We also generate 12 images so you can verify the visual direction matches what you had in mind. Edit anything that's off. Save it.",
   },
   {
     number: '03',
-    title: 'Generate posts that actually fit',
+    title: "Write posts that don't sound generic",
     description:
-      'Type a topic, AI writes brand-aligned drafts for each platform you choose — Instagram, Facebook, LinkedIn, Threads, Reddit.',
+      'Type what you want to talk about. Helm writes 3 drafts for each platform you pick (Instagram, Facebook, LinkedIn, Threads, Reddit), each leaning into a different angle of your brand. Pick the one that lands.',
   },
   {
     number: '04',
-    title: 'Schedule or share now',
+    title: 'Schedule or share',
     description:
-      'Drag drafts onto the calendar. Pick a golden time. 1 tap to share to Instagram, Facebook, X, anywhere — works today on every platform. Auto-post to Meta coming in V3.',
+      "Drop drafts on the calendar at your audience's golden times, or tap share and post wherever you want. Native auto-post to Meta ships in v3 (we're waiting on Meta's review).",
   },
 ];
 
@@ -54,7 +60,7 @@ function LandingHowItWorks() {
             How it works
           </div>
           <h2 className="font-display text-4xl md:text-5xl tracking-tight font-light leading-tight">
-            From website to scheduled posts in minutes
+            Four steps. No sales call.
           </h2>
         </div>
 

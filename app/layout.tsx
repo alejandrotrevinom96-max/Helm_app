@@ -16,16 +16,19 @@ import './globals.css';
 // PR #38 — Sprint 6.4: copy pivot. Auto-post to Meta is gated by
 // App Review (blocked), so the SEO/share previews now match the
 // real shipping path: "Tap to share anywhere".
+//
+// PR #41 — Sprint 6.6: anti-AI-slop rewrite. The (marketing)/
+// page.tsx metadata still wins for "/", but this default applies
+// to every other route that doesn't supply its own (auth pages,
+// dashboard, etc.) so it gets the same positioning shift.
 export const metadata: Metadata = {
-  title:
-    'Helm — Brand-aware content that sounds like you. Ship it your way.',
+  title: 'Helm: Marketing for people who built the product first',
   description:
-    'AI marketing suite for indie founders. Generate brand-aligned posts that sound like you. 1 tap to share to Instagram, Facebook, X, anywhere. Free for the first 20 founders.',
+    'You built the product. Now you have to market it. Helm reads your brand from any URL or Instagram, writes posts that sound like you, and ships them anywhere. Free for the first 20 founders.',
   openGraph: {
-    title:
-      'Helm — Brand-aware content that sounds like you. Ship it your way.',
+    title: 'Helm: Marketing for people who built the product first',
     description:
-      'AI marketing suite for indie founders. Tap to share anywhere. Free for the first 20 founders.',
+      "You built the product. Now you have to market it. Helm does the part you avoid. Free for the first 20 founders.",
     url: 'https://trythelm.com',
     siteName: 'Helm',
     type: 'website',

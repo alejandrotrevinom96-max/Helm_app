@@ -16,46 +16,55 @@ interface Pillar {
   features: string[];
 }
 
+// PR #41 — Sprint 6.6: pillar copy rewrite. Out: parallel one-word
+// titles ("Generate. Schedule. Share." / "Find pain. Find users." /
+// "Score your startup like a VC.") that read as ChatGPT pattern
+// matching, plus VC-aimed framing on Compass that addresses the
+// wrong audience. In: situation-specific titles that name a real
+// founder moment, body copy in one consistent voice across all
+// three tools, bullets as present-tense verbs instead of feature
+// nouns. Compass renamed to "Strategy" because that's what the
+// product is — "compass" was the metaphor, "strategy" is the noun.
 const PILLARS: Pillar[] = [
   {
     icon: Megaphone,
-    label: 'Marketing Suite',
-    title: 'Generate. Schedule. Share.',
+    label: 'Marketing',
+    title: 'Stop staring at the empty caption box',
     description:
-      'AI generates posts brand-aligned to your voice. Calendar with golden times. 1-tap share to Instagram, Facebook, X, anywhere — auto-post to Meta coming in V3.',
+      "Helm reads your website or Instagram, learns how you actually sound, then writes posts that match. You review, you tap to share, you go back to building. The calendar tells you when your audience is actually online (not when LinkedIn says they are).",
     features: [
-      'Auto-generate brand bible from your website',
-      '12-image visual validation loop',
-      'Multi-platform post generation',
-      'Drag-and-drop calendar with drafts pool',
-      '1-tap share to Instagram, Facebook, X, more',
-      'Auto-post to Meta coming in V3',
+      'Reads your existing brand from a URL',
+      'Validates the visual style with 12 image options',
+      'Writes for Instagram, Facebook, LinkedIn, Threads, Reddit',
+      'Calendar shows your real golden times',
+      'One tap to share anywhere',
+      'Native auto-post to Meta arriving in v3',
     ],
   },
   {
     icon: Search,
     label: 'Research',
-    title: 'Find pain. Find users.',
+    title: 'Read where your customers actually complain',
     description:
-      'Mine Reddit, Hacker News, Indie Hackers, and Google Trends for real pain points. Track what your audience is asking.',
+      'Reddit threads at 2am, Hacker News flame wars, Indie Hackers lurkers asking for the thing you build. Helm pulls real complaints and questions from where your audience hangs out, not from a generic SEO tool.',
     features: [
-      'Multi-source pain mining',
-      'Audience profile detection',
-      'Trend tracking',
-      'Saved findings library',
+      'Pulls posts from Reddit, Hacker News, Indie Hackers',
+      'Tracks Google Trends for your topic',
+      'Builds an audience profile from real conversations',
+      'Saves what matters so you can reference it later',
     ],
   },
   {
     icon: Compass,
-    label: 'Compass',
-    title: 'Score your startup like a VC.',
+    label: 'Strategy',
+    title: 'Spot the gap before you waste a quarter',
     description:
-      'Strategy assessment with VC-grade rubrics. Spot your strengths and your gaps before you ship the next thing.',
+      "You're guessing what to build next. Helm runs a strategy review on what you already have, finds the gaps that will hurt you in 6 months, and tells you what to fix first. No VC theater, no 40-slide framework. Just where you're weak and what to do.",
     features: [
-      'Strategy scoring',
-      'Gap analysis',
-      'Competitive positioning',
-      'Strategic recommendations',
+      'Reviews your current strategy across 8 dimensions',
+      'Flags the weak spots most founders miss',
+      'Compares your positioning to actual competitors',
+      'Tells you the next thing worth working on',
     ],
   },
 ];
@@ -69,10 +78,10 @@ function LandingPillars() {
       <div className="max-w-6xl mx-auto">
         <div className="text-center mb-12 md:mb-16">
           <div className="text-[10px] font-mono uppercase tracking-[0.2em] text-text-3 mb-3">
-            Three workspaces · One product
+            What&apos;s inside
           </div>
           <h2 className="font-display text-4xl md:text-5xl tracking-tight font-light">
-            What Helm does
+            Three tools that work together
           </h2>
         </div>
 

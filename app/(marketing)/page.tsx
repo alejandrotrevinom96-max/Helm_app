@@ -12,24 +12,32 @@ import { LandingPage } from './_landing/landing-page';
 // native Meta auto-publishing which is gated by App Review (blocked
 // 4–6 weeks). New copy reflects the ship-today path: "Ship it your
 // way" + 1-tap share via Web Share API. Auto-post stays as V3.
+//
+// PR #41 — Sprint 6.6: anti-AI-slop rewrite. Out: em-dashes in the
+// title strings, "AI marketing suite for indie founders" framing
+// that targets the wrong noun (we serve the BUILDER, not the
+// "indie founder" cohort), and the "Ship it your way" cliché.
+// In: positioning that names the actual customer ("people who
+// built the product first") and a description in the founder's
+// own voice.
 export const metadata = {
   title:
-    'Helm — Brand-aware content that sounds like you. Ship it your way.',
+    'Helm: Marketing for people who built the product first',
   description:
-    'AI marketing suite for indie founders. Generate brand-aligned posts that sound like you. 1 tap to share to Instagram, Facebook, X, anywhere. Free for the first 20 founders.',
+    'You built the product. Now you have to market it. Helm reads your brand from any URL or Instagram, writes posts that sound like you, and ships them anywhere. Free for the first 20 founders.',
   openGraph: {
     title:
-      'Helm — Brand-aware content that sounds like you. Ship it your way.',
+      'Helm: Marketing for people who built the product first',
     description:
-      'AI marketing suite for indie founders. Tap to share anywhere. Free for the first 20 founders.',
+      "You built the product. Now you have to market it. Helm does the part you avoid. Free for the first 20 founders.",
     url: 'https://trythelm.com',
     siteName: 'Helm',
     type: 'website',
   },
   twitter: {
     card: 'summary_large_image' as const,
-    title: 'Helm — Brand-aware content that sounds like you',
-    description: 'Ship it your way.',
+    title: 'Helm: Marketing for people who built the product first',
+    description: 'You built the product. Now you have to market it.',
   },
 };
 

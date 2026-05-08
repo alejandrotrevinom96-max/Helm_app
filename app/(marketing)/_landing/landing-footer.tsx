@@ -25,7 +25,7 @@ export function LandingFooter() {
             <span className="font-display text-base font-medium">Helm</span>
           </div>
           <p className="text-xs text-text-3">
-            Marketing suite for indie founders.
+            Marketing tools for people who built the product first.
           </p>
         </div>
 
