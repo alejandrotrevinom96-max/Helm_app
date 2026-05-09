@@ -88,5 +88,42 @@ export async function POST(request: Request) {
     })
     .returning();
 
+  // PR #49 — Sprint 6.8: kick a background voice-fingerprint
+  // refresh after the quote lands. Best-effort: we don't await
+  // the response, the cookie is forwarded so the analyze
+  // endpoint authenticates as the same user, and any failure
+  // is logged + non-fatal. If Vercel terminates the function
+  // before the analyze completes, the founder can still
+  // trigger it manually via `Re-analyze voice` (or just from
+  // the next quote insert that fires this same path).
+  triggerFingerprintRefresh(request, projectId);
+
   return NextResponse.json({ ok: true, quote: created });
+}
+
+function triggerFingerprintRefresh(request: Request, projectId: string) {
+  const cookie = request.headers.get('cookie') ?? '';
+  if (!cookie) return; // no auth context to forward — bail.
+  const host = request.headers.get('host');
+  // VERCEL_URL is set in production; fall back to the request
+  // host so this works locally too.
+  const base =
+    process.env.NEXT_PUBLIC_APP_URL ??
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null) ??
+    (host ? `https://${host}` : null);
+  if (!base) return;
+  // Fire and forget. NOT awaited.
+  fetch(`${base}/api/marketing/voice/analyze`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Cookie: cookie,
+    },
+    body: JSON.stringify({ projectId }),
+  }).catch((e) => {
+    console.error(
+      '[QUOTES] background fingerprint refresh failed (non-fatal):',
+      e
+    );
+  });
 }

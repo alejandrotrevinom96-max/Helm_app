@@ -111,6 +111,26 @@ export const projects = pgTable(
     // and preserves the original under `_legacyOriginal`.
     brandUrl: text('brand_url'),
     brandContext: jsonb('brand_context').$type<BrandBible>(),
+    // PR #49 — Sprint 6.8: Voice Fingerprint.
+    //
+    // Abstract patterns derived from brand_quotes by an Opus pass.
+    // The generator reads this (NOT the raw quotes) so we don't
+    // copy founder phrasings verbatim into outputs — we mimic the
+    // STRUCTURE / VOCABULARY / TONE patterns instead. Refreshed
+    // when the founder adds or edits quotes.
+    //
+    // Shape (see lib/types/voice.ts):
+    //   {
+    //     structuralPatterns: string[],
+    //     vocabularyTraits: string[],
+    //     signaturePhrasings: string[],   // pattern descriptions, not literals
+    //     toneCharacteristics: string[],
+    //     avoidPatterns: string[],
+    //     sourceQuotesCount: number,
+    //     derivedAt: ISO string,
+    //   }
+    voiceFingerprint: jsonb('voice_fingerprint'),
+    voiceFingerprintUpdatedAt: timestamp('voice_fingerprint_updated_at'),
   },
   (t) => ({
     uniqueUserRepo: unique().on(t.userId, t.githubRepoId),

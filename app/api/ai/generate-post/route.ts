@@ -1,13 +1,20 @@
 import { createClient } from '@/lib/supabase/server';
 import { db } from '@/lib/db';
-import { projects, generatedPosts, brandQuotes } from '@/lib/db/schema';
-import { eq, and, inArray, sql } from 'drizzle-orm';
+import {
+  projects,
+  generatedPosts,
+  brandQuotes,
+  scheduledPosts,
+} from '@/lib/db/schema';
+import { eq, and, inArray, sql, desc, isNotNull } from 'drizzle-orm';
 import { anthropic } from '@/lib/ai/claude';
 import { getTemplateById } from '@/lib/marketing/templates';
 import {
   computeConsistencyScore,
   type ScoreBreakdown,
 } from '@/lib/ai/consistency-score';
+import { isVoiceFingerprint } from '@/lib/types/voice';
+import type { VoiceFingerprint } from '@/lib/types/voice';
 // PR #47 — Sprint 6.7.5: removed `generateVisual` /
 // `uploadVisualFromUrl` imports along with the auto-visual
 // block they served. Visuals now go exclusively through
@@ -35,6 +42,169 @@ const VALID_PLATFORM_SET = new Set<Platform>(VALID_PLATFORMS);
 function isPlatform(p: unknown): p is Platform {
   return typeof p === 'string' && VALID_PLATFORM_SET.has(p as Platform);
 }
+
+// PR #49 — Sprint 6.8: Dual Learning System — context-block
+// builders. The generator now consumes FOUR signal types side
+// by side, each scoped to a different learning surface:
+//
+//   1. Brand Bible (existing) — high-level frame.
+//   2. Voice Fingerprint — abstract patterns derived from
+//      Quote Vault (Opus pass, persisted on projects).
+//   3. Voice Memory — recent likes/dislikes (drafts, in-app).
+//   4. Performance Memory — worked/flopped published posts
+//      (real-world feedback from scheduled_posts).
+//
+// CRITICAL DESIGN: voice and performance signals are SEPARATE.
+// The prompt makes that explicit so Claude doesn't conflate
+// "this style worked" with "this style sounds like the founder".
+// The two answer different questions.
+//
+// All builders are tolerant of empty inputs — they emit a "not
+// enough data" stub so the prompt structure stays stable across
+// projects with zero, partial, and full learning history.
+
+const VOICE_MEMORY_THRESHOLD = 5; // total votes before learning kicks in
+const PERFORMANCE_THRESHOLD = 5; // total ratings before learning kicks in
+const VOICE_MEMORY_LIMIT = 10; // recent N liked + N disliked
+const PERFORMANCE_LIMIT = 10; // recent N worked + N flopped
+
+interface VotedDraftRow {
+  content: string;
+  votedAt: Date | null;
+}
+
+interface RatedScheduledRow {
+  content: string;
+  performanceRating: string | null;
+  performanceNote: string | null;
+  metricsImpressions: number | null;
+  metricsLikes: number | null;
+  metricsComments: number | null;
+  metricsShares: number | null;
+  ratedAt: Date | null;
+}
+
+function buildVoiceFingerprintBlock(
+  fingerprint: VoiceFingerprint | null
+): string {
+  if (!fingerprint) {
+    return `## VOICE FINGERPRINT
+
+No voice fingerprint yet. Add 3+ quotes to this project's Quote Vault and Helm will analyze them into abstract voice patterns. Until then, rely on the brand bible voice settings.`;
+  }
+  const parts: string[] = [
+    `## VOICE FINGERPRINT (derived from ${fingerprint.sourceQuotesCount} real quotes)`,
+    '',
+    'These are ABSTRACT patterns. NEVER copy any phrasing verbatim from the source material — apply the patterns to NEW content.',
+  ];
+  const sections: Array<[string, string[]]> = [
+    ['Structure', fingerprint.structuralPatterns],
+    ['Vocabulary', fingerprint.vocabularyTraits],
+    ['Signature phrasing', fingerprint.signaturePhrasings],
+    ['Tone', fingerprint.toneCharacteristics],
+    ['Avoid', fingerprint.avoidPatterns],
+  ];
+  for (const [label, items] of sections) {
+    if (items.length === 0) continue;
+    parts.push('');
+    parts.push(`${label}:`);
+    for (const item of items) parts.push(`  - ${item}`);
+  }
+  return parts.join('\n');
+}
+
+function buildVoiceMemoryBlock(
+  liked: VotedDraftRow[],
+  disliked: VotedDraftRow[]
+): string {
+  const total = liked.length + disliked.length;
+  if (total < VOICE_MEMORY_THRESHOLD) {
+    return `## VOICE MEMORY
+
+Not enough draft feedback yet (${total}/${VOICE_MEMORY_THRESHOLD} votes needed before patterns can be inferred). Use Brand Bible voice settings only for now.`;
+  }
+  const truncate = (s: string) => (s.length > 200 ? s.slice(0, 200) + '…' : s);
+  const parts: string[] = [
+    '## VOICE MEMORY (founder feedback on previous AI drafts)',
+    '',
+    'When generating new drafts, lean toward LIKED structural patterns (opening style, hook shape, length, emoji usage, question types) and avoid DISLIKED patterns. These are about HOW to write — not WHAT to write about.',
+  ];
+  if (liked.length > 0) {
+    parts.push('');
+    parts.push('Liked drafts (mimic the structure, tone, length):');
+    liked.forEach((d, i) => {
+      parts.push(`  Liked #${i + 1}: "${truncate(d.content)}"`);
+    });
+  }
+  if (disliked.length > 0) {
+    parts.push('');
+    parts.push('Disliked drafts (avoid these patterns):');
+    disliked.forEach((d, i) => {
+      parts.push(`  Disliked #${i + 1}: "${truncate(d.content)}"`);
+    });
+  }
+  return parts.join('\n');
+}
+
+function buildPerformanceBlock(rows: RatedScheduledRow[]): string {
+  const worked = rows.filter((r) => r.performanceRating === 'worked');
+  const flopped = rows.filter((r) => r.performanceRating === 'flopped');
+  const total = worked.length + flopped.length;
+  if (total < PERFORMANCE_THRESHOLD) {
+    return `## PERFORMANCE LEARNING
+
+Not enough rated published posts yet (${total}/${PERFORMANCE_THRESHOLD} ratings needed before topic-level patterns can be inferred). Use Brand Bible pillars only for topic selection.`;
+  }
+  const truncate = (s: string) => (s.length > 150 ? s.slice(0, 150) + '…' : s);
+  const renderMetrics = (r: RatedScheduledRow): string => {
+    const m: string[] = [];
+    if (r.metricsImpressions != null) m.push(`reach=${r.metricsImpressions}`);
+    if (r.metricsLikes != null) m.push(`likes=${r.metricsLikes}`);
+    if (r.metricsComments != null) m.push(`comments=${r.metricsComments}`);
+    if (r.metricsShares != null) m.push(`shares=${r.metricsShares}`);
+    return m.join(', ');
+  };
+  const parts: string[] = [
+    '## PERFORMANCE LEARNING (real-world feedback from published posts)',
+    '',
+    'When generating new posts, prioritize TOPICS and ANGLES similar to WORKED posts. Avoid TOPICS and ANGLES similar to FLOPPED posts. These are about WHAT to write about — not HOW to write.',
+  ];
+  if (worked.length > 0) {
+    parts.push('');
+    parts.push('Worked (replicate these angles/topics):');
+    worked.forEach((r, i) => {
+      const metrics = renderMetrics(r);
+      parts.push(`  Worked #${i + 1}: "${truncate(r.content)}"`);
+      if (r.performanceNote) parts.push(`    Why it worked: ${r.performanceNote}`);
+      if (metrics) parts.push(`    Metrics: ${metrics}`);
+    });
+  }
+  if (flopped.length > 0) {
+    parts.push('');
+    parts.push('Flopped (avoid these angles/topics):');
+    flopped.forEach((r, i) => {
+      parts.push(`  Flopped #${i + 1}: "${truncate(r.content)}"`);
+      if (r.performanceNote) parts.push(`    Why it flopped: ${r.performanceNote}`);
+    });
+  }
+  return parts.join('\n');
+}
+
+const DUAL_LEARNING_GUIDANCE = `## DUAL LEARNING SIGNAL ARCHITECTURE
+
+You receive TWO different signal types above. Treat them separately:
+
+🎨 VOICE signals (Brand Bible + Voice Fingerprint + Voice Memory):
+   These tell you HOW to write — structure, tone, length, hooks, vocabulary.
+   Honor them strictly: the founder has chosen this voice.
+
+📊 PERFORMANCE signals (Performance Learning):
+   These tell you WHAT to write about — topics, angles, framing.
+   Use them for topic selection and angle bias.
+
+Optimize for BOTH simultaneously: write in the founder's authentic voice ABOUT topics that have validated performance. Each draft should feel like the founder wrote it about a topic that resonates with their audience.
+
+If you only have one signal type (e.g. lots of voice data, no performance data), use the available signal and don't compensate by mixing.`;
 
 // PR #42 — Sprint 6.7: bumped 3 → 4 so the generate page can show
 // drafts in a balanced 2-column grid (4 → 2×2). Founder feedback:
@@ -283,6 +453,95 @@ export async function POST(request: Request) {
     .orderBy(sql`usage_count ASC`, sql`random()`)
     .limit(PILLAR_VARIANTS_COUNT);
 
+  // PR #49 — Sprint 6.8: Dual Learning System.
+  //
+  // Pull learning signals once per request (NOT per platform/
+  // pillar combination — would be 4×4 = 16 redundant queries
+  // for a 4-platform run). All four blocks are computed up
+  // front, joined as a single string, and appended to every
+  // systemPrompt downstream.
+  //
+  // Voice signals (HOW to write):
+  //   - Brand Bible (already in pillar prompt).
+  //   - Voice Fingerprint from project.voiceFingerprint
+  //     (Opus-derived patterns from Quote Vault).
+  //   - Voice Memory from generated_posts.user_vote
+  //     (in-app likes/dislikes on prior drafts).
+  //
+  // Performance signals (WHAT to write about):
+  //   - Performance Memory from scheduled_posts.performance_rating
+  //     (worked/flopped after publish — real-world feedback).
+
+  const fingerprintRaw = project.voiceFingerprint as unknown;
+  const fingerprint =
+    fingerprintRaw && isVoiceFingerprint(fingerprintRaw)
+      ? fingerprintRaw
+      : null;
+
+  const [likedDrafts, dislikedDrafts] = await Promise.all([
+    db
+      .select({
+        content: generatedPosts.content,
+        votedAt: generatedPosts.votedAt,
+      })
+      .from(generatedPosts)
+      .where(
+        and(
+          eq(generatedPosts.projectId, projectId),
+          eq(generatedPosts.userVote, 'liked')
+        )
+      )
+      .orderBy(desc(generatedPosts.votedAt))
+      .limit(VOICE_MEMORY_LIMIT),
+    db
+      .select({
+        content: generatedPosts.content,
+        votedAt: generatedPosts.votedAt,
+      })
+      .from(generatedPosts)
+      .where(
+        and(
+          eq(generatedPosts.projectId, projectId),
+          eq(generatedPosts.userVote, 'disliked')
+        )
+      )
+      .orderBy(desc(generatedPosts.votedAt))
+      .limit(VOICE_MEMORY_LIMIT),
+  ]);
+
+  const ratedScheduled = await db
+    .select({
+      content: scheduledPosts.content,
+      performanceRating: scheduledPosts.performanceRating,
+      performanceNote: scheduledPosts.performanceNote,
+      metricsImpressions: scheduledPosts.metricsImpressions,
+      metricsLikes: scheduledPosts.metricsLikes,
+      metricsComments: scheduledPosts.metricsComments,
+      metricsShares: scheduledPosts.metricsShares,
+      ratedAt: scheduledPosts.ratedAt,
+    })
+    .from(scheduledPosts)
+    .where(
+      and(
+        eq(scheduledPosts.projectId, projectId),
+        isNotNull(scheduledPosts.performanceRating)
+      )
+    )
+    .orderBy(desc(scheduledPosts.ratedAt))
+    .limit(PERFORMANCE_LIMIT * 2); // pull both worked + flopped together
+
+  const voiceFingerprintBlock = buildVoiceFingerprintBlock(fingerprint);
+  const voiceMemoryBlock = buildVoiceMemoryBlock(likedDrafts, dislikedDrafts);
+  const performanceBlock = buildPerformanceBlock(ratedScheduled);
+
+  // Single concatenation downstream prompts append at the end.
+  const learningContext = [
+    voiceFingerprintBlock,
+    voiceMemoryBlock,
+    performanceBlock,
+    DUAL_LEARNING_GUIDANCE,
+  ].join('\n\n');
+
   // 4 platforms × 3 drafts × 2 calls (gen + score) = up to 24 parallel
   // Anthropic calls. Promise.all keeps total wallclock bounded by the
   // slowest platform rather than the sum of all platforms.
@@ -316,6 +575,16 @@ ${seedQuote.context ? `Context: ${seedQuote.context}` : ''}
 
 Don't quote this verbatim — instead, channel its spirit, energy, and specific phrasing patterns. Your draft should feel like the SAME PERSON who said this quote also wrote the post. Match cadence, vocabulary range, and worldview.`;
           }
+
+          // PR #49 — Sprint 6.8: Dual Learning System. Append the
+          // four learning blocks (Voice Fingerprint + Voice Memory
+          // + Performance + dual-signal guidance) to every
+          // platform/pillar variant. Same content for every draft
+          // in this generate call — the per-pillar slant from
+          // buildPillarPrompt + the per-quote seeding above stay
+          // in front; the learning context comes after, framed as
+          // global guidance the model should consider on top.
+          systemPrompt += '\n\n' + learningContext;
 
           let content = '';
           try {
