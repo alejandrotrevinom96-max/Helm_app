@@ -769,6 +769,20 @@ export function MarketingClient({
           brandUrl: project.brandUrl,
           brandContext:
             (project.brandContext as BrandBible | null) ?? null,
+          // PR #50 — Sprint 6.8.1: pass through the persisted
+          // voice fingerprint so the card can render the
+          // pattern chips + Re-analyze button. Cast loosely:
+          // the project type lives in lib/db/schema and the
+          // fingerprint shape in lib/types/voice; the card
+          // type-guards before rendering, so a malformed value
+          // becomes the empty-state CTA instead of a crash.
+          voiceFingerprint: (project as unknown as {
+            voiceFingerprint?: import('@/lib/types/voice').VoiceFingerprint | null;
+          }).voiceFingerprint ?? null,
+          voiceFingerprintUpdatedAt:
+            (project as unknown as {
+              voiceFingerprintUpdatedAt?: Date | null;
+            }).voiceFingerprintUpdatedAt?.toISOString() ?? null,
         }}
       />
 

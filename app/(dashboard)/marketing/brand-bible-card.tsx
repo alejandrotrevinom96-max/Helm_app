@@ -1,16 +1,26 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { GlassCard } from '@/components/ui/glass-card';
 import { BrandBibleModal } from './brand-bible-modal';
+import { showToast } from '@/components/toast/toast';
 import type { BrandBible } from '@/lib/types/brand';
+import type { VoiceFingerprint } from '@/lib/types/voice';
 
 export interface BrandProject {
   id: string;
   name: string;
   brandUrl: string | null;
   brandContext: BrandBible | null;
+  // PR #50 — Sprint 6.8.1: optional fingerprint passed from the
+  // parent server component. When present, the card renders a
+  // dedicated Voice Fingerprint section + a "Re-analyze" button.
+  // Optional so legacy usages of <BrandBibleCard> don't have to
+  // change shape if the fingerprint isn't ready yet.
+  voiceFingerprint?: VoiceFingerprint | null;
+  voiceFingerprintUpdatedAt?: string | null;
 }
 
 export function BrandBibleCard({ project }: { project: BrandProject }) {
@@ -141,6 +151,18 @@ export function BrandBibleCard({ project }: { project: BrandProject }) {
           </div>
         )}
 
+        {/* PR #50 — Sprint 6.8.1: Voice Fingerprint section.
+            Pre-PR-50 the fingerprint was computed (Sprint 6.8) +
+            persisted (projects.voice_fingerprint) but invisible
+            to the founder. Now they can see the patterns Helm
+            inferred from their Quote Vault, plus a Re-analyze
+            button to refresh after editing quotes. */}
+        <VoiceFingerprintSection
+          projectId={project.id}
+          fingerprint={project.voiceFingerprint ?? null}
+          updatedAt={project.voiceFingerprintUpdatedAt ?? null}
+        />
+
         {bible.audience?.primary?.description && (
           <div className="mb-4">
             <div className="text-[10px] font-mono uppercase tracking-[0.1em] text-text-3 mb-2">
@@ -194,6 +216,177 @@ export function BrandBibleCard({ project }: { project: BrandProject }) {
       )}
     </>
   );
+}
+
+// PR #50 — Sprint 6.8.1: Voice Fingerprint display.
+//
+// Renders the 5 abstract pattern arrays (structural / vocabulary /
+// signature / tone / avoid) as labeled chip groups, plus a small
+// "derived from N quotes · last updated X ago" caption and a
+// Re-analyze button that re-triggers /api/marketing/voice/analyze.
+//
+// When no fingerprint exists yet (project < 3 quotes or never
+// analyzed), the section is a CTA stub pointing at the Quote
+// Vault. We show it in both states because the founder learning
+// "where to add quotes" is half the value.
+function VoiceFingerprintSection({
+  projectId,
+  fingerprint,
+  updatedAt,
+}: {
+  projectId: string;
+  fingerprint: VoiceFingerprint | null;
+  updatedAt: string | null;
+}) {
+  const router = useRouter();
+  const [refreshing, setRefreshing] = useState(false);
+
+  const handleReanalyze = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      const res = await fetch('/api/marketing/voice/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showToast(
+          (data as { error?: string }).error ??
+            'Could not re-analyze voice',
+          'error'
+        );
+        return;
+      }
+      showToast('Voice fingerprint updated', 'sparkle');
+      // Server already revalidatePath'd /marketing/generate; the
+      // refresh below picks up the new fingerprint on this page.
+      router.refresh();
+    } catch {
+      showToast('Could not re-analyze voice', 'error');
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  // Empty state — quotes haven't reached the threshold or analyze
+  // never ran. Same layout footprint so the card doesn't reflow
+  // when the fingerprint becomes available.
+  if (!fingerprint) {
+    return (
+      <div className="mb-4">
+        <div className="flex items-baseline justify-between gap-2 mb-2">
+          <div className="text-[10px] font-mono uppercase tracking-[0.1em] text-text-3">
+            Voice fingerprint
+          </div>
+        </div>
+        <p className="text-xs text-text-2 leading-relaxed">
+          Add 3+ quotes to your Quote Vault and Helm will derive an
+          abstract voice fingerprint (structure, vocabulary, tone)
+          that the writer uses without copying your exact words.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mb-4">
+      <div className="flex items-baseline justify-between gap-2 mb-2">
+        <div className="text-[10px] font-mono uppercase tracking-[0.1em] text-text-3">
+          Voice fingerprint
+        </div>
+        <button
+          type="button"
+          onClick={handleReanalyze}
+          disabled={refreshing}
+          className="text-[10px] text-accent hover:underline disabled:opacity-50 whitespace-nowrap"
+          title="Re-run Opus voice analysis on the current Quote Vault"
+        >
+          {refreshing ? 'Analyzing…' : '↻ Re-analyze'}
+        </button>
+      </div>
+      <p className="text-[10px] text-text-3 mb-3">
+        Derived from {fingerprint.sourceQuotesCount} quote
+        {fingerprint.sourceQuotesCount === 1 ? '' : 's'}
+        {updatedAt && (
+          <>
+            {' '}· updated {formatRelativeShort(updatedAt)}
+          </>
+        )}
+      </p>
+      <div className="space-y-2">
+        <FingerprintChips
+          label="Structure"
+          items={fingerprint.structuralPatterns}
+        />
+        <FingerprintChips
+          label="Vocabulary"
+          items={fingerprint.vocabularyTraits}
+        />
+        <FingerprintChips
+          label="Signature"
+          items={fingerprint.signaturePhrasings}
+        />
+        <FingerprintChips label="Tone" items={fingerprint.toneCharacteristics} />
+        <FingerprintChips
+          label="Avoid"
+          items={fingerprint.avoidPatterns}
+          tone="warn"
+        />
+      </div>
+    </div>
+  );
+}
+
+function FingerprintChips({
+  label,
+  items,
+  tone = 'neutral',
+}: {
+  label: string;
+  items: string[];
+  tone?: 'neutral' | 'warn';
+}) {
+  if (!items || items.length === 0) return null;
+  const chipClass =
+    tone === 'warn'
+      ? 'bg-amber-500/10 border-amber-500/30 text-amber-500'
+      : 'bg-bg-elev/60 border-border text-text-2';
+  return (
+    <div>
+      <div className="text-[9px] font-mono uppercase tracking-wider text-text-3 mb-1">
+        {label}
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {items.map((item, i) => (
+          <span
+            key={i}
+            className={`text-[11px] px-2 py-0.5 rounded-full border ${chipClass} max-w-full`}
+          >
+            {item}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Compact "2h ago / 3d ago" formatter — avoids pulling date-fns
+// just for one timestamp. Falls back to a date string for things
+// older than a week.
+function formatRelativeShort(iso: string): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return '';
+  const diff = Date.now() - then;
+  const min = 60 * 1000;
+  const hour = 60 * min;
+  const day = 24 * hour;
+  if (diff < min) return 'just now';
+  if (diff < hour) return `${Math.round(diff / min)}m ago`;
+  if (diff < day) return `${Math.round(diff / hour)}h ago`;
+  if (diff < 7 * day) return `${Math.round(diff / day)}d ago`;
+  return new Date(iso).toLocaleDateString();
 }
 
 // Tiny dot-on-track display of a 0-10 voice score. We map 0..10 → 0..100%
