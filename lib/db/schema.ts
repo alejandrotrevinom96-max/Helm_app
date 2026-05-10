@@ -204,6 +204,19 @@ export const generatedPosts = pgTable('generated_posts', {
   // refreshed Library row carries its image.
   imageUrl: text('image_url'),
   imagePrompt: text('image_prompt'),
+  // PR #51 — Sprint 6.8.2: performance rating ALSO on drafts.
+  // Pre-PR-51 only scheduled_posts could be rated (post-publish
+  // reality check). The founder QA asked for a single
+  // /api/marketing/posts/[id]/performance endpoint that works
+  // regardless of source — we route polymorphically by id
+  // lookup. The same four fields shape mirrors scheduled_posts
+  // (rating, note, metrics jsonb, ratedAt) so generate-post can
+  // pull "what worked" from either table with a single field
+  // contract.
+  performanceRating: text('performance_rating'),
+  performanceNote: text('performance_note'),
+  performanceMetrics: jsonb('performance_metrics'),
+  performanceRatedAt: timestamp('performance_rated_at'),
 });
 
 // ===== Research Findings =====
