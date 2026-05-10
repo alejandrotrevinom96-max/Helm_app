@@ -256,6 +256,18 @@ export async function GET(request: Request) {
       schedFilters.push(
         sql`${scheduledPosts.status} IN ('scheduled', 'notified', 'posted', 'cancelled')`
       );
+    } else if (wantStatus === 'published') {
+      // PR #54 — Sprint 6.8.5: the result mapping below treats
+      // `r.status === 'posted' || r.status === 'notified'` as
+      // 'published' (lines around 285-290). Pre-PR-54 this
+      // filter used `eq(status, 'posted')` only — so the
+      // "Published (N)" tab count included 'notified' rows but
+      // clicking the tab filtered to 'posted' only, returning
+      // a smaller (sometimes zero) list. Now the filter matches
+      // the mapping: notified rows show up under Published.
+      schedFilters.push(
+        sql`${scheduledPosts.status} IN ('posted', 'notified')`
+      );
     } else {
       const mapped = scheduledStatusFor(wantStatus);
       if (mapped) schedFilters.push(eq(scheduledPosts.status, mapped));
