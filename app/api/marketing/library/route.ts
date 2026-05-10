@@ -74,6 +74,14 @@ export interface LibraryPost {
   // to drafts only). Returned for source='generated' even when
   // null (unvoted) so the type is consistent.
   userVote: string | null;
+  // PR #53 — Sprint 6.8.4: surface the vote timestamp too.
+  // generated_posts.voted_at has existed since Sprint 6.7 and
+  // the vote endpoint persists it on every Like/Hide, but the
+  // Library route never mapped it — the founder's QA reported
+  // "votedAt missing from DB" because they were inspecting the
+  // API response, not the column directly. Always null for
+  // scheduled rows (votes are draft-only).
+  votedAt: string | null;
 }
 
 const VALID_STATUSES: LibraryStatus[] = [
@@ -229,6 +237,8 @@ export async function GET(request: Request) {
       reelProcessingError: null,
       // PR #48 — Sprint 6.7.6: surface vote state.
       userVote: r.userVote ?? null,
+      // PR #53 — Sprint 6.8.4: surface vote timestamp.
+      votedAt: r.votedAt?.toISOString() ?? null,
     }));
   }
 
@@ -317,6 +327,7 @@ export async function GET(request: Request) {
         // null here. Including the field keeps the LibraryPost
         // shape consistent across both source branches.
         userVote: null,
+        votedAt: null,
       };
     });
   }

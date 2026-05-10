@@ -111,14 +111,28 @@ export async function GET(request: Request) {
   // the existing PerformanceInsights component keeps rendering.
 
   if (ratedPosts.length < MIN_RATED_FOR_INSIGHTS) {
+    // PR #53 — Sprint 6.8.4: compute totalWorked/totalFlopped
+    // even in the below-threshold branch. Pre-PR-53 we hardcoded
+    // both to 0 here, which gave the misleading response
+    // {ratedCount: 2, totalWorked: 0, totalFlopped: 0} to the
+    // dual-cards UI — the founder saw "0 worked" right after
+    // rating two posts as worked. Confidence stays
+    // 'not enough data' below the 5-rating threshold, but the
+    // raw counts are now honest.
+    const earlyWorked = ratedPosts.filter(
+      (p) => p.performanceRating === 'worked'
+    ).length;
+    const earlyFlopped = ratedPosts.filter(
+      (p) => p.performanceRating === 'flopped'
+    ).length;
     const performanceBlock: {
       totalWorked: number;
       totalFlopped: number;
       ratedCount: number;
       confidence: 'building' | 'not enough data';
     } = {
-      totalWorked: 0,
-      totalFlopped: 0,
+      totalWorked: earlyWorked,
+      totalFlopped: earlyFlopped,
       ratedCount: ratedPosts.length,
       confidence: 'not enough data',
     };
