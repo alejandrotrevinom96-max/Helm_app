@@ -509,91 +509,37 @@ export async function POST(request: Request) {
       .limit(VOICE_MEMORY_LIMIT),
   ]);
 
-  // PR #51 — Sprint 6.8.2: pull performance ratings from BOTH
-  // tables. scheduled_posts is the canonical "what got published
-  // and how it did" surface, but drafts can also carry a rating
-  // now (Sprint 6.8.2 added the columns + endpoint) — e.g. a
-  // founder annotates a draft as "this style would have flopped"
-  // before it ever ships. Treating both sources lets the
-  // performance context learn from both signals.
-  const [ratedScheduled, ratedDrafts] = await Promise.all([
-    db
-      .select({
-        content: scheduledPosts.content,
-        performanceRating: scheduledPosts.performanceRating,
-        performanceNote: scheduledPosts.performanceNote,
-        metricsImpressions: scheduledPosts.metricsImpressions,
-        metricsLikes: scheduledPosts.metricsLikes,
-        metricsComments: scheduledPosts.metricsComments,
-        metricsShares: scheduledPosts.metricsShares,
-        ratedAt: scheduledPosts.ratedAt,
-      })
-      .from(scheduledPosts)
-      .where(
-        and(
-          eq(scheduledPosts.projectId, projectId),
-          isNotNull(scheduledPosts.performanceRating)
-        )
-      )
-      .orderBy(desc(scheduledPosts.ratedAt))
-      .limit(PERFORMANCE_LIMIT * 2),
-    db
-      .select({
-        content: generatedPosts.content,
-        performanceRating: generatedPosts.performanceRating,
-        performanceNote: generatedPosts.performanceNote,
-        performanceMetrics: generatedPosts.performanceMetrics,
-        performanceRatedAt: generatedPosts.performanceRatedAt,
-      })
-      .from(generatedPosts)
-      .where(
-        and(
-          eq(generatedPosts.projectId, projectId),
-          isNotNull(generatedPosts.performanceRating)
-        )
-      )
-      .orderBy(desc(generatedPosts.performanceRatedAt))
-      .limit(PERFORMANCE_LIMIT * 2),
-  ]);
-
-  // Normalize the draft shape to the scheduled shape (the prompt
-  // builder expects metrics as 4 separate fields) so a single
-  // builder can consume both. Drafts' metrics jsonb is
-  // { reach, likes, comments, shares, impressions? } — we map
-  // it back to the scheduled column names.
-  const normalizedRatedDrafts = ratedDrafts.map((d) => {
-    const m = (d.performanceMetrics ?? null) as {
-      reach?: number;
-      impressions?: number;
-      likes?: number;
-      comments?: number;
-      shares?: number;
-    } | null;
-    return {
-      content: d.content,
-      performanceRating: d.performanceRating,
-      performanceNote: d.performanceNote,
-      metricsImpressions: m?.impressions ?? m?.reach ?? null,
-      metricsLikes: m?.likes ?? null,
-      metricsComments: m?.comments ?? null,
-      metricsShares: m?.shares ?? null,
-      ratedAt: d.performanceRatedAt,
-    };
-  });
-
-  // Merge both sources, then cap to PERFORMANCE_LIMIT * 2 most
-  // recent overall so the prompt token budget stays bounded.
-  const ratedCombined = [...ratedScheduled, ...normalizedRatedDrafts]
-    .sort((a, b) => {
-      const ta = a.ratedAt ? new Date(a.ratedAt).getTime() : 0;
-      const tb = b.ratedAt ? new Date(b.ratedAt).getTime() : 0;
-      return tb - ta;
+  // PR #52 — Sprint 6.8.3: scheduled_posts is the only source
+  // of performance ratings. Pre-PR-52 we briefly merged from
+  // generated_posts too (Sprint 6.8.2), but Sprint 6.8.3 made
+  // drafts un-rateable: performance is post-fact reality, and
+  // a draft hasn't happened yet. The merge produced zero rows
+  // in practice and added complexity. Cleaner to query the
+  // one table that holds the signal.
+  const ratedScheduled = await db
+    .select({
+      content: scheduledPosts.content,
+      performanceRating: scheduledPosts.performanceRating,
+      performanceNote: scheduledPosts.performanceNote,
+      metricsImpressions: scheduledPosts.metricsImpressions,
+      metricsLikes: scheduledPosts.metricsLikes,
+      metricsComments: scheduledPosts.metricsComments,
+      metricsShares: scheduledPosts.metricsShares,
+      ratedAt: scheduledPosts.ratedAt,
     })
-    .slice(0, PERFORMANCE_LIMIT * 2);
+    .from(scheduledPosts)
+    .where(
+      and(
+        eq(scheduledPosts.projectId, projectId),
+        isNotNull(scheduledPosts.performanceRating)
+      )
+    )
+    .orderBy(desc(scheduledPosts.ratedAt))
+    .limit(PERFORMANCE_LIMIT * 2);
 
   const voiceFingerprintBlock = buildVoiceFingerprintBlock(fingerprint);
   const voiceMemoryBlock = buildVoiceMemoryBlock(likedDrafts, dislikedDrafts);
-  const performanceBlock = buildPerformanceBlock(ratedCombined);
+  const performanceBlock = buildPerformanceBlock(ratedScheduled);
 
   // Single concatenation downstream prompts append at the end.
   const learningContext = [
