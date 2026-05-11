@@ -516,6 +516,20 @@ export const scheduledPosts = pgTable('scheduled_posts', {
     .default(0)
     .notNull(),
   reelPollingNextAt: timestamp('reel_polling_next_at'),
+  // PR #63 — Sprint 7.0.6: structured-draft propagation.
+  //
+  // `contentType` and `structuredContent` are copied from
+  // `generated_posts` when the founder schedules a structured draft.
+  // Both nullable so legacy plain-text scheduled posts stay valid.
+  //
+  // Reading these here unlocks two follow-ups:
+  //   - Calendar/Library badges (Sprint 7.0.5) now show per-format
+  //     chips on scheduled posts, not just drafts.
+  //   - The publisher cron (Sprint 7.0.7) can dispatch on
+  //     contentType to pick the right Meta posting path (Carousel
+  //     multi-image, Reel async upload, etc.).
+  contentType: text('content_type'),
+  structuredContent: jsonb('structured_content'),
 });
 
 // ===== Meta Integrations =====

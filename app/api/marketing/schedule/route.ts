@@ -46,6 +46,12 @@ export async function POST(request: Request) {
     // continue to work unchanged (the scheduled_post still
     // lands; the source draft just isn't auto-archived).
     sourceDraftId,
+    // PR #63 — Sprint 7.0.6: structured-draft propagation. Both
+    // optional so legacy callers (Sprint 6.7 single-draft path)
+    // keep working unchanged. When sourceDraftId is set we also
+    // back-fill from the draft row below if these come in null.
+    contentType: bodyContentType,
+    structuredContent: bodyStructuredContent,
   } = await request.json();
 
   if (!projectId || !platform || !content || !scheduledFor) {
@@ -203,6 +209,19 @@ export async function POST(request: Request) {
           ? videoAspectRatio.toFixed(4)
           : null,
       reelProcessingStatus: wantsReel ? 'uploaded' : null,
+      // PR #63 — Sprint 7.0.6: caller-supplied structured-draft
+      // fields. Validate shape defensively — body comes from the
+      // client, we don't trust it past auth + project ownership.
+      contentType:
+        typeof bodyContentType === 'string' && bodyContentType.length > 0
+          ? bodyContentType.slice(0, 60)
+          : null,
+      structuredContent:
+        bodyStructuredContent &&
+        typeof bodyStructuredContent === 'object' &&
+        !Array.isArray(bodyStructuredContent)
+          ? bodyStructuredContent
+          : null,
     })
     .returning();
 

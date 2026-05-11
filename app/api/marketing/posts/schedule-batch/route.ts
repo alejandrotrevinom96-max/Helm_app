@@ -107,6 +107,11 @@ export async function POST(request: Request) {
       isStory: generatedPosts.isStory,
       isReel: generatedPosts.isReel,
       videoUrl: generatedPosts.videoUrl,
+      // PR #63 — Sprint 7.0.6: propagate the structured-draft
+      // metadata so Library/Calendar badges + the future
+      // Sprint-7.0.7 publisher dispatch all read the same source.
+      contentType: generatedPosts.contentType,
+      structuredContent: generatedPosts.structuredContent,
     })
     .from(generatedPosts)
     .innerJoin(projects, eq(projects.id, generatedPosts.projectId))
@@ -136,6 +141,11 @@ export async function POST(request: Request) {
       isStory: d.isStory,
       isReel: d.isReel,
       videoUrl: d.videoUrl,
+      // PR #63 — Sprint 7.0.6: copy contentType + structuredContent
+      // so the badge/format work from Sprint 7.0.5 has data on the
+      // scheduled side. Null for legacy pillar-variant drafts.
+      contentType: d.contentType,
+      structuredContent: d.structuredContent ?? null,
     };
   });
 

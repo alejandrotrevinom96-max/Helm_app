@@ -378,13 +378,12 @@ export async function GET(request: Request) {
         // shape consistent across both source branches.
         userVote: null,
         votedAt: null,
-        // PR #62 — Sprint 7.0.5: scheduled_posts doesn't carry
-        // contentType yet (no schema column). Always null for the
-        // scheduled branch — the founder sees the type chip on
-        // drafts only until Sprint 7.0.6 propagates it through
-        // the schedule flow.
-        contentType: null,
-        structuredContent: null,
+        // PR #63 — Sprint 7.0.6: contentType + structuredContent
+        // now flow through from generated_posts via the three
+        // schedule endpoints. Falls back to null for pre-7.0.6
+        // scheduled rows that never carried these columns.
+        contentType: r.contentType ?? null,
+        structuredContent: r.structuredContent ?? null,
       };
     });
   }

@@ -72,6 +72,11 @@ export async function POST(
       isStory: generatedPosts.isStory,
       isReel: generatedPosts.isReel,
       videoUrl: generatedPosts.videoUrl,
+      // PR #63 — Sprint 7.0.6: carry structured-draft fields so the
+      // Calendar badge + Library scheduled-post type filter both
+      // surface the format. Null on legacy pillar-variant drafts.
+      contentType: generatedPosts.contentType,
+      structuredContent: generatedPosts.structuredContent,
     })
     .from(generatedPosts)
     .innerJoin(projects, eq(projects.id, generatedPosts.projectId))
@@ -146,6 +151,9 @@ export async function POST(
       isReel: draft.isReel,
       videoUrl: draft.videoUrl ?? null,
       reelProcessingStatus: draft.isReel ? 'uploaded' : null,
+      // PR #63 — Sprint 7.0.6: copy structured-draft metadata.
+      contentType: draft.contentType,
+      structuredContent: draft.structuredContent ?? null,
     })
     .returning();
 

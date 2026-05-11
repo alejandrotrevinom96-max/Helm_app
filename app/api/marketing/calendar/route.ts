@@ -38,13 +38,11 @@ export interface CalendarPost {
   // reelProcessingStatus surfaces "processing" badges in the modal.
   isReel: boolean;
   reelProcessingStatus: string | null;
-  // PR #62 — Sprint 7.0.5: per-platform format chip (Reel script,
-  // Carousel, LinkedIn essay, etc.). Currently always null because
-  // the schedule flow doesn't yet propagate contentType from the
-  // generated_posts source row. Sprint 7.0.6 will add the column to
-  // scheduled_posts and copy it during the schedule step. The shape
-  // is here so the UI can render the badge automatically once it's
-  // populated — no client redeploy needed.
+  // PR #63 — Sprint 7.0.6: per-platform format chip (Reel script,
+  // Carousel, LinkedIn essay, X thread). Propagated through the
+  // three schedule endpoints from `generated_posts.content_type`.
+  // Null for legacy plain-text scheduled posts (rows created
+  // before this column existed).
   contentType: string | null;
 }
 
@@ -125,9 +123,8 @@ export async function GET(request: Request) {
     storyExpiresAt: r.storyExpiresAt?.toISOString() ?? null,
     isReel: r.isReel ?? false,
     reelProcessingStatus: r.reelProcessingStatus ?? null,
-    // PR #62 — Sprint 7.0.5: contentType field — see interface
-    // comment. Always null until the schedule flow propagates it.
-    contentType: null,
+    // PR #63 — Sprint 7.0.6: now reads the propagated column.
+    contentType: r.contentType ?? null,
   }));
 
   return NextResponse.json({ posts });
