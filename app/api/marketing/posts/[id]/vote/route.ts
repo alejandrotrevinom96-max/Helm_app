@@ -43,9 +43,16 @@ export async function POST(
   const body = await request.json().catch(() => ({}));
   const vote = body?.vote;
 
-  if (vote !== 'liked' && vote !== 'disliked') {
+  // PR #55 — Sprint 6.9: accept `null` to clear/restore. Lets
+  // the founder un-Hide a previously Hidden draft from the
+  // new Library "Hidden" tab. 'liked' / 'disliked' continue
+  // to set + flip visibleInLibrary as before.
+  if (vote !== 'liked' && vote !== 'disliked' && vote !== null) {
     return NextResponse.json(
-      { error: 'Invalid vote. Expected "liked" or "disliked".' },
+      {
+        error:
+          'Invalid vote. Expected "liked", "disliked", or null to clear.',
+      },
       { status: 400 }
     );
   }
@@ -76,14 +83,21 @@ export async function POST(
   // located the row, this should always affect 1 row; logging
   // a zero would point to a column-name / Drizzle-mapping
   // mismatch we'd never spot otherwise.
+  //
+  // PR #55 — Sprint 6.9: vote: null is the "clear / restore"
+  // path. Sets userVote=null + votedAt=null + visibleInLibrary
+  // back to true (the column default for unvoted drafts).
+  // 'liked' / 'disliked' continue to set the timestamp + flip
+  // visibleInLibrary as before.
   const updated = await db
     .update(generatedPosts)
     .set({
       userVote: vote,
-      votedAt: new Date(),
-      // Disliked drafts hide from Library + drafts pool. Re-liking
-      // a previously-disliked draft brings it back.
-      visibleInLibrary: vote === 'liked',
+      votedAt: vote === null ? null : new Date(),
+      // null → restore to default-visible
+      // liked → visible
+      // disliked → hidden
+      visibleInLibrary: vote === 'disliked' ? false : true,
     })
     .where(eq(generatedPosts.id, id))
     .returning({

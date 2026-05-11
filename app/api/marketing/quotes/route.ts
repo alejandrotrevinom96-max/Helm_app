@@ -26,9 +26,31 @@ import { createClient } from '@/lib/supabase/server';
 import { db } from '@/lib/db';
 import { brandQuotes, projects } from '@/lib/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
+import sanitizeHtml from 'sanitize-html';
 
 const MAX_CONTENT_LEN = 2000;
 const MIN_CONTENT_LEN = 10;
+
+// PR #55 — Sprint 6.9: strip every HTML construct from quote
+// input. Quotes flow through:
+//   1. POST persists to brand_quotes.content
+//   2. Voice Fingerprint Opus pass reads them as system-prompt
+//      context (Sprint 6.8) — an unsanitized <script> would
+//      become a prompt injection vector
+//   3. Quote Vault UI re-renders the content as text
+// allowedTags: [] + allowedAttributes: {} = "treat input as
+// literal text content". No <b>, no <em>, no nothing. If a
+// founder wants emphasis they can use punctuation.
+function sanitizeQuoteText(input: unknown): string {
+  if (typeof input !== 'string') return '';
+  return sanitizeHtml(input, {
+    allowedTags: [],
+    allowedAttributes: {},
+    // disallowedTagsMode: 'discard' strips the tag entirely
+    // (default behavior, restated explicitly for future readers).
+    disallowedTagsMode: 'discard',
+  }).trim();
+}
 
 async function verifyProjectOwnership(projectId: string, userId: string) {
   const [project] = await db
@@ -101,19 +123,29 @@ export async function POST(request: Request) {
       : typeof body?.content === 'string'
         ? body.content
         : '';
-  const source = typeof body?.source === 'string' ? body.source : null;
-  const context = typeof body?.context === 'string' ? body.context : null;
+  const rawSource = typeof body?.source === 'string' ? body.source : null;
+  const rawContext = typeof body?.context === 'string' ? body.context : null;
 
-  if (!projectId || !rawText.trim()) {
+  // PR #55 — Sprint 6.9: sanitize BEFORE length validation so a
+  // 2000-char string of HTML still gets rejected even if the
+  // visible text is short. Length check is on the cleaned value.
+  const cleanText = sanitizeQuoteText(rawText);
+  const cleanSource = rawSource ? sanitizeQuoteText(rawSource) : '';
+  const cleanContext = rawContext ? sanitizeQuoteText(rawContext) : '';
+
+  if (!projectId || !cleanText) {
     return NextResponse.json(
       { error: 'projectId and text are required' },
       { status: 400 }
     );
   }
-  if (rawText.length < MIN_CONTENT_LEN || rawText.length > MAX_CONTENT_LEN) {
+  if (
+    cleanText.length < MIN_CONTENT_LEN ||
+    cleanText.length > MAX_CONTENT_LEN
+  ) {
     return NextResponse.json(
       {
-        error: `Quote must be between ${MIN_CONTENT_LEN} and ${MAX_CONTENT_LEN} characters.`,
+        error: `Quote must be between ${MIN_CONTENT_LEN} and ${MAX_CONTENT_LEN} characters of plain text.`,
       },
       { status: 400 }
     );
@@ -129,9 +161,9 @@ export async function POST(request: Request) {
     .values({
       projectId,
       userId: user.id,
-      content: rawText.trim(),
-      source: source?.trim() || null,
-      context: context?.trim() || null,
+      content: cleanText,
+      source: cleanSource || null,
+      context: cleanContext || null,
       tags: [],
     })
     .returning();

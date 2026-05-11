@@ -24,6 +24,14 @@ import { eq, and, ilike, desc, sql } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 
 export type LibraryStatus = 'draft' | 'scheduled' | 'published' | 'cancelled';
+// PR #55 — Sprint 6.9: 'hidden' is a synthetic Library filter
+// (not a real status column value). When ?status=hidden is
+// passed, we surface drafts whose userVote='disliked' — i.e.
+// drafts the founder previously Hid via the Generate page or
+// Library and now wants to either retrieve or permanently
+// delete. Scheduled rows never have a vote, so 'hidden' is
+// drafts-only.
+type LibraryStatusFilter = LibraryStatus | 'all' | 'hidden';
 
 export interface LibraryPost {
   id: string;
@@ -109,9 +117,13 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url);
   const projectId = searchParams.get('projectId');
+  // PR #55 — Sprint 6.9: widened the union to include 'hidden'.
+  // Anything outside the union below falls back to 'all' via
+  // the wantStatus check downstream.
   const statusRaw = (searchParams.get('status') ?? 'all') as
     | LibraryStatus
-    | 'all';
+    | 'all'
+    | 'hidden';
   const platform = searchParams.get('platform') ?? '';
   const search = searchParams.get('search') ?? '';
   // PR #30 — Sprint 5.2: filter by post type. 'story' isolates the
@@ -155,28 +167,43 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
 
-  const wantStatus: LibraryStatus | 'all' =
+  // PR #55 — Sprint 6.9: accept synthetic 'hidden' filter.
+  const wantStatus: LibraryStatusFilter =
     statusRaw === 'all' ||
+    statusRaw === 'hidden' ||
     (VALID_STATUSES as string[]).includes(statusRaw)
-      ? statusRaw
+      ? (statusRaw as LibraryStatusFilter)
       : 'all';
 
   // ---- DRAFTS (generated_posts) -------------------------------------
-  // Only included when status='all' or 'draft'. Drafts have no
-  // scheduledFor / publishedAt / metrics — we fill those with null.
+  // Only included when status='all', 'draft', or 'hidden'. Drafts have
+  // no scheduledFor / publishedAt / metrics — we fill those with null.
+  // For 'hidden', we flip the visibleInLibrary filter and require
+  // userVote='disliked'.
   let drafts: LibraryPost[] = [];
-  if (wantStatus === 'all' || wantStatus === 'draft') {
+  const isHiddenView = wantStatus === 'hidden';
+  if (wantStatus === 'all' || wantStatus === 'draft' || isHiddenView) {
     const draftFilters = [
       eq(generatedPosts.projectId, projectId),
       eq(generatedPosts.status, 'draft'),
-      // PR #42 — Sprint 6.7: hide soft-deleted (disliked) drafts.
-      // visibleInLibrary defaults true for legacy rows + new
-      // unvoted drafts; flips to false when the user dislikes a
-      // draft from the generate page voting UI.
-      eq(generatedPosts.visibleInLibrary, true),
     ];
-    if (likedOnly) {
-      draftFilters.push(eq(generatedPosts.userVote, 'liked'));
+    // PR #42 — Sprint 6.7: hide soft-deleted (disliked) drafts.
+    // visibleInLibrary defaults true for legacy rows + new
+    // unvoted drafts; flips to false when the user dislikes a
+    // draft from the generate page voting UI.
+    // PR #55 — Sprint 6.9: 'hidden' view INVERTS this filter —
+    // we want exactly the rows the rest of the Library hides,
+    // scoped to drafts the founder explicitly Hid (userVote=
+    // 'disliked'). Lets the founder restore or permanently
+    // delete.
+    if (isHiddenView) {
+      draftFilters.push(eq(generatedPosts.visibleInLibrary, false));
+      draftFilters.push(eq(generatedPosts.userVote, 'disliked'));
+    } else {
+      draftFilters.push(eq(generatedPosts.visibleInLibrary, true));
+      if (likedOnly) {
+        draftFilters.push(eq(generatedPosts.userVote, 'liked'));
+      }
     }
     if (platform) {
       draftFilters.push(eq(generatedPosts.platform, platform));
@@ -243,8 +270,10 @@ export async function GET(request: Request) {
   }
 
   // ---- SCHEDULED / PUBLISHED / CANCELLED (scheduled_posts) ----------
+  // PR #55 — Sprint 6.9: 'hidden' is a drafts-only view (scheduled
+  // rows can't be voted on), so we skip the scheduled query.
   let scheduled: LibraryPost[] = [];
-  if (wantStatus !== 'draft') {
+  if (wantStatus !== 'draft' && !isHiddenView) {
     const schedFilters = [
       eq(scheduledPosts.userId, user.id),
       eq(scheduledPosts.projectId, projectId),

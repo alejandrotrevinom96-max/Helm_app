@@ -3,9 +3,25 @@ import { db } from '@/lib/db';
 import { brandQuotes, projects } from '@/lib/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
+import sanitizeHtml from 'sanitize-html';
 
 const MAX_CONTENT_LEN = 1000;
 const MAX_TAGS = 10;
+
+// PR #55 — Sprint 6.9: same XSS / prompt-injection mitigation
+// as /api/marketing/quotes. Strips ALL HTML; quote content is
+// re-fed into a system prompt for Opus voice analysis, so an
+// unsanitized <script> or <img src=x onerror=...> string would
+// be a vector for both browser XSS (in Quote Vault re-renders)
+// and prompt injection (in the analyzer).
+function sanitizeQuoteText(input: unknown): string {
+  if (typeof input !== 'string') return '';
+  return sanitizeHtml(input, {
+    allowedTags: [],
+    allowedAttributes: {},
+    disallowedTagsMode: 'discard',
+  }).trim();
+}
 
 function sanitizeTags(input: unknown): string[] {
   if (!Array.isArray(input)) return [];
@@ -56,13 +72,25 @@ export async function POST(request: Request) {
     tags?: unknown;
   };
 
-  if (!projectId || !content || !content.trim()) {
+  if (!projectId) {
     return NextResponse.json(
-      { error: 'projectId and content required' },
+      { error: 'projectId is required' },
       { status: 400 }
     );
   }
-  if (content.length > MAX_CONTENT_LEN) {
+
+  // PR #55 — Sprint 6.9: sanitize before length check.
+  const cleanContent = sanitizeQuoteText(content);
+  const cleanSource = sanitizeQuoteText(source);
+  const cleanContext = sanitizeQuoteText(context);
+
+  if (!cleanContent) {
+    return NextResponse.json(
+      { error: 'Quote text is required (plain text only).' },
+      { status: 400 }
+    );
+  }
+  if (cleanContent.length > MAX_CONTENT_LEN) {
     return NextResponse.json(
       { error: `Content too long (max ${MAX_CONTENT_LEN} chars)` },
       { status: 400 }
@@ -81,9 +109,9 @@ export async function POST(request: Request) {
     .values({
       projectId,
       userId: user.id,
-      content: content.trim(),
-      source: source?.trim() || null,
-      context: context?.trim() || null,
+      content: cleanContent,
+      source: cleanSource || null,
+      context: cleanContext || null,
       tags: sanitizeTags(tags),
     })
     .returning();

@@ -71,7 +71,45 @@ export function PostDetailModal({
   // don't auto-poll the publishStatus because the Library refetches
   // every time the user opens this modal anyway.
   const [retryingPublish, setRetryingPublish] = useState(false);
+  // PR #55 — Sprint 6.9: restore-from-hidden flow.
+  const [restoring, setRestoring] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // PR #55 — Sprint 6.9: draft was Hidden via the Generate/Library
+  // voting UI (visibleInLibrary=false + userVote='disliked').
+  // Restore puts it back to default-visible (vote: null).
+  const isHiddenDraft =
+    post.source === 'generated' && post.userVote === 'disliked';
+
+  const handleRestore = async () => {
+    if (restoring) return;
+    setRestoring(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/marketing/posts/${post.id}/vote`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vote: null }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(
+          (data as { error?: string }).error ??
+            'Restore failed'
+        );
+        setRestoring(false);
+        return;
+      }
+      // Restore moves the draft out of the Hidden tab; the
+      // parent list refetches via onRemove so the modal can
+      // close cleanly.
+      onRemove(post.id);
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Network error');
+      setRestoring(false);
+    }
+  };
 
   const showFeedback =
     post.source === 'scheduled' && post.status === 'published';
@@ -539,6 +577,20 @@ export function PostDetailModal({
                 className="px-3 py-2 bg-bg border border-border rounded-lg text-sm hover:bg-bg-elev hover:border-border-bright transition-colors disabled:opacity-50"
               >
                 {movingToDraft ? 'Moving…' : '← Move to draft'}
+              </button>
+            )}
+            {/* PR #55 — Sprint 6.9: Restore button for hidden
+                drafts. Surfaces only when the draft was Hidden
+                via the voting UI; clears the vote + flips
+                visibleInLibrary back to true. */}
+            {isHiddenDraft && (
+              <button
+                type="button"
+                onClick={handleRestore}
+                disabled={restoring}
+                className="px-3 py-2 bg-bg border border-accent/40 text-accent rounded-lg text-sm hover:bg-accent/10 transition-colors disabled:opacity-50"
+              >
+                {restoring ? 'Restoring…' : '↶ Restore to library'}
               </button>
             )}
             <button

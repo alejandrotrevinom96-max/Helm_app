@@ -53,21 +53,30 @@ export async function GET(request: Request) {
       .from(projects)
       .where(and(eq(projects.id, projectId), eq(projects.userId, user.id)))
       .limit(1);
-    if (project) {
-      const draftRows = await db
-        .select({ userVote: generatedPosts.userVote })
-        .from(generatedPosts)
-        .where(eq(generatedPosts.projectId, projectId));
-      voiceLikes = draftRows.filter((r) => r.userVote === 'liked').length;
-      voiceDislikes = draftRows.filter((r) => r.userVote === 'disliked').length;
-      const fp = project.voiceFingerprint as unknown;
-      if (fp && isVoiceFingerprint(fp)) {
-        voiceHasFingerprint = true;
-        voiceFingerprintQuotesCount = fp.sourceQuotesCount;
-      }
-      voiceFingerprintUpdatedAt =
-        project.voiceFingerprintUpdatedAt?.toISOString() ?? null;
+    // PR #55 — Sprint 6.9: refuse with 403 when the user passed
+    // a projectId they don't own. Pre-PR-55 we silently returned
+    // the empty/zero shape, which was technically not a data
+    // leak but it differed from /quotes /library which return 403
+    // for the same input. The inconsistency made it harder to
+    // tell from a network log whether an ownership check ran.
+    if (!project) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
+    const draftRows = await db
+      .select({ userVote: generatedPosts.userVote })
+      .from(generatedPosts)
+      .where(eq(generatedPosts.projectId, projectId));
+    voiceLikes = draftRows.filter((r) => r.userVote === 'liked').length;
+    voiceDislikes = draftRows.filter(
+      (r) => r.userVote === 'disliked'
+    ).length;
+    const fp = project.voiceFingerprint as unknown;
+    if (fp && isVoiceFingerprint(fp)) {
+      voiceHasFingerprint = true;
+      voiceFingerprintQuotesCount = fp.sourceQuotesCount;
+    }
+    voiceFingerprintUpdatedAt =
+      project.voiceFingerprintUpdatedAt?.toISOString() ?? null;
   }
   const voiceTotalVotes = voiceLikes + voiceDislikes;
   const voiceConfidence: 'building' | 'not enough data' =

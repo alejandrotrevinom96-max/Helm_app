@@ -371,25 +371,54 @@ function OverviewMode({
         </div>
       </div>
 
+      {/* PR #55 — Sprint 6.9: tooltips on every action button so a
+          first-time founder can hover and learn what each does
+          without having to click. `title` is the cheapest
+          accessible affordance; matches the existing pattern on
+          the pillar list at line 328. */}
       <div className="flex flex-wrap gap-2 pt-4 border-t border-border">
-        <Button size="sm" onClick={onAuto}>
+        <Button
+          size="sm"
+          onClick={onAuto}
+          title="Regenerate the entire brand bible with AI from your existing URL + sources."
+        >
           ✨ Auto-generate
         </Button>
         {/* PR #27 — only useful once an archetype is set, otherwise the
             POST endpoint refuses with 400. Hiding the button when the
             bible is sparse keeps the affordance honest. */}
         {bible?.archetype?.primary && (
-          <Button variant="ghost" size="sm" onClick={onValidate}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onValidate}
+            title="Generate 12 images to check whether the visual direction matches your archetype."
+          >
             🖼 Validate visually
           </Button>
         )}
-        <Button variant="ghost" size="sm" onClick={onDiscover}>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onDiscover}
+          title="Run a quick research pass on your URL to surface anything the bible is missing."
+        >
           Quick discovery
         </Button>
-        <Button variant="ghost" size="sm" onClick={onRefine}>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onRefine}
+          title="Ask AI to fill in any sections of the brand bible that are still empty or thin."
+        >
           Refine remaining gaps
         </Button>
-        <Button variant="ghost" size="sm" onClick={onQuotes}>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onQuotes}
+          title="Manage the founder quotes that seed every generation and feed the voice fingerprint."
+        >
           Quote vault →
         </Button>
         <div className="flex-1" />

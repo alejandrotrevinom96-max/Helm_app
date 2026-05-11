@@ -157,6 +157,27 @@ export function LibraryPostCard({ post, onClick }: Props) {
         {post.content}
       </p>
 
+      {/* PR #55 — Sprint 6.9: surface consistencyScore when set.
+          Field was carried in LibraryPost from PR #29 but never
+          rendered on cards. Color-coded so the founder can scan
+          the grid for off-brand drafts (red) at a glance. */}
+      {typeof post.consistencyScore === 'number' && (
+        <div className="mb-2 text-[10px] font-mono uppercase tracking-[0.1em] inline-flex items-center gap-1.5 text-text-3">
+          <span>Brand fit</span>
+          <span
+            className={
+              post.consistencyScore >= 80
+                ? 'text-emerald-500 font-medium'
+                : post.consistencyScore >= 50
+                  ? 'text-amber-500 font-medium'
+                  : 'text-danger font-medium'
+            }
+          >
+            {post.consistencyScore}/100
+          </span>
+        </div>
+      )}
+
       <div className="flex items-center justify-between text-xs text-text-3 gap-2">
         <span className="truncate">{dateLabel}</span>
         <div className="flex items-center gap-1 shrink-0">

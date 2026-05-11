@@ -33,6 +33,21 @@ import {
   scheduledPosts,
 } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
+import sanitizeHtml from 'sanitize-html';
+
+// PR #55 — Sprint 6.9: same XSS strip as the quotes endpoints.
+// performanceNote is shown in the Library modal AND re-fed into
+// the Generate prompt's performance context (Sprint 6.8) — an
+// unsanitized payload is a prompt-injection vector on top of
+// the browser-XSS risk.
+function sanitizeNote(input: unknown): string {
+  if (typeof input !== 'string') return '';
+  return sanitizeHtml(input, {
+    allowedTags: [],
+    allowedAttributes: {},
+    disallowedTagsMode: 'discard',
+  }).trim();
+}
 
 const VALID_RATINGS = new Set<string>(['worked', 'flopped']);
 
@@ -80,7 +95,10 @@ export async function POST(
   const { id } = await params;
   const body = await request.json().catch(() => ({}));
   const rating = body?.rating;
-  const note = typeof body?.note === 'string' ? body.note.trim() : null;
+  // PR #55 — Sprint 6.9: strip HTML from the note before
+  // persisting. Empty string after sanitize → null in DB.
+  const cleanNote = sanitizeNote(body?.note);
+  const note = cleanNote || null;
   const metricsResult = validateMetrics(body?.metrics);
 
   // Rating: 'worked' | 'flopped' | null. null clears a previous

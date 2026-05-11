@@ -25,13 +25,19 @@ type LibraryTabValue =
   | LibraryStatus
   | 'all'
   | 'stories'
-  | 'reels';
+  | 'reels'
+  // PR #55 — Sprint 6.9: 'hidden' tab surfaces drafts the
+  // founder Hid via the Generate / Library voting UI. Lets
+  // them restore (vote: null) or permanently delete a draft
+  // that was prematurely dismissed.
+  | 'hidden';
 
 const TABS: Array<{ value: LibraryTabValue; label: string }> = [
   { value: 'all', label: 'All' },
   { value: 'draft', label: 'Drafts' },
   { value: 'scheduled', label: 'Scheduled' },
   { value: 'published', label: 'Published' },
+  { value: 'hidden', label: 'Hidden' },
   { value: 'stories', label: '📸 Stories' },
   { value: 'reels', label: '🎬 Reels' },
 ];
@@ -70,6 +76,7 @@ export function LibraryClient({
     cancelled: 0,
     stories: 0,
     reels: 0,
+    hidden: 0,
   });
 
   const fetchAll = useCallback(async () => {
@@ -95,7 +102,27 @@ export function LibraryClient({
         cancelled: all.filter((p) => p.status === 'cancelled').length,
         stories: all.filter((p) => p.isStory).length,
         reels: all.filter((p) => p.isReel).length,
+        // Sprint 6.9: hidden count needs its own fetch because the
+        // 'all' query above excludes visibleInLibrary=false drafts
+        // by design. We'll patch it asynchronously below.
+        hidden: 0,
       });
+
+      // Hidden count piggybacks the same projectId so the request
+      // doesn't even fire if the user has no projects. Failure is
+      // silent (count just stays at 0 — the tab still works on
+      // click).
+      try {
+        const hRes = await fetch(
+          `/api/marketing/library?projectId=${projectId}&status=hidden`,
+          { cache: 'no-store' }
+        );
+        const hData: { posts?: LibraryPost[] } = await hRes.json();
+        const hCount = (hData.posts ?? []).length;
+        setCounts((prev) => ({ ...prev, hidden: hCount }));
+      } catch {
+        // non-fatal
+      }
     } catch {
       // counts are best-effort; UI still works without them
     }
@@ -111,6 +138,10 @@ export function LibraryClient({
       // when Stories/Reels tab already pinned a type.
       const isStoriesTab = activeTab === 'stories';
       const isReelsTab = activeTab === 'reels';
+      // Sprint 6.9: 'hidden' passes through directly — the API
+      // route now handles it as a synthetic filter that inverts
+      // the default visibleInLibrary filter and requires
+      // userVote='disliked'.
       const apiStatus = isStoriesTab || isReelsTab ? 'all' : activeTab;
       const params = new URLSearchParams({
         projectId,
