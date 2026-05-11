@@ -5,7 +5,11 @@
 // then hands off to the client.
 import { createClient } from '@/lib/supabase/server';
 import { db } from '@/lib/db';
-import { projectSources, sourceDirectory } from '@/lib/db/schema';
+import {
+  projectSources,
+  sourceDirectory,
+  researchConfig,
+} from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { redirect } from 'next/navigation';
 import { getActiveProject } from '@/lib/active-project';
@@ -50,12 +54,27 @@ export default async function ResearchSourcesPage() {
     language: sd.language,
     signalScore: ps.signalScore ?? 50,
     connectedAt: ps.connectedAt?.toISOString() ?? null,
+    findingsCount: ps.findingsCount ?? 0,
+    lastScannedAt: ps.lastScannedAt?.toISOString() ?? null,
   }));
+
+  // PR #59 — Sprint 7.0.3: hydrate Reddit RSS opt-in flag so the UI
+  // doesn't flash the opt-in banner on every page load if the
+  // founder already accepted.
+  const [config] = await db
+    .select({
+      optin: researchConfig.redditRssOptin,
+      optinAt: researchConfig.redditRssOptinAt,
+    })
+    .from(researchConfig)
+    .where(eq(researchConfig.projectId, project.id))
+    .limit(1);
 
   return (
     <SourcesClient
       project={{ id: project.id, name: project.name }}
       connected={connected}
+      initialRedditOptin={config?.optin ?? false}
     />
   );
 }

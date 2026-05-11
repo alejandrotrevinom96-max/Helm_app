@@ -14,6 +14,7 @@ import { getTableCount } from '@/lib/integrations/supabase-mgmt';
 import { getAdAccountInsights } from '@/lib/integrations/meta';
 import { generateWeeklyInsight } from '@/lib/research/generate-insight';
 import { generateAndSendBrief } from '@/lib/research/brief';
+import { cleanupExpiredCache } from '@/lib/research/cache';
 import { sendWebhook } from '@/lib/webhooks/send';
 import { NextResponse } from 'next/server';
 
@@ -325,6 +326,15 @@ export async function GET(request: Request) {
     }
   }
 
+  // PR #59 — Sprint 7.0.3: cache cleanup. research_cache rows hold
+  // RSS payloads with a 24h TTL; without this sweep they'd
+  // accumulate indefinitely. The cache helper's getCached already
+  // ignores expired rows, but stale storage still wastes disk.
+  const cacheCleaned = await cleanupExpiredCache();
+  if (cacheCleaned > 0) {
+    console.log(`[CRON] cleaned ${cacheCleaned} expired cache rows`);
+  }
+
   return NextResponse.json({
     synced,
     projects: allProjects.length,
@@ -339,5 +349,6 @@ export async function GET(request: Request) {
       skipped: briefsSkipped,
       failed: briefsFailed,
     },
+    cacheCleaned,
   });
 }

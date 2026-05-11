@@ -390,6 +390,12 @@ export const researchConfig = pgTable('research_config', {
   weeklyInsight: text('weekly_insight'),
   weeklyInsightAt: timestamp('weekly_insight_at'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
+  // PR #59 — Sprint 7.0.3: opt-in for Reddit RSS scanning. We keep
+  // this OUTSIDE the `sources` JSONB so it's queryable + indexable +
+  // doesn't conflict with the legacy keyword-search flag. The
+  // timestamp captures consent for traceability if Reddit ever asks.
+  redditRssOptin: boolean('reddit_rss_optin').default(false).notNull(),
+  redditRssOptinAt: timestamp('reddit_rss_optin_at'),
 });
 
 // ===== Scheduled Posts =====
@@ -836,6 +842,24 @@ export const researchInsights = pgTable('research_insights', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
+// ===== Research Cache (PR #59 — Sprint 7.0.3) =====
+// Generic TTL cache used by the Reddit RSS client (and any future
+// rate-limited fetchers). We put this in Postgres rather than Vercel
+// KV because KV moved to a paid tier in late 2025 and the access
+// pattern (writes ~ every 24h per key, reads on every scan) is fine
+// for Postgres at our volume.
+//
+// `cacheKey` is the natural PK — unique-indexed for fast lookup +
+// upserts via onConflictDoUpdate. `expiresAt` lets the cron sweep
+// stale rows daily.
+export const researchCache = pgTable('research_cache', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  cacheKey: text('cache_key').notNull().unique(),
+  cacheValue: jsonb('cache_value').notNull(),
+  expiresAt: timestamp('expires_at').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
 // ===== Type exports =====
 export type User = typeof users.$inferSelect;
 export type Project = typeof projects.$inferSelect;
@@ -855,3 +879,4 @@ export type MetaIntegration = typeof metaIntegrations.$inferSelect;
 export type SourceDirectoryRow = typeof sourceDirectory.$inferSelect;
 export type ProjectSource = typeof projectSources.$inferSelect;
 export type ResearchInsight = typeof researchInsights.$inferSelect;
+export type ResearchCacheRow = typeof researchCache.$inferSelect;
