@@ -220,6 +220,17 @@ export const generatedPosts = pgTable('generated_posts', {
   performanceNote: text('performance_note'),
   performanceMetrics: jsonb('performance_metrics'),
   performanceRatedAt: timestamp('performance_rated_at'),
+  // PR #60 — Sprint 7.0.4: structured drafts.
+  //
+  // `contentType` references content_types.type (e.g. 'reel',
+  // 'carousel'). Null = legacy plain-text draft from the original
+  // generate-post flow, kept null-safe so the old UI still works.
+  // `structuredContent` holds the parsed JSON output from Opus
+  // (hook+beats+caption for reels, slides+caption for carousels,
+  // etc.). The original `content` field stays populated with a
+  // human-readable fallback string for backward compatibility.
+  contentType: text('content_type'),
+  structuredContent: jsonb('structured_content'),
 });
 
 // ===== Research Findings =====
@@ -842,6 +853,68 @@ export const researchInsights = pgTable('research_insights', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
+// ===== Content Types (PR #60 — Sprint 7.0.4) =====
+// Templates per (platform, type) pair that describe how the AI should
+// structure a draft for that specific format. Seeded once via
+// scripts/seed-content-types.ts; updating a template doesn't break
+// existing drafts since each draft already stores its own
+// structuredContent snapshot in generatedPosts.
+//
+// Why a table (vs hardcoding in code): the founder will iterate on
+// these prompts based on real output quality, and we want hot-fixing
+// the prompt for "Instagram Reel" to be a single UPDATE rather than
+// a redeploy.
+export const contentTypes = pgTable(
+  'content_types',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    platform: text('platform').notNull(), // 'instagram' | 'facebook' | 'linkedin' | 'reddit' | 'threads' | 'x'
+    type: text('type').notNull(), // 'reel' | 'carousel' | 'photo' | 'text_post' | 'self_post' | 'thread' | …
+    displayName: text('display_name').notNull(),
+    description: text('description'),
+    promptTemplate: text('prompt_template').notNull(),
+    structureSchema: jsonb('structure_schema').notNull(),
+    guidelines: text('guidelines'),
+    maxLength: integer('max_length'),
+    defaultEnabled: boolean('default_enabled').default(true).notNull(),
+    displayOrder: integer('display_order').default(0).notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    platformTypeUk: unique('content_types_platform_type_uk').on(
+      t.platform,
+      t.type,
+    ),
+  }),
+);
+
+// ===== User Content Preferences (PR #60 — Sprint 7.0.4) =====
+// Per-project: which content types is THIS project's founder
+// generating right now. One row per (project, platform). The
+// `enabledTypes` jsonb is just an array of type strings.
+//
+// We carry redundant userId for defense-in-depth (same pattern as
+// projectSources in PR #56).
+export const userContentPreferences = pgTable(
+  'user_content_preferences',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id').notNull(),
+    platform: text('platform').notNull(),
+    enabledTypes: jsonb('enabled_types').notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    projectPlatformUk: unique('user_content_preferences_project_platform_uk').on(
+      t.projectId,
+      t.platform,
+    ),
+  }),
+);
+
 // ===== Research Cache (PR #59 — Sprint 7.0.3) =====
 // Generic TTL cache used by the Reddit RSS client (and any future
 // rate-limited fetchers). We put this in Postgres rather than Vercel
@@ -880,3 +953,5 @@ export type SourceDirectoryRow = typeof sourceDirectory.$inferSelect;
 export type ProjectSource = typeof projectSources.$inferSelect;
 export type ResearchInsight = typeof researchInsights.$inferSelect;
 export type ResearchCacheRow = typeof researchCache.$inferSelect;
+export type ContentType = typeof contentTypes.$inferSelect;
+export type UserContentPreference = typeof userContentPreferences.$inferSelect;
