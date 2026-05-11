@@ -39,7 +39,11 @@ interface Props {
 
 interface DiscoverResponse {
   discovered: number;
-  seedTermsUsed: string[];
+  // Sprint 7.0 used `seedTermsUsed`; 7.0.1 also returns
+  // `searchTermsUsed` (same value, friendlier name). Either populates.
+  seedTermsUsed?: string[];
+  searchTermsUsed?: string[];
+  warnings?: string[];
   sources: Array<{
     id: string;
     platform: string;
@@ -65,10 +69,19 @@ export function SourcesClient({ project, connected }: Props) {
   const [busy, setBusy] = useState<'discover' | 'rank' | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // PR #57 — Sprint 7.0.1: surface the terms the server actually used
+  // + any non-fatal warnings (e.g. YouTube key missing) so the founder
+  // can see what was searched and why coverage might be partial.
+  const [searchTerms, setSearchTerms] = useState<string[]>([]);
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const [errorHint, setErrorHint] = useState<string | null>(null);
 
   const runDiscovery = async () => {
     setError(null);
+    setErrorHint(null);
     setStatus(null);
+    setSearchTerms([]);
+    setWarnings([]);
     setBusy('discover');
     try {
       const dRes = await fetch('/api/research/discover', {
@@ -79,18 +92,21 @@ export function SourcesClient({ project, connected }: Props) {
       const dData = (await dRes.json()) as DiscoverResponse;
       if (!dRes.ok) {
         setError(dData.error ?? 'Discovery failed');
-        setStatus(dData.hint ?? null);
+        setErrorHint(dData.hint ?? null);
         return;
       }
+      const usedTerms = dData.searchTermsUsed ?? dData.seedTermsUsed ?? [];
+      setSearchTerms(usedTerms);
+      setWarnings(dData.warnings ?? []);
       if (dData.discovered === 0) {
         setStatus(
-          'No new communities to suggest. Run again after adding more brand context, or check your Connected list.',
+          'No new communities to suggest. Run again after adding more keywords in Research → Configuration, or check your Connected list.',
         );
         setSuggestions([]);
         return;
       }
       setStatus(
-        `Discovered ${dData.discovered} new candidates from seeds: ${dData.seedTermsUsed.join(', ')}. Ranking…`,
+        `Discovered ${dData.discovered} new candidates. Ranking…`,
       );
 
       // Step 2: rank what we just found.
@@ -206,9 +222,28 @@ export function SourcesClient({ project, connected }: Props) {
           {status}
         </div>
       )}
+      {/* PR #57 — Sprint 7.0.1: transparent feedback so the founder
+          sees which terms were actually searched. If discovery comes
+          back empty, this line is the diagnostic. */}
+      {searchTerms.length > 0 && (
+        <div className="text-[11px] font-mono text-text-3">
+          <span className="uppercase tracking-[0.1em]">Searched:</span>{' '}
+          {searchTerms.join(' · ')}
+        </div>
+      )}
+      {warnings.length > 0 && (
+        <div className="p-3 border border-amber-500/30 bg-amber-500/10 rounded-lg text-xs text-amber-600 space-y-1">
+          {warnings.map((w, i) => (
+            <div key={i}>⚠ {w}</div>
+          ))}
+        </div>
+      )}
       {error && (
         <div className="p-3 border border-danger/30 bg-danger/10 rounded-lg text-sm text-danger">
-          {error}
+          <div>{error}</div>
+          {errorHint && (
+            <div className="text-xs text-danger/80 mt-1">{errorHint}</div>
+          )}
         </div>
       )}
 

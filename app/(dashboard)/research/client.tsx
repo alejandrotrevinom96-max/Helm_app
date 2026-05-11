@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import type { Project, ResearchFinding } from '@/lib/db/schema';
 import { timeAgo, formatRelativeDate } from '@/lib/utils';
@@ -11,6 +11,10 @@ import { SimpleMarkdown } from '@/components/ui/simple-markdown';
 import { KeywordChips } from './keyword-chips';
 import { CompetitorComparison } from './competitor-comparison';
 import { AutoConfigSection } from './auto-config-section';
+import {
+  PainPointCard,
+  type PainPoint,
+} from '@/components/research/PainPointCard';
 
 type Sources = {
   reddit: boolean;
@@ -74,6 +78,80 @@ export function ResearchClient({
   const [allFindings, setAllFindings] = useState<ResearchFinding[]>(findings);
   const [hasMore, setHasMore] = useState(findings.length === 50);
   const [loadingMore, setLoadingMore] = useState(false);
+
+  // PR #57 — Sprint 7.0.1: pain points block. Mount-load + refresh on
+  // demand via the extract endpoint. Failure is silent — the section
+  // just shows the empty state.
+  const [painPoints, setPainPoints] = useState<PainPoint[]>([]);
+  const [painSummary, setPainSummary] = useState<string | null>(null);
+  const [painSkippedReason, setPainSkippedReason] = useState<string | null>(
+    null,
+  );
+  const [extractLoading, setExtractLoading] = useState(false);
+  const [extractError, setExtractError] = useState<string | null>(null);
+  const [extractHint, setExtractHint] = useState<string | null>(null);
+
+  const loadInsights = useCallback(async () => {
+    try {
+      const res = await fetch(
+        `/api/research/insights?projectId=${project.id}`,
+        { cache: 'no-store' },
+      );
+      const data: {
+        hasInsight?: boolean;
+        insight?: {
+          painPoints?: PainPoint[];
+          summary?: string | null;
+          skippedReason?: string | null;
+        };
+      } = await res.json();
+      if (res.ok && data.hasInsight && data.insight) {
+        setPainPoints(data.insight.painPoints ?? []);
+        setPainSummary(data.insight.summary ?? null);
+        setPainSkippedReason(data.insight.skippedReason ?? null);
+      }
+    } catch {
+      // non-fatal
+    }
+  }, [project.id]);
+
+  useEffect(() => {
+    loadInsights();
+  }, [loadInsights]);
+
+  const extractPainPoints = async () => {
+    setExtractError(null);
+    setExtractHint(null);
+    setExtractLoading(true);
+    try {
+      const res = await fetch('/api/research/extract-pain-points', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId: project.id }),
+      });
+      const data: {
+        success?: boolean;
+        painPoints?: PainPoint[];
+        summary?: string | null;
+        skippedReason?: string | null;
+        hint?: string;
+        error?: string;
+        sourcesNeeded?: boolean;
+      } = await res.json();
+      if (!res.ok) {
+        setExtractError(data.error ?? 'Extraction failed');
+        return;
+      }
+      setPainPoints(data.painPoints ?? []);
+      setPainSummary(data.summary ?? null);
+      setPainSkippedReason(data.skippedReason ?? null);
+      if (data.hint) setExtractHint(data.hint);
+    } catch (e) {
+      setExtractError(e instanceof Error ? e.message : 'Network error');
+    } finally {
+      setExtractLoading(false);
+    }
+  };
 
   const persistConfig = async (
     patch: Partial<{
@@ -245,6 +323,52 @@ export function ResearchClient({
           Last scan: {formatRelativeDate(initialConfig.lastSyncedAt)}
         </div>
       )}
+
+      {/* PR #57 — Sprint 7.0.1: Pain Points this week. Sits above
+          Configuration because this is the highest-signal artifact
+          the page now produces — it's what a founder opens the tab
+          to see. */}
+      <section className="mb-6">
+        <div className="flex items-baseline justify-between mb-3">
+          <h2 className="font-display text-xl font-light">
+            Pain points this week
+          </h2>
+          <button
+            onClick={extractPainPoints}
+            disabled={extractLoading}
+            className="text-xs font-mono text-accent hover:opacity-80 disabled:opacity-50"
+          >
+            {extractLoading ? 'Extracting…' : '↻ Extract now'}
+          </button>
+        </div>
+        {extractError && (
+          <div className="mb-3 p-3 border border-danger/30 bg-danger/10 rounded-lg text-sm text-danger">
+            {extractError}
+          </div>
+        )}
+        {extractHint && painPoints.length === 0 && (
+          <div className="mb-3 text-xs text-text-3">{extractHint}</div>
+        )}
+        {painSummary && painPoints.length > 0 && (
+          <p className="text-sm text-text-2 mb-3 max-w-2xl">{painSummary}</p>
+        )}
+        {painPoints.length > 0 ? (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            {painPoints.map((p, i) => (
+              <PainPointCard
+                key={`${p.theme}-${i}`}
+                painPoint={p}
+                projectId={project.id}
+              />
+            ))}
+          </div>
+        ) : (
+          <GlassCard className="p-6 text-center text-text-3 text-sm">
+            {painSkippedReason ??
+              'No pain points yet. Connect sources in /research/sources first, run a scan, then hit Extract.'}
+          </GlassCard>
+        )}
+      </section>
 
       {/* Configuration card (collapsible) */}
       <GlassCard className="p-5 mb-6">

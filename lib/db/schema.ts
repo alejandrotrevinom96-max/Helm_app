@@ -240,6 +240,11 @@ export const researchFindings = pgTable('research_findings', {
   // Set by the scoring step when the finding mentions a known competitor.
   // Null for findings that are about the user's own product / niche only.
   competitor: text('competitor'),
+  // PR #57 — Sprint 7.0.1: link each finding back to the directory row
+  // it came from. Nullable because the scan endpoint still inserts
+  // legacy un-sourced findings until we wire the sources loop end-to-
+  // end (Sprint 7.0.2 territory).
+  sourceId: uuid('source_id').references(() => sourceDirectory.id),
 });
 
 // ===== Waitlist Pages =====
@@ -801,6 +806,33 @@ export const projectSources = pgTable('project_sources', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
+// ===== Research Insights (PR #57 — Sprint 7.0.1) =====
+// One row per weekly Pain Point extraction run. The Haiku extractor
+// summarizes connected-source findings into a structured pain-point
+// list with a quote, frequency, platform, and an actionable angle.
+//
+// `weekStarting` lets the Weekly Brief (deferred to Sprint 7.0.2) pull
+// "this week's pains" reliably without re-running the extractor.
+// `briefSent` is a guard so a re-run of the cron can't double-email.
+// `sourcesUsed` is a flat jsonb array of project_source IDs the
+// extraction actually drew from — useful for the UI to surface
+// "extracted from N sources".
+export const researchInsights = pgTable('research_insights', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  projectId: uuid('project_id')
+    .notNull()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull(), // defense-in-depth — same as projectSources
+  painPoints: jsonb('pain_points'),
+  summary: text('summary'),
+  skippedReason: text('skipped_reason'),
+  sourcesUsed: jsonb('sources_used'),
+  weekStarting: timestamp('week_starting'),
+  briefSent: boolean('brief_sent').default(false),
+  briefSentAt: timestamp('brief_sent_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
 // ===== Type exports =====
 export type User = typeof users.$inferSelect;
 export type Project = typeof projects.$inferSelect;
@@ -819,3 +851,4 @@ export type BrandImageValidation = typeof brandImageValidations.$inferSelect;
 export type MetaIntegration = typeof metaIntegrations.$inferSelect;
 export type SourceDirectoryRow = typeof sourceDirectory.$inferSelect;
 export type ProjectSource = typeof projectSources.$inferSelect;
+export type ResearchInsight = typeof researchInsights.$inferSelect;
