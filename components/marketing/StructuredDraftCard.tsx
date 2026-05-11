@@ -27,6 +27,12 @@ interface Props {
   draftId?: string;
 }
 
+interface ScheduleState {
+  kind: 'idle' | 'scheduling' | 'scheduled' | 'error';
+  message?: string;
+  scheduledFor?: string;
+}
+
 export function StructuredDraftCard({
   platform,
   contentType,
@@ -36,6 +42,10 @@ export function StructuredDraftCard({
   draftId,
 }: Props) {
   const [copied, setCopied] = useState(false);
+  // PR #64 — Sprint 7.0.7: inline schedule. Tomorrow 9am is the
+  // default cadence (one-click); the founder can still drag to a
+  // specific slot in Calendar after.
+  const [schedule, setSchedule] = useState<ScheduleState>({ kind: 'idle' });
 
   const handleCopy = async () => {
     if (structuredContent == null) return;
@@ -48,6 +58,52 @@ export function StructuredDraftCard({
     } catch {
       /* clipboard denied — no-op */
     }
+  };
+
+  const handleScheduleTomorrow = async () => {
+    if (!draftId || schedule.kind === 'scheduling') return;
+    // Local-time "tomorrow at 09:00" — the founder's browser timezone.
+    // The cron honors UTC instants, so we convert once at submit.
+    const t = new Date();
+    t.setDate(t.getDate() + 1);
+    t.setHours(9, 0, 0, 0);
+    setSchedule({ kind: 'scheduling' });
+    try {
+      const res = await fetch(`/api/marketing/library/${draftId}/schedule`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scheduledFor: t.toISOString() }),
+      });
+      const data = (await res.json()) as {
+        success?: boolean;
+        error?: string;
+        code?: string;
+      };
+      if (!res.ok || !data.success) {
+        setSchedule({
+          kind: 'error',
+          message: data.error ?? 'Failed to schedule',
+        });
+        return;
+      }
+      setSchedule({
+        kind: 'scheduled',
+        scheduledFor: t.toISOString(),
+      });
+    } catch (e) {
+      setSchedule({
+        kind: 'error',
+        message: e instanceof Error ? e.message : 'Network error',
+      });
+    }
+  };
+
+  const openInCalendar = () => {
+    if (!draftId) return;
+    // Calendar accepts a draftId query param to pre-select the
+    // draft for manual placement. The Calendar client picks it up
+    // on mount and offers a "Drop here" affordance.
+    window.location.href = `/marketing/calendar?draftId=${encodeURIComponent(draftId)}`;
   };
 
   // Object-shape gate. JSON.parse can return string / number / array
@@ -72,7 +128,7 @@ export function StructuredDraftCard({
           </div>
           <h3 className="font-display text-lg font-light">{displayName}</h3>
         </div>
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex items-center gap-2 shrink-0">
           <button
             type="button"
             onClick={handleCopy}
@@ -81,13 +137,50 @@ export function StructuredDraftCard({
           >
             {copied ? 'Copied ✓' : 'Copy JSON'}
           </button>
-          {draftId && (
-            <span className="text-[10px] font-mono text-text-3 hidden md:inline">
-              id:{draftId.slice(0, 8)}
+          {/* PR #64 — Sprint 7.0.7: inline schedule. Only rendered
+              when we have a draftId (always true for newly-generated
+              drafts; absent for the rare "preview-only" path). */}
+          {draftId && schedule.kind !== 'scheduled' && (
+            <>
+              <button
+                type="button"
+                onClick={openInCalendar}
+                disabled={schedule.kind === 'scheduling'}
+                className="text-xs font-mono px-2 py-1 rounded border border-border hover:border-border-bright disabled:opacity-50"
+              >
+                Schedule…
+              </button>
+              <button
+                type="button"
+                onClick={handleScheduleTomorrow}
+                disabled={schedule.kind === 'scheduling'}
+                className="text-xs font-mono px-2 py-1 rounded bg-accent text-white hover:opacity-90 disabled:opacity-50"
+                title="Schedule for tomorrow at 9:00 AM (your local time)"
+              >
+                {schedule.kind === 'scheduling'
+                  ? 'Scheduling…'
+                  : 'Schedule 9am →'}
+              </button>
+            </>
+          )}
+          {schedule.kind === 'scheduled' && (
+            <span className="text-[10px] font-mono uppercase tracking-[0.1em] px-2 py-1 rounded bg-emerald-500/15 text-emerald-600">
+              ✓ Scheduled
             </span>
           )}
         </div>
       </header>
+
+      {/* PR #64 — Sprint 7.0.7: schedule error surface. The
+          schedule endpoint returns a concrete reason when a
+          structured draft can't be auto-published yet (e.g.
+          "Reel script ready, but auto-publish needs a video.").
+          We render the full message so the founder can act. */}
+      {schedule.kind === 'error' && (
+        <div className="mb-4 p-3 border border-danger/30 bg-danger/10 rounded text-xs text-danger">
+          {schedule.message}
+        </div>
+      )}
 
       {error ? (
         <div className="p-3 border border-danger/30 bg-danger/10 rounded text-sm text-danger">

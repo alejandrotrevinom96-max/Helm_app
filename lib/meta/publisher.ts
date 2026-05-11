@@ -139,6 +139,64 @@ export async function publishPost(postId: string): Promise<PublishResult> {
   const client = new MetaGraphClient(pageAccessToken);
   const platform = post.platform;
 
+  // PR #64 — Sprint 7.0.7: structured-draft contentType dispatch.
+  //
+  // The schedule endpoint already refuses to schedule contentTypes
+  // we can't auto-publish (Carousel without slide images, UGC video,
+  // LinkedIn/Reddit/Threads/X, etc.) — but defense-in-depth: if a
+  // row slips through (e.g. legacy schedule from before the
+  // validation, or a contentType we add later), fail PERMANENT here
+  // so the founder sees a clear reason instead of cryptic Meta
+  // errors after each retry.
+  const ct = post.contentType;
+  if (ct === 'carousel') {
+    return {
+      success: false,
+      error:
+        'Carousel auto-publish needs slide images. Sprint 7.0.8 will add slide-image generation. Copy the slides and post manually for now.',
+      isTransient: false,
+    };
+  }
+  if (ct === 'ugc') {
+    return {
+      success: false,
+      error:
+        'UGC video auto-publish needs HeyGen integration (planned). Copy the script and record manually.',
+      isTransient: false,
+    };
+  }
+  if (ct === 'thread' || ct === 'single_tweet') {
+    return {
+      success: false,
+      error:
+        'X (Twitter) publishing needs a pay-per-use API key. Sprint 7.0.8 will wire this.',
+      isTransient: false,
+    };
+  }
+  if (ct === 'self_post' || ct === 'link_post') {
+    return {
+      success: false,
+      error:
+        'Reddit publishing isn\'t wired yet. Copy the title + body and post manually.',
+      isTransient: false,
+    };
+  }
+  if (
+    (ct === 'text_post' && platform === 'linkedin') ||
+    ct === 'single_image'
+  ) {
+    return {
+      success: false,
+      error:
+        'LinkedIn auto-publish isn\'t wired yet. Sprint 7.0.9 will add this. Copy the post and paste manually.',
+      isTransient: false,
+    };
+  }
+  // Reel and Photo/Photo-on-FB flow through to the existing
+  // platform-specific paths below. community_post on Facebook falls
+  // through to the FB text path. Anything else with contentType=null
+  // is the legacy pillar-variant flow — also passes through.
+
   try {
     // ===== FACEBOOK =====
     if (platform === 'facebook') {

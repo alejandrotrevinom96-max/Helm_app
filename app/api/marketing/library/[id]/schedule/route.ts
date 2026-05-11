@@ -136,6 +136,29 @@ export async function POST(
     }
   }
 
+  // PR #64 — Sprint 7.0.7: posteability validation for structured
+  // drafts. Sprint 7.0.4 ships drafts as JSON scripts (hook/beats/
+  // captions for Reels, slides for Carousels, etc.) but the
+  // structured-drafts flow doesn't yet produce the media files Meta
+  // needs to publish. We refuse to schedule what can't auto-publish
+  // so the founder doesn't end up with a library full of perpetual
+  // failures. Sprint 7.0.8+ will wire media generation per format.
+  const blockReason = unpostableReason(draft);
+  if (blockReason) {
+    return NextResponse.json(
+      { error: blockReason, code: 'unpostable' },
+      { status: 400 },
+    );
+  }
+
+  // PR #64 — Sprint 7.0.7: when the draft is a structured Reel
+  // with a video attached, route it through the existing Reel
+  // publisher flow even if the generate-time isReel toggle was
+  // never flipped. Same for Story (no contentType for Story yet,
+  // so isStory stays as-set).
+  const effectiveIsReel =
+    draft.isReel || (draft.contentType === 'reel' && Boolean(draft.videoUrl));
+
   // Insert the new scheduled post FIRST. If something fails, the
   // draft is still recoverable — better than losing both rows.
   const [newScheduled] = await db
@@ -148,9 +171,9 @@ export async function POST(
       scheduledFor: when,
       status: 'scheduled',
       isStory: draft.isStory,
-      isReel: draft.isReel,
+      isReel: effectiveIsReel,
       videoUrl: draft.videoUrl ?? null,
-      reelProcessingStatus: draft.isReel ? 'uploaded' : null,
+      reelProcessingStatus: effectiveIsReel ? 'uploaded' : null,
       // PR #63 — Sprint 7.0.6: copy structured-draft metadata.
       contentType: draft.contentType,
       structuredContent: draft.structuredContent ?? null,
@@ -173,4 +196,78 @@ export async function POST(
       status: newScheduled.status,
     },
   });
+}
+
+// PR #64 — Sprint 7.0.7: classify a draft's auto-publishability.
+//
+// Returns null when the draft can be auto-published today, or a
+// founder-facing reason string when it can't. The UI surfaces the
+// string directly so we keep them concrete and actionable.
+//
+// Rules:
+//   - Instagram needs media: a Reel without videoUrl, a Photo /
+//     Carousel without visualUrl can't be published.
+//   - Carousel + Story + most non-photo IG types need media we
+//     don't yet generate from structured drafts (deferred to a
+//     later sprint that adds slide-image generation).
+//   - Non-Meta platforms (LinkedIn / Reddit / Threads / X) have
+//     no publisher wired yet, so we refuse to schedule until the
+//     respective integration lands.
+//   - Legacy plain-text drafts (contentType=null) pass through
+//     untouched — the existing isReel/isStory paths cover them.
+function unpostableReason(draft: {
+  platform: string;
+  contentType: string | null;
+  visualUrl?: string | null;
+  videoUrl?: string | null;
+}): string | null {
+  const ct = draft.contentType;
+  if (!ct) return null; // legacy plain-text — existing flow handles it
+
+  // Non-Meta platforms: no publisher wired yet.
+  if (draft.platform === 'linkedin') {
+    return 'LinkedIn auto-publish isn\'t wired yet. Save the draft and copy it manually for now.';
+  }
+  if (draft.platform === 'reddit') {
+    return 'Reddit auto-publish isn\'t wired yet. Copy the title + body and post manually.';
+  }
+  if (draft.platform === 'threads') {
+    return 'Threads auto-publish isn\'t wired yet. Sprint 7.0.9 will add this.';
+  }
+  if (draft.platform === 'x') {
+    return 'X (Twitter) auto-publish needs a pay-per-use API key. Sprint 7.0.8 will wire this.';
+  }
+
+  // Instagram & Facebook formats.
+  if (ct === 'reel') {
+    if (!draft.videoUrl) {
+      return 'Reel script ready, but auto-publish needs a video. Upload one in Generate, or copy the script and post manually.';
+    }
+    return null;
+  }
+  if (ct === 'carousel') {
+    return 'Carousel auto-publish needs slide images (one per slide). Sprint 7.0.8 will add slide-image generation; for now copy the slides and post manually.';
+  }
+  if (ct === 'photo' || ct === 'single_image') {
+    if (!draft.visualUrl) {
+      return 'Photo post needs a visual. Use Generate\'s "+ Add visual" button, then schedule.';
+    }
+    return null;
+  }
+  if (ct === 'ugc') {
+    return 'UGC video isn\'t auto-publishable yet — Sprint 7.0.10 plans HeyGen integration. Copy the script and record manually.';
+  }
+  if (ct === 'community_post') {
+    // Facebook community post is text-only; allowed.
+    if (draft.platform === 'facebook') return null;
+    return 'Community posts are Facebook-only. Re-generate on Facebook.';
+  }
+  if (ct === 'text_post') {
+    // No native text-only support on IG; OK on FB.
+    if (draft.platform === 'facebook') return null;
+    return 'Text posts on this platform aren\'t auto-publishable yet.';
+  }
+
+  // Unknown contentType — refuse rather than guess.
+  return `Don't know how to publish "${ct}" on ${draft.platform} yet. Copy manually for now.`;
 }

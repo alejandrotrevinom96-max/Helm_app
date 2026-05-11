@@ -138,6 +138,23 @@ export function LibraryPostCard({ post, onClick }: Props) {
                 Reel error
               </span>
             )}
+          {/* PR #64 — Sprint 7.0.7: surface per-format chip from the
+              structured-drafts flow (Sprint 7.0.4). Skips formats
+              already badged separately (reel/story have their own
+              icons above) to avoid double-labelling. Always rendered
+              when contentType is set — works for both drafts AND
+              scheduled rows since Sprint 7.0.6 propagated the
+              column. */}
+          {post.contentType &&
+            post.contentType !== 'reel' &&
+            !post.isStory && (
+              <span
+                className="text-[10px] font-mono uppercase tracking-[0.1em] px-2 py-0.5 rounded bg-accent/15 text-accent"
+                title={`Content format: ${post.contentType}`}
+              >
+                {post.contentType.replace(/_/g, ' ')}
+              </span>
+            )}
         </div>
         <span className="text-[10px] font-mono uppercase tracking-[0.1em] text-text-3">
           {post.platform}
