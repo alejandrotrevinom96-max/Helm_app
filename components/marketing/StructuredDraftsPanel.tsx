@@ -14,6 +14,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { GlassCard } from '@/components/ui/glass-card';
 import { Button } from '@/components/ui/button';
 import { StructuredDraftCard } from './StructuredDraftCard';
+import { StructuredDraftErrorBoundary } from './StructuredDraftErrorBoundary';
 
 type Platform =
   | 'instagram'
@@ -51,7 +52,10 @@ interface Draft {
   id: string;
   contentType: string;
   displayName: string;
-  structuredContent: Record<string, unknown> | null;
+  // PR #61 — Sprint 7.0.4.1: typed as `unknown` because Opus can
+  // return any JSON value (object / array / string / null). The
+  // card's render guard routes non-objects to a Fallback view.
+  structuredContent: unknown;
   error?: string;
 }
 
@@ -94,7 +98,13 @@ export function StructuredDraftsPanel({ projectId }: Props) {
     };
   }, [projectId]);
 
-  // Load templates whenever platform changes.
+  // Load templates whenever platform changes. PR #61 — Sprint
+  // 7.0.4.1: this effect previously also depended on `preferences`,
+  // which caused a feedback loop: toggling a type called
+  // setPreferences → the effect re-ran → the user's just-toggled
+  // selection got overwritten by the persisted state on the next
+  // tick. We split the two concerns now — types here, initial
+  // selection in the next effect below.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -105,17 +115,7 @@ export function StructuredDraftsPanel({ projectId }: Props) {
         });
         const data = (await res.json()) as { types?: ContentTypeRow[] };
         if (cancelled) return;
-        const rows = data.types ?? [];
-        setTypes(rows);
-        // Pick the selection: stored pref first, else defaultEnabled.
-        const pref = preferences.find((p) => p.platform === platform);
-        if (pref) {
-          // Filter to types that still exist (in case schema changed).
-          const valid = new Set(rows.map((r) => r.type));
-          setSelected(pref.enabledTypes.filter((t) => valid.has(t)));
-        } else {
-          setSelected(rows.filter((r) => r.defaultEnabled).map((r) => r.type));
-        }
+        setTypes(data.types ?? []);
       } catch {
         if (!cancelled) setTypes([]);
       } finally {
@@ -125,7 +125,24 @@ export function StructuredDraftsPanel({ projectId }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [platform, preferences]);
+  }, [platform]);
+
+  // Apply the initial selection only when `platform` changes — not
+  // every time `preferences` mutates. Run after `types` arrives so
+  // we can filter out stale type IDs.
+  useEffect(() => {
+    if (types.length === 0) return;
+    const pref = preferences.find((p) => p.platform === platform);
+    if (pref) {
+      const valid = new Set(types.map((r) => r.type));
+      setSelected(pref.enabledTypes.filter((t) => valid.has(t)));
+    } else {
+      setSelected(types.filter((r) => r.defaultEnabled).map((r) => r.type));
+    }
+    // Intentionally omit `preferences` from deps — we only want this
+    // to fire when the platform changes or types finish loading.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [platform, types]);
 
   const persistSelection = async (next: string[]) => {
     try {
@@ -281,7 +298,7 @@ export function StructuredDraftsPanel({ projectId }: Props) {
                         type="checkbox"
                         checked={checked}
                         onChange={() => toggleType(t.type)}
-                        className="mt-1 accent-current"
+                        className="mt-1"
                       />
                       <div className="flex-1 min-w-0">
                         <div className="font-medium text-sm text-text-1">
@@ -337,17 +354,29 @@ export function StructuredDraftsPanel({ projectId }: Props) {
                 </span>
               </div>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                {drafts.map((d, i) => (
-                  <StructuredDraftCard
-                    key={d.id || `${d.contentType}-${i}`}
-                    platform={platform}
-                    contentType={d.contentType}
-                    displayName={d.displayName}
-                    structuredContent={d.structuredContent}
-                    error={d.error}
-                    draftId={d.id || undefined}
-                  />
-                ))}
+                {drafts.map((d, i) => {
+                  // PR #61 — Sprint 7.0.4.1: one boundary per card so
+                  // a single bad payload can't take down the whole
+                  // panel. Pre-this-PR a malformed Reel would unmount
+                  // the entire React subtree with "Application
+                  // error: a client-side exception has occurred".
+                  const key = d.id || `${d.contentType}-${i}`;
+                  return (
+                    <StructuredDraftErrorBoundary
+                      key={key}
+                      label={`${platform}/${d.contentType}`}
+                    >
+                      <StructuredDraftCard
+                        platform={platform}
+                        contentType={d.contentType}
+                        displayName={d.displayName}
+                        structuredContent={d.structuredContent}
+                        error={d.error}
+                        draftId={d.id || undefined}
+                      />
+                    </StructuredDraftErrorBoundary>
+                  );
+                })}
               </div>
             </div>
           )}

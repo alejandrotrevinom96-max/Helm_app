@@ -17,7 +17,12 @@ interface Props {
   platform: string;
   contentType: string;
   displayName: string;
-  structuredContent: Record<string, unknown> | null;
+  // PR #61 — Sprint 7.0.4.1: accept `unknown` because Opus can
+  // return anything from JSON.parse (string / number / array /
+  // null / object). The runtime guard in DraftBody routes
+  // non-objects to the Fallback view instead of crashing the
+  // sub-views with `.title`/`.slides` access on a string.
+  structuredContent: unknown;
   error?: string;
   draftId?: string;
 }
@@ -33,7 +38,7 @@ export function StructuredDraftCard({
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
-    if (!structuredContent) return;
+    if (structuredContent == null) return;
     try {
       await navigator.clipboard.writeText(
         JSON.stringify(structuredContent, null, 2),
@@ -44,6 +49,14 @@ export function StructuredDraftCard({
       /* clipboard denied — no-op */
     }
   };
+
+  // Object-shape gate. JSON.parse can return string / number / array
+  // / null / object — anything but a plain object would crash the
+  // sub-views as soon as they touch `.title` etc. Route those to the
+  // Fallback view which just stringifies the payload.
+  const payload = isPlainObject(structuredContent)
+    ? (structuredContent as Record<string, unknown>)
+    : null;
 
   return (
     <GlassCard className="p-5">
@@ -63,7 +76,7 @@ export function StructuredDraftCard({
           <button
             type="button"
             onClick={handleCopy}
-            disabled={!structuredContent}
+            disabled={structuredContent == null}
             className="text-xs font-mono text-text-3 hover:text-text-1 disabled:opacity-50"
           >
             {copied ? 'Copied ✓' : 'Copy JSON'}
@@ -80,12 +93,27 @@ export function StructuredDraftCard({
         <div className="p-3 border border-danger/30 bg-danger/10 rounded text-sm text-danger">
           Generation failed: {error}
         </div>
-      ) : !structuredContent ? (
+      ) : structuredContent == null ? (
         <div className="text-sm text-text-3">Empty draft.</div>
+      ) : payload == null ? (
+        // Non-object top-level (string/number/array/etc). Show raw
+        // so the founder can at least see what the model returned.
+        <FallbackView payload={{ raw: structuredContent }} />
       ) : (
-        <DraftBody contentType={contentType} payload={structuredContent} />
+        <DraftBody contentType={contentType} payload={payload} />
       )}
     </GlassCard>
+  );
+}
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return (
+    typeof v === 'object' &&
+    v !== null &&
+    !Array.isArray(v) &&
+    // Reject DOM nodes / class instances — only plain {} survives.
+    (Object.getPrototypeOf(v) === Object.prototype ||
+      Object.getPrototypeOf(v) === null)
   );
 }
 
