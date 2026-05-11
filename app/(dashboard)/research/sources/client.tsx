@@ -102,6 +102,8 @@ export function SourcesClient({
     kind: 'success' | 'error' | 'info';
     msg: string;
   } | null>(null);
+  // PR #62 — Sprint 7.0.5: auto-connect top-5 button.
+  const [autoConnecting, setAutoConnecting] = useState(false);
 
   const runDiscovery = async () => {
     setError(null);
@@ -374,6 +376,55 @@ export function SourcesClient({
     }
   };
 
+  // PR #62 — Sprint 7.0.5: auto-connect top-5 from the latest
+  // brand_analysis row. Endpoint enforces predictedRelevance >= 80,
+  // caps at 5, and skips Reddit when opt-in is off.
+  const runAutoConnect = async () => {
+    if (autoConnecting) return;
+    setAutoConnecting(true);
+    setRssFeedback(null);
+    try {
+      const res = await fetch('/api/research/auto-connect-sources', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId: project.id }),
+      });
+      const data = (await res.json()) as {
+        success?: boolean;
+        autoConnected?: number;
+        skippedOptinHint?: string | null;
+        error?: string;
+        hint?: string;
+      };
+      if (!res.ok || !data.success) {
+        setRssFeedback({
+          kind: 'error',
+          msg: data.error ?? data.hint ?? 'Auto-connect failed',
+        });
+        return;
+      }
+      const count = data.autoConnected ?? 0;
+      setRssFeedback({
+        kind: count > 0 ? 'success' : 'info',
+        msg:
+          count > 0
+            ? `Auto-connected ${count} source${count === 1 ? '' : 's'} (relevance ≥ 80).${
+                data.skippedOptinHint ? ' ' + data.skippedOptinHint : ''
+              }`
+            : data.skippedOptinHint ??
+              'No high-confidence sources available. Run Brand Analysis first.',
+      });
+      await refreshConnected();
+    } catch (e) {
+      setRssFeedback({
+        kind: 'error',
+        msg: e instanceof Error ? e.message : 'Network error',
+      });
+    } finally {
+      setAutoConnecting(false);
+    }
+  };
+
   // Show the Reddit-specific UI prominently when the founder hasn't
   // accepted yet — otherwise it lives quietly alongside Discover.
   const redditConnectedCount = connectedList.filter(
@@ -415,6 +466,18 @@ export function SourcesClient({
               : busy === 'rank'
                 ? 'Ranking…'
                 : 'Discover sources ↻'}
+          </Button>
+          {/* PR #62 — Sprint 7.0.5: auto-connect the top-5 high-
+              confidence (relevance ≥ 80) sources from the latest
+              brand analysis. Capped at 5 per call to stay within
+              Reddit's RSS rate-limit contract (1×/day per sub). */}
+          <Button
+            variant="secondary"
+            onClick={runAutoConnect}
+            disabled={autoConnecting}
+            title="Connect the top 5 high-confidence (≥80) sources from your latest Brand Analysis"
+          >
+            {autoConnecting ? 'Connecting…' : '⚡ Auto-connect top 5'}
           </Button>
         </div>
       </div>

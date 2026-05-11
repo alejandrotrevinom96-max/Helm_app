@@ -60,6 +60,11 @@ export function LibraryClient({
     platform: '',
     search: '',
     type: '' as '' | 'post' | 'story' | 'reel',
+    // PR #62 — Sprint 7.0.5: client-side filter by contentType. The
+    // API doesn't accept this yet — we filter the fetched array
+    // because the client already has the full set in memory after
+    // the initial fetch.
+    contentType: '',
   });
   const [selectedPost, setSelectedPost] = useState<LibraryPost | null>(null);
 
@@ -260,37 +265,56 @@ export function LibraryClient({
         </div>
       )}
 
-      {loading ? (
-        <div className="text-center py-12 text-text-3 text-sm">
-          Loading posts…
-        </div>
-      ) : posts.length === 0 ? (
-        <div className="p-12 border border-dashed border-border rounded-xl text-center">
-          <p className="text-text-3 text-sm mb-4">
-            {activeTab === 'all'
-              ? filters.search || filters.platform
-                ? 'No posts match those filters.'
-                : "No posts yet. Generate your first post."
-              : `No ${activeTab} posts${filters.search || filters.platform ? ' match those filters' : ''}.`}
-          </p>
-          <Link
-            href="/marketing/generate"
-            className="inline-flex px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity"
-          >
-            → Generate
-          </Link>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {posts.map((post) => (
-            <LibraryPostCard
-              key={`${post.source}-${post.id}`}
-              post={post}
-              onClick={() => setSelectedPost(post)}
-            />
-          ))}
-        </div>
-      )}
+      {(() => {
+        // PR #62 — Sprint 7.0.5: client-side contentType filter.
+        // 'legacy' = drafts with null contentType (pre-Sprint-7.0.4).
+        const visiblePosts = filters.contentType
+          ? posts.filter((p) => {
+              const ct = (p as { contentType?: string | null }).contentType ?? null;
+              if (filters.contentType === 'legacy') return ct == null;
+              return ct === filters.contentType;
+            })
+          : posts;
+        if (loading) {
+          return (
+            <div className="text-center py-12 text-text-3 text-sm">
+              Loading posts…
+            </div>
+          );
+        }
+        if (visiblePosts.length === 0) {
+          const hasAnyFilter =
+            filters.search || filters.platform || filters.contentType;
+          return (
+            <div className="p-12 border border-dashed border-border rounded-xl text-center">
+              <p className="text-text-3 text-sm mb-4">
+                {activeTab === 'all'
+                  ? hasAnyFilter
+                    ? 'No posts match those filters.'
+                    : 'No posts yet. Generate your first post.'
+                  : `No ${activeTab} posts${hasAnyFilter ? ' match those filters' : ''}.`}
+              </p>
+              <Link
+                href="/marketing/generate"
+                className="inline-flex px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity"
+              >
+                → Generate
+              </Link>
+            </div>
+          );
+        }
+        return (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {visiblePosts.map((post) => (
+              <LibraryPostCard
+                key={`${post.source}-${post.id}`}
+                post={post}
+                onClick={() => setSelectedPost(post)}
+              />
+            ))}
+          </div>
+        );
+      })()}
 
       {selectedPost && (
         <PostDetailModal

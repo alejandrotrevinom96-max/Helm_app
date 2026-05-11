@@ -250,8 +250,21 @@ export function CalendarView({
                     `}
                     style={{ borderLeftColor: style.brand }}
                   >
-                    <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-text-3 mb-1 flex items-center gap-1">
+                    <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-text-3 mb-1 flex items-center gap-1 flex-wrap">
                       <span>{fmtTime(post.scheduledFor)} · {post.platform}</span>
+                      {/* PR #62 — Sprint 7.0.5: per-format chip from
+                          the structured-drafts flow. Renders only
+                          when contentType is set (Sprint 7.0.6 will
+                          populate it server-side on schedule). */}
+                      {post.contentType && (
+                        <span
+                          className="text-accent"
+                          title={`Content format: ${post.contentType}`}
+                          aria-label={`Format: ${post.contentType}`}
+                        >
+                          · {post.contentType.replace(/_/g, ' ')}
+                        </span>
+                      )}
                       {/* PR #30 — Story marker. Pink to match IG. */}
                       {post.isStory && (
                         <span
@@ -394,6 +407,15 @@ export function CalendarView({
                     style={{ borderLeftColor: style.brand }}
                   >
                     <span>{fmtTime(post.scheduledFor)} {post.platform}</span>
+                    {/* PR #62 — Sprint 7.0.5: format chip. */}
+                    {post.contentType && (
+                      <span
+                        className="ml-1 text-accent"
+                        aria-label={`Format: ${post.contentType}`}
+                      >
+                        · {post.contentType.replace(/_/g, ' ')}
+                      </span>
+                    )}
                     {post.isStory && (
                       <span
                         className="text-pink-500 ml-1"

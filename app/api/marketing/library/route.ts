@@ -90,6 +90,12 @@ export interface LibraryPost {
   // API response, not the column directly. Always null for
   // scheduled rows (votes are draft-only).
   votedAt: string | null;
+  // PR #62 — Sprint 7.0.5: surface contentType + structuredContent
+  // so the Library client can filter by per-platform format (Reel,
+  // Carousel, Thread, etc.) and render preview chips. Null for the
+  // legacy plain-text pillar-variant drafts.
+  contentType: string | null;
+  structuredContent: unknown;
 }
 
 const VALID_STATUSES: LibraryStatus[] = [
@@ -266,6 +272,9 @@ export async function GET(request: Request) {
       userVote: r.userVote ?? null,
       // PR #53 — Sprint 6.8.4: surface vote timestamp.
       votedAt: r.votedAt?.toISOString() ?? null,
+      // PR #62 — Sprint 7.0.5: structured drafts.
+      contentType: r.contentType ?? null,
+      structuredContent: r.structuredContent ?? null,
     }));
   }
 
@@ -369,6 +378,13 @@ export async function GET(request: Request) {
         // shape consistent across both source branches.
         userVote: null,
         votedAt: null,
+        // PR #62 — Sprint 7.0.5: scheduled_posts doesn't carry
+        // contentType yet (no schema column). Always null for the
+        // scheduled branch — the founder sees the type chip on
+        // drafts only until Sprint 7.0.6 propagates it through
+        // the schedule flow.
+        contentType: null,
+        structuredContent: null,
       };
     });
   }

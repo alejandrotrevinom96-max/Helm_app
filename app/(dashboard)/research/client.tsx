@@ -15,6 +15,7 @@ import {
   PainPointCard,
   type PainPoint,
 } from '@/components/research/PainPointCard';
+import { BrandAnalysisCard } from '@/components/research/BrandAnalysisCard';
 
 type Sources = {
   reddit: boolean;
@@ -368,6 +369,15 @@ export function ResearchClient({
               'No pain points yet. Connect sources in /research/sources first, run a scan, then hit Extract.'}
           </GlassCard>
         )}
+      </section>
+
+      {/* PR #62 — Sprint 7.0.5: Smart Auto-configure. Lives between
+          Pain Points and Configuration because it's the strategic
+          read the founder needs BEFORE manually editing keywords —
+          and one click later, "Apply to research →" populates the
+          Configuration card below. */}
+      <section className="mb-6">
+        <BrandAnalysisCard projectId={project.id} />
       </section>
 
       {/* Configuration card (collapsible) */}

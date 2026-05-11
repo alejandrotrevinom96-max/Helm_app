@@ -853,6 +853,40 @@ export const researchInsights = pgTable('research_insights', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
+// ===== Brand Analysis (PR #62 — Sprint 7.0.5) =====
+// Cached Opus-4.7 deep analysis of a brand's niche, audience layers,
+// competitor gap, and recommended specificity. Drives Smart Auto-
+// configure (`/api/research/analyze-brand`).
+//
+// We cache 30 days because re-running is expensive (~$0.10 Opus call
+// + ~$0.005 Haiku follow-up) and the underlying brand bible rarely
+// changes that fast. Founder can force-regenerate via the UI's
+// "Regenerate" button.
+//
+// `searchKeywords` + `suggestedSources` + `toneGuidance` come from
+// the Haiku follow-up pass and downstream endpoints
+// (auto-connect-sources) read this row directly.
+export const brandAnalysis = pgTable('brand_analysis', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  projectId: uuid('project_id')
+    .notNull()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull(), // defense-in-depth
+  niche: text('niche').notNull(),
+  subNiches: jsonb('sub_niches'),
+  audienceLayers: jsonb('audience_layers'),
+  competitorGap: text('competitor_gap'),
+  specificityRecommended: text('specificity_recommended'), // 'broad' | 'niche' | 'hyper'
+  specificityReasoning: text('specificity_reasoning'),
+  searchKeywords: jsonb('search_keywords'),
+  suggestedSources: jsonb('suggested_sources'),
+  toneGuidance: jsonb('tone_guidance'),
+  competitorAngles: jsonb('competitor_angles'),
+  generatedBy: text('generated_by').default('claude-opus-4-7'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  expiresAt: timestamp('expires_at'),
+});
+
 // ===== Content Types (PR #60 — Sprint 7.0.4) =====
 // Templates per (platform, type) pair that describe how the AI should
 // structure a draft for that specific format. Seeded once via
@@ -955,3 +989,4 @@ export type ResearchInsight = typeof researchInsights.$inferSelect;
 export type ResearchCacheRow = typeof researchCache.$inferSelect;
 export type ContentType = typeof contentTypes.$inferSelect;
 export type UserContentPreference = typeof userContentPreferences.$inferSelect;
+export type BrandAnalysisRow = typeof brandAnalysis.$inferSelect;
