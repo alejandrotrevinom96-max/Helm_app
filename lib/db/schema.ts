@@ -736,6 +736,71 @@ export const anthropicUsageLog = pgTable('anthropic_usage_log', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
+// ===== Source Directory (PR #56 — Sprint 7.0) =====
+// Global catalog of every research source we've ever discovered. Rows
+// are NOT per-project — many founders care about r/SaaS, so we don't
+// want to insert it three times. The (platform, identifier) pair is
+// the natural key (Reddit subreddit name, YouTube channel ID, etc.)
+// and `unique` enforces dedup at the DB layer.
+//
+// `metadata` is platform-specific raw payload (subreddit's
+// `subscribers`, `over18`, `lang`, etc.) — we keep the full JSON so
+// future ranking improvements don't need a re-scan.
+export const sourceDirectory = pgTable(
+  'source_directory',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    platform: text('platform').notNull(), // 'reddit' | 'youtube' | …
+    identifier: text('identifier').notNull(), // subreddit name, channel id
+    displayName: text('display_name').notNull(),
+    url: text('url').notNull(),
+    memberCount: integer('member_count'),
+    activityLevel: text('activity_level'), // 'low' | 'medium' | 'high'
+    language: text('language'),
+    description: text('description'),
+    metadata: jsonb('metadata'),
+    discoveredAt: timestamp('discovered_at').defaultNow().notNull(),
+    lastVerified: timestamp('last_verified'),
+  },
+  (t) => ({
+    platformIdent: unique('source_directory_platform_ident_uk').on(
+      t.platform,
+      t.identifier,
+    ),
+  }),
+);
+
+// ===== Project Sources (PR #56 — Sprint 7.0) =====
+// Per-project join row: which sources from the directory has this
+// project's founder chosen to monitor (`connected`), explicitly
+// dismissed (`skipped`), or simply seen as a suggestion (`suggested`).
+//
+// Defense-in-depth: `userId` is redundant with `projects.userId` but
+// duplicated here so every isolation query can filter directly without
+// an extra join — same pattern as `generatedPosts.userId` (PR #15).
+//
+// `signalScore` is the Haiku-4.5 ranking output (0-100, defaults to
+// 50 if a connect happens without ranking). `findingsCount` is a
+// denormalized counter we'll bump as the scan loop discovers items
+// from this source.
+export const projectSources = pgTable('project_sources', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  projectId: uuid('project_id')
+    .notNull()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull(),
+  sourceId: uuid('source_id')
+    .notNull()
+    .references(() => sourceDirectory.id),
+  status: text('status').notNull(), // 'suggested' | 'connected' | 'skipped'
+  connectedAt: timestamp('connected_at'),
+  lastScannedAt: timestamp('last_scanned_at'),
+  scanCount: integer('scan_count').default(0),
+  signalScore: integer('signal_score').default(50),
+  findingsCount: integer('findings_count').default(0),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
 // ===== Type exports =====
 export type User = typeof users.$inferSelect;
 export type Project = typeof projects.$inferSelect;
@@ -752,3 +817,5 @@ export type CompassReadingRow = typeof compassReadings.$inferSelect;
 export type BrandBibleSource = typeof brandBibleSources.$inferSelect;
 export type BrandImageValidation = typeof brandImageValidations.$inferSelect;
 export type MetaIntegration = typeof metaIntegrations.$inferSelect;
+export type SourceDirectoryRow = typeof sourceDirectory.$inferSelect;
+export type ProjectSource = typeof projectSources.$inferSelect;

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import type { Project, ResearchFinding } from '@/lib/db/schema';
 import { timeAgo, formatRelativeDate } from '@/lib/utils';
 import { GlassCard } from '@/components/ui/glass-card';
@@ -210,6 +211,15 @@ export function ResearchClient({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          {/* PR #56 — Sprint 7.0: surface the auto-discovery flow.
+              We put this first because configuring sources is the
+              prerequisite — a scan with zero connected sources is
+              just a keyword search. */}
+          <Link href="/research/sources">
+            <Button variant="secondary" size="sm">
+              Sources →
+            </Button>
+          </Link>
           <Button
             variant="secondary"
             size="sm"
