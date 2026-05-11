@@ -877,6 +877,47 @@ export const researchInsights = pgTable('research_insights', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
+// ===== LinkedIn Integrations (PR #66 — Sprint 7.0.9) =====
+// Per-project LinkedIn OAuth state. Mirrors the per-project shape
+// of `metaIntegrations` rather than reusing the user-scoped
+// `integrations` table because a founder running Voya + Helm +
+// CritMatch may want a distinct LinkedIn persona per brand.
+//
+// Tokens are AES-256-GCM encrypted via lib/crypto/token-encryption
+// (same helper Meta uses). `linkedinUserId` is the URN suffix
+// (the `sub` field from OpenID Connect userinfo), so the publisher
+// can construct `urn:li:person:<id>` for the share author field.
+//
+// `scopes` jsonb tells us at runtime whether the connection has
+// w_member_social (post-on-behalf) — if a founder connected before
+// we asked for that scope, the LinkedIn card surfaces a "reconnect"
+// CTA rather than failing at publish time.
+export const linkedinIntegrations = pgTable(
+  'linkedin_integrations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id').notNull(),
+    accessTokenEncrypted: text('access_token_encrypted').notNull(),
+    refreshTokenEncrypted: text('refresh_token_encrypted'),
+    tokenExpiresAt: timestamp('token_expires_at'),
+    linkedinUserId: text('linkedin_user_id').notNull(),
+    linkedinName: text('linkedin_name'),
+    linkedinHandle: text('linkedin_handle'),
+    scopes: jsonb('scopes').$type<string[]>(),
+    status: text('status').default('connected').notNull(), // 'connected' | 'expired' | 'disconnected'
+    lastError: text('last_error'),
+    connectedAt: timestamp('connected_at').defaultNow().notNull(),
+    lastUsedAt: timestamp('last_used_at'),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    uniqueProject: unique('linkedin_integrations_project_uk').on(t.projectId),
+  }),
+);
+
 // ===== Brand Analysis (PR #62 — Sprint 7.0.5) =====
 // Cached Opus-4.7 deep analysis of a brand's niche, audience layers,
 // competitor gap, and recommended specificity. Drives Smart Auto-
@@ -1014,3 +1055,4 @@ export type ResearchCacheRow = typeof researchCache.$inferSelect;
 export type ContentType = typeof contentTypes.$inferSelect;
 export type UserContentPreference = typeof userContentPreferences.$inferSelect;
 export type BrandAnalysisRow = typeof brandAnalysis.$inferSelect;
+export type LinkedinIntegration = typeof linkedinIntegrations.$inferSelect;

@@ -20,6 +20,15 @@ import { eq, and } from 'drizzle-orm';
 import { MetaGraphClient, MetaApiError } from './graph-client';
 import { decryptToken } from '@/lib/crypto/token-encryption';
 import { isXConfigured, postTweet, postThread } from '@/lib/x/client';
+import {
+  publishLinkedInText,
+  publishLinkedInImage,
+  publishLinkedInCarousel,
+} from '@/lib/linkedin/client';
+import {
+  publishThreadsText,
+  publishThreadsPhoto,
+} from '@/lib/threads/client';
 
 export interface PublishResult {
   success: boolean;
@@ -101,12 +110,19 @@ export async function publishPost(postId: string): Promise<PublishResult> {
     return { success: false, error: 'Post not found', isTransient: false };
   }
 
-  // PR #65 — Sprint 7.0.8: X (Twitter) publishes outside Meta —
-  // dispatch BEFORE loading the Meta integration so projects
-  // without an FB Page can still post tweets. The schedule
-  // endpoint validated content shape; we just call the API here.
+  // PR #65 — Sprint 7.0.8 / PR #66 — Sprint 7.0.9: non-Meta
+  // platforms dispatch BEFORE we load the Meta integration so
+  // projects without an FB Page can still publish to X / LinkedIn
+  // / Threads. The schedule endpoint validated content shape; the
+  // per-platform helper does the API call.
   if (post.platform === 'x') {
     return await publishToX(post);
+  }
+  if (post.platform === 'linkedin') {
+    return await publishToLinkedIn(post);
+  }
+  if (post.platform === 'threads') {
+    return await publishToThreads(post);
   }
 
   const [integration] = await db
@@ -157,11 +173,12 @@ export async function publishPost(postId: string): Promise<PublishResult> {
   // validation, or a contentType we add later), fail PERMANENT here
   // so the founder sees a clear reason instead of cryptic Meta
   // errors after each retry.
-  // PR #65 — Sprint 7.0.8: dispatch refuses tightened. Carousel + X
-  // now have real handlers (below for Carousel; lib/x/client.ts for
-  // X — invoked from the X branch further down). LinkedIn / Reddit /
-  // Threads / UGC remain refused with concrete reasons until each
-  // platform's integration lands.
+  // PR #66 — Sprint 7.0.9: dispatch refuses narrowed to the
+  // genuinely-unsupported corners. LinkedIn + Threads now have real
+  // handlers (routed at the platform-dispatch above). UGC and
+  // Reddit content types remain refused until their integrations
+  // land — but the OR-bug from Sprint 7.0.7 is fixed: refuses are
+  // platform-aware.
   const ct = post.contentType;
   if (ct === 'ugc') {
     return {
@@ -171,27 +188,19 @@ export async function publishPost(postId: string): Promise<PublishResult> {
       isTransient: false,
     };
   }
-  if (ct === 'self_post' || ct === 'link_post') {
-    return {
-      success: false,
-      error:
-        'Reddit publishing isn\'t wired yet. Copy the title + body and post manually.',
-      isTransient: false,
-    };
-  }
   if (
-    (ct === 'text_post' && platform === 'linkedin') ||
-    ct === 'single_image'
+    platform === 'reddit' &&
+    (ct === 'self_post' || ct === 'link_post')
   ) {
     return {
       success: false,
       error:
-        'LinkedIn auto-publish isn\'t wired yet. Sprint 7.0.9 will add this. Copy the post and paste manually.',
+        'Reddit publishing isn\'t wired yet (requires app review). Copy the title + body and post manually.',
       isTransient: false,
     };
   }
-  // Reel / Photo / FB-photo / FB text / Carousel / X flow through
-  // to the platform-specific paths below. Anything else with
+  // Reel / Photo / Carousel / Story / Text on Meta flow through to
+  // the platform-specific branches below. Anything else with
   // contentType=null is the legacy pillar-variant flow — passes
   // through as well.
 
@@ -689,6 +698,184 @@ async function publishToX(
       success: false,
       error: `X publish failed: ${msg.slice(0, 200)}`,
       isTransient: isRateLimit,
+    };
+  }
+}
+
+// PR #66 — Sprint 7.0.9: LinkedIn publisher. Routes per contentType
+// to text / image / carousel handlers. Credentials live in
+// linkedin_integrations per-project; the lib/linkedin/client helper
+// handles token decryption + scope checks + UGC posting.
+async function publishToLinkedIn(
+  post: typeof scheduledPosts.$inferSelect,
+): Promise<PublishResult> {
+  const ct = post.contentType;
+  const sc = post.structuredContent as Record<string, unknown> | null;
+  try {
+    if (ct === 'text_post' || !ct) {
+      // Compose the LinkedIn body from the structured hook/body/cta
+      // shape when available, else fall back to the legacy content.
+      const text = composeLinkedInText(sc, post.content);
+      const result = await publishLinkedInText({
+        projectId: post.projectId,
+        text,
+      });
+      return {
+        success: true,
+        metaPostId: result.postUrn,
+        permalink: result.url,
+      };
+    }
+    if (ct === 'single_image') {
+      if (!post.visualUrl) {
+        return {
+          success: false,
+          error:
+            'LinkedIn single_image post needs an image. Generate or attach a visual before scheduling.',
+          isTransient: false,
+        };
+      }
+      const text =
+        (typeof sc?.copy === 'string' && sc.copy) ||
+        composeLinkedInText(sc, post.content);
+      const result = await publishLinkedInImage({
+        projectId: post.projectId,
+        text,
+        imageUrl: post.visualUrl,
+      });
+      return {
+        success: true,
+        metaPostId: result.postUrn,
+        permalink: result.url,
+      };
+    }
+    if (ct === 'carousel') {
+      const urls = (post.visualUrls as string[] | null) ?? [];
+      if (urls.length === 0) {
+        return {
+          success: false,
+          error:
+            'LinkedIn carousel needs slide images. Click "Generate slides" on the draft first.',
+          isTransient: false,
+        };
+      }
+      const slides = Array.isArray((sc as { slides?: unknown })?.slides)
+        ? ((sc as { slides: unknown[] }).slides as Record<string, unknown>[])
+        : [];
+      const titles = slides
+        .map((s) => (typeof s?.title === 'string' ? (s.title as string) : ''))
+        .filter(Boolean);
+      const coverCopy =
+        (typeof sc?.coverCopy === 'string' && sc.coverCopy) ||
+        composeLinkedInText(sc, post.content);
+      const result = await publishLinkedInCarousel({
+        projectId: post.projectId,
+        coverCopy,
+        imageUrls: urls,
+        slideTitles: titles,
+      });
+      return {
+        success: true,
+        metaPostId: result.postUrn,
+        permalink: result.url,
+      };
+    }
+    return {
+      success: false,
+      error: `LinkedIn contentType "${ct}" isn't supported yet.`,
+      isTransient: false,
+    };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    // LinkedIn 401 = token expired; 403 = scope missing. Both
+    // permanent for the retry loop — the founder must re-connect.
+    const looksAuth = /\b401\b|\b403\b|token|scope|expired/i.test(msg);
+    return {
+      success: false,
+      error: `LinkedIn publish failed: ${msg.slice(0, 240)}`,
+      isTransient: !looksAuth,
+    };
+  }
+}
+
+// Compose a LinkedIn-ready body from the structured text-post shape.
+// LinkedIn doesn't render markdown — plain text + line breaks
+// outperforms anything fancier. We string together hook → body
+// paragraphs → cta in the order Opus laid them out.
+function composeLinkedInText(
+  sc: Record<string, unknown> | null,
+  fallback: string,
+): string {
+  if (!sc) return (fallback ?? '').trim();
+  const hook = typeof sc.hook === 'string' ? sc.hook : '';
+  const body = Array.isArray(sc.body)
+    ? (sc.body as unknown[])
+        .filter((p): p is string => typeof p === 'string')
+        .join('\n\n')
+    : typeof sc.body === 'string'
+      ? sc.body
+      : '';
+  const cta = typeof sc.cta === 'string' ? sc.cta : '';
+  const composed = [hook, body, cta].filter(Boolean).join('\n\n').trim();
+  return composed || (fallback ?? '').trim();
+}
+
+// PR #66 — Sprint 7.0.9: Threads publisher. Uses the Meta token
+// from meta_integrations (Threads is part of the Meta platform).
+async function publishToThreads(
+  post: typeof scheduledPosts.$inferSelect,
+): Promise<PublishResult> {
+  const ct = post.contentType;
+  const sc = post.structuredContent as Record<string, unknown> | null;
+  try {
+    if (ct === 'photo') {
+      if (!post.visualUrl) {
+        return {
+          success: false,
+          error:
+            'Threads photo post needs an image. Generate or attach a visual before scheduling.',
+          isTransient: false,
+        };
+      }
+      const text =
+        (typeof sc?.content === 'string' && sc.content) || post.content || '';
+      const result = await publishThreadsPhoto({
+        projectId: post.projectId,
+        text,
+        imageUrl: post.visualUrl,
+      });
+      return {
+        success: true,
+        metaPostId: result.threadId,
+        permalink: result.url,
+      };
+    }
+    // text_post (default) — includes contentType=null legacy path.
+    if (ct === 'text_post' || !ct) {
+      const text =
+        (typeof sc?.content === 'string' && sc.content) || post.content || '';
+      const result = await publishThreadsText({
+        projectId: post.projectId,
+        text,
+      });
+      return {
+        success: true,
+        metaPostId: result.threadId,
+        permalink: result.url,
+      };
+    }
+    return {
+      success: false,
+      error: `Threads contentType "${ct}" isn't supported yet.`,
+      isTransient: false,
+    };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    const looksAuth = /\b401\b|\b403\b|scope|threads_basic|token/i.test(msg);
+    return {
+      success: false,
+      error: `Threads publish failed: ${msg.slice(0, 240)}`,
+      isTransient: !looksAuth,
     };
   }
 }

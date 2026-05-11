@@ -78,6 +78,20 @@ export async function postTweet(text: string): Promise<PostedTweet> {
 }
 
 /**
+ * Delete a previously-posted tweet. Used by the smoke-test endpoint
+ * (post → verify → delete) and by future "undo publish" flows.
+ *
+ * Throws on failure — the caller is responsible for surfacing the
+ * error. Twitter requires deleteTweet to use the same OAuth1.0a
+ * user context that posted the tweet; our env credentials cover
+ * that, but a tweet posted by a different account would 403.
+ */
+export async function deleteTweet(tweetId: string): Promise<void> {
+  const client = buildClient();
+  await client.v2.deleteTweet(tweetId);
+}
+
+/**
  * Post a thread (2-N tweets). Each tweet replies to the previous
  * one, producing a single canonical chain. Returns the root id so
  * the caller can persist a clickable permalink for the post.

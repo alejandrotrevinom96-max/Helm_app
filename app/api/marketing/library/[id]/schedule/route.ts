@@ -243,14 +243,43 @@ function unpostableReason(draft: {
   );
 
   // Non-Meta platforms.
+  // PR #66 — Sprint 7.0.9: LinkedIn + Threads now wired. We only
+  // check the content shape here; runtime connection health
+  // (token expired, scope missing, etc.) is surfaced when the
+  // publisher actually runs. That avoids two sources of truth
+  // and matches how Meta is handled — schedule trusts that an
+  // integration exists; publisher provides the human message
+  // when it doesn't.
   if (draft.platform === 'linkedin') {
-    return 'LinkedIn auto-publish isn\'t wired yet. Save the draft and copy it manually for now.';
+    if (ct === 'single_image' && !draft.visualUrl) {
+      return 'LinkedIn single_image post needs a visual. Use Generate\'s "+ Add visual" first.';
+    }
+    if (ct === 'carousel') {
+      const urls = Array.isArray(draft.visualUrls)
+        ? (draft.visualUrls as unknown[]).filter(
+            (u) => typeof u === 'string' && u.length > 0,
+          )
+        : [];
+      if (urls.length === 0) {
+        return 'LinkedIn carousel needs slide images. Click "Generate slides" on the draft first.';
+      }
+    }
+    return null;
   }
   if (draft.platform === 'reddit') {
-    return 'Reddit auto-publish isn\'t wired yet. Copy the title + body and post manually.';
+    return 'Reddit auto-publish isn\'t wired yet (requires app review). Copy the title + body and post manually.';
   }
   if (draft.platform === 'threads') {
-    return 'Threads auto-publish isn\'t wired yet. Sprint 7.0.9 will add this.';
+    if (ct === 'photo' && !draft.visualUrl) {
+      return 'Threads photo post needs a visual. Use Generate\'s "+ Add visual" first.';
+    }
+    // Length check — Threads caps at 500.
+    const text =
+      getStringField(draft.structuredContent, 'content') ?? '';
+    if (text.length > 500) {
+      return `Threads body is ${text.length} chars (over 500). Regenerate shorter.`;
+    }
+    return null;
   }
   if (draft.platform === 'x') {
     if (!xConfigured) {
