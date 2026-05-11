@@ -35,6 +35,9 @@ export const users = pgTable('users', {
   // The secret signs payloads with HMAC-SHA256 — receiver MUST verify it.
   webhookUrl: text('webhook_url'),
   webhookSecret: text('webhook_secret'),
+  // PR #58 — Sprint 7.0.2: opt-in for the Monday-morning Weekly Brief
+  // email. Defaults off so we never email a user who hasn't asked.
+  weeklyBriefEnabled: boolean('weekly_brief_enabled').default(false).notNull(),
 });
 
 // ===== Integrations =====

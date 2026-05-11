@@ -6,6 +6,7 @@ import { redirect } from 'next/navigation';
 import { getActiveProject, getAllUserProjects } from '@/lib/active-project';
 import { IntegrationsClient } from './client';
 import { MetaIntegrationCard } from './meta-integration-card';
+import { RedditCard } from './reddit-card';
 
 export default async function IntegrationsPage() {
   const supabase = await createClient();
@@ -54,6 +55,23 @@ export default async function IntegrationsPage() {
           <MetaIntegrationCard projectId={activeProject.id} />
         </div>
       )}
+
+      {/* PR #58 — Sprint 7.0.2: research sources need Reddit OAuth
+          for cloud-IP reliability. Separate section because Reddit
+          is user-scoped, not project-scoped. */}
+      <div className="max-w-6xl mx-auto px-4 md:px-8 pb-12">
+        <h2 className="font-display text-2xl font-light mb-2">
+          Research sources
+        </h2>
+        <p className="text-sm text-text-2 mb-6">
+          OAuth into the platforms Helm scans for audience signal.
+        </p>
+        <RedditCard
+          initiallyConnected={userIntegrations.some(
+            (i) => i.provider === 'reddit',
+          )}
+        />
+      </div>
     </>
   );
 }

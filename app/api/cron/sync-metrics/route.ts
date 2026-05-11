@@ -13,6 +13,7 @@ import { getVercelAnalytics } from '@/lib/integrations/vercel';
 import { getTableCount } from '@/lib/integrations/supabase-mgmt';
 import { getAdAccountInsights } from '@/lib/integrations/meta';
 import { generateWeeklyInsight } from '@/lib/research/generate-insight';
+import { generateAndSendBrief } from '@/lib/research/brief';
 import { sendWebhook } from '@/lib/webhooks/send';
 import { NextResponse } from 'next/server';
 
@@ -268,6 +269,62 @@ export async function GET(request: Request) {
     );
   }
 
+  // PR #58 — Sprint 7.0.2: piggyback the Monday Weekly Brief on
+  // this daily cron so we stay within the Vercel Hobby 2-cron cap.
+  // Brief fires only when:
+  //   - today is Monday (UTC)
+  //   - the user has weekly_brief_enabled = true
+  //   - the latest research_insight has briefSent = false
+  // The generator itself enforces idempotence, so a same-day re-run
+  // of the cron can't double-mail anyone.
+  let briefsSent = 0;
+  let briefsSkipped = 0;
+  let briefsFailed = 0;
+  const isMonday = new Date().getUTCDay() === 1;
+  if (isMonday) {
+    const optedIn = await db
+      .select({ id: users.id, email: users.email })
+      .from(users)
+      .where(eq(users.weeklyBriefEnabled, true));
+
+    // Iterate one user → one (oldest) active project at a time. A
+    // founder with multiple projects only gets one brief per Monday
+    // — the active project's. Multi-brief support is a Sprint 7.1
+    // problem; first we want signal that briefs are valuable at all.
+    for (const u of optedIn) {
+      const [project] = await db
+        .select({ id: projects.id })
+        .from(projects)
+        .where(and(eq(projects.userId, u.id), eq(projects.isActive, true)))
+        .limit(1);
+      if (!project) {
+        briefsSkipped++;
+        continue;
+      }
+      try {
+        const res = await generateAndSendBrief({
+          userId: u.id,
+          projectId: project.id,
+        });
+        if (res.success) briefsSent++;
+        else if (res.skipped) briefsSkipped++;
+        else {
+          briefsFailed++;
+          console.error(
+            `[CRON] brief failed for user=${u.id} project=${project.id}:`,
+            res.error,
+          );
+        }
+      } catch (e) {
+        briefsFailed++;
+        console.error(
+          `[CRON] brief crashed for user=${u.id} project=${project.id}:`,
+          e,
+        );
+      }
+    }
+  }
+
   return NextResponse.json({
     synced,
     projects: allProjects.length,
@@ -276,5 +333,11 @@ export async function GET(request: Request) {
     webhooksFailed,
     insightsGenerated,
     insightsDeferred: Math.max(0, stale.length - MAX_INSIGHTS_PER_RUN),
+    weeklyBrief: {
+      ran: isMonday,
+      sent: briefsSent,
+      skipped: briefsSkipped,
+      failed: briefsFailed,
+    },
   });
 }

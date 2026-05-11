@@ -30,6 +30,10 @@ import { eq, and, inArray } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 import { checkRateLimit } from '@/lib/rate-limit';
 import type { BrandBible } from '@/lib/types/brand';
+import {
+  getRedditAccessToken,
+  getUserAgent,
+} from '@/lib/integrations/reddit-oauth';
 
 export const maxDuration = 30;
 
@@ -52,27 +56,33 @@ interface SubredditSearchResponse {
   data: { children: SubredditSearchHit[] };
 }
 
-const REDDIT_UA =
-  process.env.REDDIT_USER_AGENT ?? 'Helm/1.0 (indie hacker tool)';
-
+// PR #58 — Sprint 7.0.2: prefer the authenticated `oauth.reddit.com`
+// endpoint when the founder has connected Reddit. The public JSON
+// API at `www.reddit.com` silently returns empty listings when the
+// caller IP belongs to a cloud provider (Vercel/AWS), which is why
+// Sprint 7.0.1 saw `discovered: 0` even with valid keywords.
 async function searchSubreddits(
   term: string,
   limit = 10,
+  accessToken: string | null,
 ): Promise<SubredditSearchHit['data'][]> {
-  const url = new URL('https://www.reddit.com/subreddits/search.json');
-  url.searchParams.set('q', term);
-  url.searchParams.set('limit', String(limit));
-  url.searchParams.set('include_over_18', 'off');
+  const ua = getUserAgent();
+  const path = `/subreddits/search.json?q=${encodeURIComponent(term)}&limit=${limit}&include_over_18=off`;
+  const url = accessToken
+    ? `https://oauth.reddit.com${path}`
+    : `https://www.reddit.com${path}`;
+  const headers: Record<string, string> = { 'User-Agent': ua };
+  if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
   try {
-    const res = await fetch(url.toString(), {
-      headers: { 'User-Agent': REDDIT_UA },
-      // Reddit's response is fine to cache for a few minutes — same
-      // founder hitting Discover twice in a row shouldn't re-bill us
-      // (well, it's free, but it's polite).
+    const res = await fetch(url, {
+      headers,
       next: { revalidate: 300 },
     });
     if (!res.ok) {
-      console.error(`[discover] Reddit search failed (${term}):`, res.status);
+      console.error(
+        `[discover] Reddit search failed (${term}, auth=${Boolean(accessToken)}):`,
+        res.status,
+      );
       return [];
     }
     const json: SubredditSearchResponse = await res.json();
@@ -253,12 +263,24 @@ export async function POST(request: Request) {
     );
   }
 
+  // PR #58 — Sprint 7.0.2: pull the founder's Reddit OAuth token if
+  // they've connected the account. When present we hit
+  // oauth.reddit.com (works from cloud IPs); when absent we fall
+  // back to www.reddit.com which is frequently rate-limited or
+  // blocked for cloud IPs.
+  const redditToken = await getRedditAccessToken(user.id);
+  if (!redditToken) {
+    warnings.push(
+      'Reddit not connected: using public API which often returns 0 results from cloud IPs. Connect Reddit in /integrations for reliable discovery.',
+    );
+  }
+
   // Fan out to Reddit. Run sequentially — Reddit is touchy about
   // bursts from a single User-Agent. 6 seeds × 10 results = at most
-  // 60 hits, well below the 100/min the public JSON API tolerates.
+  // 60 hits, well below the 100/min the API tolerates.
   const allHits: SubredditSearchHit['data'][] = [];
   for (const term of seedTerms) {
-    const hits = await searchSubreddits(term, 10);
+    const hits = await searchSubreddits(term, 10, redditToken);
     allHits.push(...hits);
   }
 
