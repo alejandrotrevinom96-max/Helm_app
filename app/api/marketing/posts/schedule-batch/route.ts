@@ -112,6 +112,8 @@ export async function POST(request: Request) {
       // Sprint-7.0.7 publisher dispatch all read the same source.
       contentType: generatedPosts.contentType,
       structuredContent: generatedPosts.structuredContent,
+      // PR #65 — Sprint 7.0.8: carry carousel slide images.
+      visualUrls: generatedPosts.visualUrls,
     })
     .from(generatedPosts)
     .innerJoin(projects, eq(projects.id, generatedPosts.projectId))
@@ -146,6 +148,8 @@ export async function POST(request: Request) {
       // scheduled side. Null for legacy pillar-variant drafts.
       contentType: d.contentType,
       structuredContent: d.structuredContent ?? null,
+      // PR #65 — Sprint 7.0.8: carry slide image URLs for carousels.
+      visualUrls: (d.visualUrls as string[] | null) ?? null,
     };
   });
 

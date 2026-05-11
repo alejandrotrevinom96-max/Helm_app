@@ -231,6 +231,12 @@ export const generatedPosts = pgTable('generated_posts', {
   // human-readable fallback string for backward compatibility.
   contentType: text('content_type'),
   structuredContent: jsonb('structured_content'),
+  // PR #65 — Sprint 7.0.8: array of slide image URLs for carousel
+  // drafts. One URL per slide in `structuredContent.slides`. Null
+  // for everything else (Reel, Photo, Text, etc.). The legacy
+  // `imageUrl` column stays the single-image source of truth for
+  // non-carousel posts.
+  visualUrls: jsonb('visual_urls').$type<string[]>(),
 });
 
 // ===== Research Findings =====
@@ -530,6 +536,10 @@ export const scheduledPosts = pgTable('scheduled_posts', {
   //     multi-image, Reel async upload, etc.).
   contentType: text('content_type'),
   structuredContent: jsonb('structured_content'),
+  // PR #65 — Sprint 7.0.8: carousel slide image URLs. Carried from
+  // generated_posts on schedule so the publisher cron has the
+  // images ready to push to Meta's carousel container endpoint.
+  visualUrls: jsonb('visual_urls').$type<string[]>(),
 });
 
 // ===== Meta Integrations =====

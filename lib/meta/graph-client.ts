@@ -215,6 +215,51 @@ export class MetaGraphClient {
     return this.request(`/${mediaId}?fields=permalink`);
   }
 
+  // ============ INSTAGRAM CAROUSEL (PR #65 — Sprint 7.0.8) ============
+  // Three-step posting:
+  //   1. For each slide image, create a child container with
+  //      is_carousel_item=true (no caption — the parent carries it).
+  //   2. Create a parent container with media_type=CAROUSEL and
+  //      children=<comma-separated child container ids>.
+  //   3. /media_publish on the parent (same endpoint as single
+  //      feed posts).
+  //
+  // Meta requires 2-10 slides; we enforce 2-8 upstream to leave
+  // headroom (Reel + Story flags don't compose with carousels).
+  // Container processing for each child is async like feed posts,
+  // but the parent container's FINISHED status implies every child
+  // is ready — so we only poll the parent.
+
+  async createInstagramCarouselItemContainer(
+    igBusinessId: string,
+    imageUrl: string,
+  ): Promise<{ id: string }> {
+    return this.request(`/${igBusinessId}/media`, {
+      method: 'POST',
+      body: JSON.stringify({
+        image_url: imageUrl,
+        is_carousel_item: true,
+      }),
+    });
+  }
+
+  async createInstagramCarouselContainer(
+    igBusinessId: string,
+    childContainerIds: string[],
+    caption?: string,
+  ): Promise<{ id: string }> {
+    return this.request(`/${igBusinessId}/media`, {
+      method: 'POST',
+      body: JSON.stringify({
+        media_type: 'CAROUSEL',
+        // Graph API expects the children list as a comma-separated
+        // string, NOT a JSON array — fight the obvious shape here.
+        children: childContainerIds.join(','),
+        caption: caption ?? '',
+      }),
+    });
+  }
+
   // ============ INSTAGRAM STORIES ============
   // Same 2-step pattern as feed posts (container → media_publish),
   // but the container is created with media_type=STORIES. Only image

@@ -33,6 +33,13 @@ interface ScheduleState {
   scheduledFor?: string;
 }
 
+interface SlideGenState {
+  kind: 'idle' | 'generating' | 'ready' | 'error';
+  urls: string[];
+  message?: string;
+  costUsd?: number;
+}
+
 export function StructuredDraftCard({
   platform,
   contentType,
@@ -46,6 +53,14 @@ export function StructuredDraftCard({
   // default cadence (one-click); the founder can still drag to a
   // specific slot in Calendar after.
   const [schedule, setSchedule] = useState<ScheduleState>({ kind: 'idle' });
+  // PR #65 — Sprint 7.0.8: carousel slide images. Generated on
+  // demand via the /generate-slides endpoint. URLs persist in the
+  // draft row server-side so a refresh would re-hydrate them; this
+  // state is the in-session cache for the current card.
+  const [slides, setSlides] = useState<SlideGenState>({
+    kind: 'idle',
+    urls: [],
+  });
 
   const handleCopy = async () => {
     if (structuredContent == null) return;
@@ -104,6 +119,57 @@ export function StructuredDraftCard({
     // draft for manual placement. The Calendar client picks it up
     // on mount and offers a "Drop here" affordance.
     window.location.href = `/marketing/calendar?draftId=${encodeURIComponent(draftId)}`;
+  };
+
+  // PR #65 — Sprint 7.0.8: kick off slide image generation. Each
+  // slide costs ~$0.05; we surface the total upfront so the
+  // founder consents to spend before the call fires.
+  const handleGenerateSlides = async () => {
+    if (!draftId || slides.kind === 'generating') return;
+    setSlides({ ...slides, kind: 'generating', message: undefined });
+    try {
+      const res = await fetch(
+        `/api/marketing/posts/${draftId}/generate-slides`,
+        { method: 'POST' },
+      );
+      const data = (await res.json()) as {
+        success?: boolean;
+        visualUrls?: (string | null)[];
+        slidesGenerated?: number;
+        slidesRequested?: number;
+        estimatedCostUsd?: number;
+        error?: string;
+        hint?: string;
+        failures?: { slideIndex: number; reason: string }[];
+      };
+      if (!res.ok || !data.success) {
+        setSlides({
+          kind: 'error',
+          urls: [],
+          message: data.error ?? data.hint ?? 'Slide generation failed',
+        });
+        return;
+      }
+      const urls = (data.visualUrls ?? []).filter(
+        (u): u is string => typeof u === 'string' && u.length > 0,
+      );
+      const partial =
+        (data.slidesGenerated ?? 0) < (data.slidesRequested ?? urls.length);
+      setSlides({
+        kind: partial ? 'error' : 'ready',
+        urls,
+        costUsd: data.estimatedCostUsd,
+        message: partial
+          ? `Partial: ${data.slidesGenerated}/${data.slidesRequested} slides generated. Retry to complete.`
+          : undefined,
+      });
+    } catch (e) {
+      setSlides({
+        kind: 'error',
+        urls: [],
+        message: e instanceof Error ? e.message : 'Network error',
+      });
+    }
   };
 
   // Object-shape gate. JSON.parse can return string / number / array
@@ -182,6 +248,18 @@ export function StructuredDraftCard({
         </div>
       )}
 
+      {/* PR #65 — Sprint 7.0.8: Carousel slide image generation
+          surface. Only renders for contentType='carousel' drafts;
+          everything else skips this block. */}
+      {contentType === 'carousel' && payload != null && (
+        <CarouselSlideImagesBlock
+          slideCount={countSlides(payload)}
+          state={slides}
+          onGenerate={handleGenerateSlides}
+          canGenerate={Boolean(draftId)}
+        />
+      )}
+
       {error ? (
         <div className="p-3 border border-danger/30 bg-danger/10 rounded text-sm text-danger">
           Generation failed: {error}
@@ -197,6 +275,79 @@ export function StructuredDraftCard({
       )}
     </GlassCard>
   );
+}
+
+// PR #65 — Sprint 7.0.8: carousel slide images UI block.
+function CarouselSlideImagesBlock({
+  slideCount,
+  state,
+  onGenerate,
+  canGenerate,
+}: {
+  slideCount: number;
+  state: SlideGenState;
+  onGenerate: () => void;
+  canGenerate: boolean;
+}) {
+  if (slideCount === 0) return null;
+  const estCost = (slideCount * 0.05).toFixed(2);
+  const hasUrls = state.urls.length > 0;
+  return (
+    <div className="mb-4 p-3 border border-border rounded-lg bg-bg-elev/40">
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-[10px] font-mono uppercase tracking-[0.1em] text-text-3">
+          Slide images
+          {hasUrls && (
+            <span className="ml-2 text-emerald-500">
+              ✓ {state.urls.length}/{slideCount} ready
+            </span>
+          )}
+        </div>
+        {state.kind !== 'ready' || state.urls.length < slideCount ? (
+          <button
+            type="button"
+            onClick={onGenerate}
+            disabled={!canGenerate || state.kind === 'generating'}
+            className="text-xs font-mono px-2 py-1 rounded bg-accent text-white hover:opacity-90 disabled:opacity-50"
+            title={`Flux Pro v1.1, 1:1, ~${slideCount} × $0.05 ≈ $${estCost}`}
+          >
+            {state.kind === 'generating'
+              ? `Generating ${slideCount} slides…`
+              : hasUrls
+                ? '↻ Regenerate'
+                : `🎨 Generate ${slideCount} slides ($${estCost})`}
+          </button>
+        ) : null}
+      </div>
+      {state.message && (
+        <div
+          className={`text-xs mb-2 ${
+            state.kind === 'error' ? 'text-danger' : 'text-text-2'
+          }`}
+        >
+          {state.message}
+        </div>
+      )}
+      {hasUrls && (
+        <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 gap-2">
+          {state.urls.map((url, i) => (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              key={`${i}-${url.slice(-20)}`}
+              src={url}
+              alt={`Slide ${i + 1}`}
+              className="w-full aspect-square object-cover rounded bg-bg"
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function countSlides(payload: Record<string, unknown>): number {
+  const slides = payload.slides;
+  return Array.isArray(slides) ? slides.length : 0;
 }
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {

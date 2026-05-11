@@ -19,6 +19,7 @@ import { scheduledPosts, metaIntegrations } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { MetaGraphClient, MetaApiError } from './graph-client';
 import { decryptToken } from '@/lib/crypto/token-encryption';
+import { isXConfigured, postTweet, postThread } from '@/lib/x/client';
 
 export interface PublishResult {
   success: boolean;
@@ -100,6 +101,14 @@ export async function publishPost(postId: string): Promise<PublishResult> {
     return { success: false, error: 'Post not found', isTransient: false };
   }
 
+  // PR #65 — Sprint 7.0.8: X (Twitter) publishes outside Meta —
+  // dispatch BEFORE loading the Meta integration so projects
+  // without an FB Page can still post tweets. The schedule
+  // endpoint validated content shape; we just call the API here.
+  if (post.platform === 'x') {
+    return await publishToX(post);
+  }
+
   const [integration] = await db
     .select()
     .from(metaIntegrations)
@@ -148,28 +157,17 @@ export async function publishPost(postId: string): Promise<PublishResult> {
   // validation, or a contentType we add later), fail PERMANENT here
   // so the founder sees a clear reason instead of cryptic Meta
   // errors after each retry.
+  // PR #65 — Sprint 7.0.8: dispatch refuses tightened. Carousel + X
+  // now have real handlers (below for Carousel; lib/x/client.ts for
+  // X — invoked from the X branch further down). LinkedIn / Reddit /
+  // Threads / UGC remain refused with concrete reasons until each
+  // platform's integration lands.
   const ct = post.contentType;
-  if (ct === 'carousel') {
-    return {
-      success: false,
-      error:
-        'Carousel auto-publish needs slide images. Sprint 7.0.8 will add slide-image generation. Copy the slides and post manually for now.',
-      isTransient: false,
-    };
-  }
   if (ct === 'ugc') {
     return {
       success: false,
       error:
         'UGC video auto-publish needs HeyGen integration (planned). Copy the script and record manually.',
-      isTransient: false,
-    };
-  }
-  if (ct === 'thread' || ct === 'single_tweet') {
-    return {
-      success: false,
-      error:
-        'X (Twitter) publishing needs a pay-per-use API key. Sprint 7.0.8 will wire this.',
       isTransient: false,
     };
   }
@@ -192,10 +190,10 @@ export async function publishPost(postId: string): Promise<PublishResult> {
       isTransient: false,
     };
   }
-  // Reel and Photo/Photo-on-FB flow through to the existing
-  // platform-specific paths below. community_post on Facebook falls
-  // through to the FB text path. Anything else with contentType=null
-  // is the legacy pillar-variant flow — also passes through.
+  // Reel / Photo / FB-photo / FB text / Carousel / X flow through
+  // to the platform-specific paths below. Anything else with
+  // contentType=null is the legacy pillar-variant flow — passes
+  // through as well.
 
   try {
     // ===== FACEBOOK =====
@@ -285,6 +283,99 @@ export async function publishPost(postId: string): Promise<PublishResult> {
           success: true,
           pendingPolling: true,
         };
+      }
+
+      // PR #65 — Sprint 7.0.8: Carousel branch. Sits between Reel
+      // and the single-image Photo/Story branch because it short-
+      // circuits the visualUrl check (carousels use visualUrls).
+      // Three-step posting per IG's API:
+      //   1. Create one child container per slide image with
+      //      is_carousel_item=true.
+      //   2. Create a parent CAROUSEL container referencing the
+      //      child IDs.
+      //   3. /media_publish on the parent.
+      // We persist the parent containerId in metaContainerId so
+      // retries within the 24h container window skip steps 1+2.
+      if (post.contentType === 'carousel') {
+        const urls = (post.visualUrls as string[] | null) ?? [];
+        if (urls.length < 2) {
+          return {
+            success: false,
+            error:
+              'Carousel needs at least 2 slide images. Generate them first ("Generate slides" button on the draft).',
+            isTransient: false,
+          };
+        }
+        if (urls.length > 10) {
+          return {
+            success: false,
+            error:
+              'Instagram supports a maximum of 10 carousel slides.',
+            isTransient: false,
+          };
+        }
+        if (urls.some((u) => typeof u !== 'string' || u.length === 0)) {
+          return {
+            success: false,
+            error:
+              'One or more slide image URLs are empty. Regenerate the slides.',
+            isTransient: false,
+          };
+        }
+
+        let parentContainerId = post.metaContainerId ?? null;
+        if (!parentContainerId) {
+          // Step 1: child containers (one per slide).
+          const childIds: string[] = [];
+          for (const imageUrl of urls) {
+            const child = await client.createInstagramCarouselItemContainer(
+              integration.instagramBusinessId,
+              imageUrl,
+            );
+            childIds.push(child.id);
+          }
+          // Step 2: parent carousel container.
+          const parent = await client.createInstagramCarouselContainer(
+            integration.instagramBusinessId,
+            childIds,
+            post.content,
+          );
+          parentContainerId = parent.id;
+          await db
+            .update(scheduledPosts)
+            .set({
+              metaContainerId: parentContainerId,
+              metaTargetType: 'instagram_feed',
+            })
+            .where(eq(scheduledPosts.id, postId));
+        }
+
+        // Wait for the parent to finish processing. The same
+        // helper used for single-image posts; carousel containers
+        // share the status_code lifecycle.
+        const wait = await waitForInstagramContainer(client, parentContainerId);
+        if (!wait.ready) {
+          return {
+            success: false,
+            error: wait.reason ?? 'Carousel container not ready',
+            isTransient: !(wait.reason ?? '').includes('expired'),
+          };
+        }
+
+        // Step 3: publish.
+        const published = await client.publishInstagramContainer(
+          integration.instagramBusinessId,
+          parentContainerId,
+        );
+
+        let permalink: string | undefined;
+        try {
+          const link = await client.getInstagramMediaPermalink(published.id);
+          permalink = link.permalink;
+        } catch {
+          // best-effort
+        }
+        return { success: true, metaPostId: published.id, permalink };
       }
 
       if (!post.visualUrl) {
@@ -517,6 +608,87 @@ export async function publishReelAfterProcessing(
       success: false,
       error: e instanceof Error ? e.message : 'Unknown error',
       isTransient: false,
+    };
+  }
+}
+
+// PR #65 — Sprint 7.0.8: X (Twitter) publisher. Uses lib/x/client
+// which wraps twitter-api-v2 with the founder's OAuth 1.0a creds.
+// X publishing doesn't share state with the Meta integrations
+// table — credentials live in env vars (X is one account per
+// deployment for now; multi-account support is a follow-up).
+async function publishToX(
+  post: typeof scheduledPosts.$inferSelect,
+): Promise<PublishResult> {
+  if (!isXConfigured()) {
+    return {
+      success: false,
+      error:
+        'X (Twitter) credentials not configured. Set X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_TOKEN_SECRET.',
+      isTransient: false,
+    };
+  }
+  const ct = post.contentType;
+  const sc = post.structuredContent as Record<string, unknown> | null;
+
+  try {
+    if (ct === 'single_tweet' || !ct) {
+      const text =
+        (typeof sc?.content === 'string' && sc.content) || post.content;
+      if (!text || text.length > 280) {
+        return {
+          success: false,
+          error: `Tweet body must be 1-280 chars (was ${text?.length ?? 0}).`,
+          isTransient: false,
+        };
+      }
+      const result = await postTweet(text);
+      return { success: true, metaPostId: result.id, permalink: result.url };
+    }
+
+    if (ct === 'thread') {
+      const tweetsRaw = (sc?.tweets ?? []) as unknown[];
+      const tweets = tweetsRaw.filter(
+        (t): t is string => typeof t === 'string' && t.length > 0,
+      );
+      if (tweets.length === 0) {
+        return {
+          success: false,
+          error: 'Thread body is empty. Regenerate the draft.',
+          isTransient: false,
+        };
+      }
+      const tooLong = tweets.findIndex((t) => t.length > 280);
+      if (tooLong !== -1) {
+        return {
+          success: false,
+          error: `Thread tweet ${tooLong + 1} is over 280 chars.`,
+          isTransient: false,
+        };
+      }
+      const result = await postThread(tweets);
+      return {
+        success: true,
+        metaPostId: result.rootId,
+        permalink: result.rootUrl,
+      };
+    }
+
+    return {
+      success: false,
+      error: `X contentType "${ct}" isn't supported yet.`,
+      isTransient: false,
+    };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    // 429 == rate limit (transient); the cron's retry policy will
+    // back off. Everything else (auth 401, malformed 400) is
+    // permanent — surface the API error string to the founder.
+    const isRateLimit = /\b429\b|rate.?limit/i.test(msg);
+    return {
+      success: false,
+      error: `X publish failed: ${msg.slice(0, 200)}`,
+      isTransient: isRateLimit,
     };
   }
 }

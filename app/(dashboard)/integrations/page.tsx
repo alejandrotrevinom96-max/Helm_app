@@ -7,6 +7,7 @@ import { getActiveProject, getAllUserProjects } from '@/lib/active-project';
 import { IntegrationsClient } from './client';
 import { MetaIntegrationCard } from './meta-integration-card';
 import { RedditCard } from './reddit-card';
+import { XCard } from './x-card';
 
 export default async function IntegrationsPage() {
   const supabase = await createClient();
@@ -71,6 +72,21 @@ export default async function IntegrationsPage() {
             (i) => i.provider === 'reddit',
           )}
         />
+      </div>
+
+      {/* PR #65 — Sprint 7.0.8: X (Twitter) publishing via the new
+          pay-per-use API. Credentials live in env vars (one X
+          account per deployment in this iteration; multi-account
+          per project is a follow-up). */}
+      <div className="max-w-6xl mx-auto px-4 md:px-8 pb-12">
+        <h2 className="font-display text-2xl font-light mb-2">
+          Auto-publishing (more platforms)
+        </h2>
+        <p className="text-sm text-text-2 mb-6">
+          Beyond Facebook + Instagram. Add credentials in Vercel to enable
+          each platform.
+        </p>
+        <XCard />
       </div>
     </>
   );

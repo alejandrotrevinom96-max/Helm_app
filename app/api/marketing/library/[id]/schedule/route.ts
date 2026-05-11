@@ -77,6 +77,10 @@ export async function POST(
       // surface the format. Null on legacy pillar-variant drafts.
       contentType: generatedPosts.contentType,
       structuredContent: generatedPosts.structuredContent,
+      // PR #65 — Sprint 7.0.8: carousel slide image URLs. Carried
+      // forward so the publisher cron can post the multi-image
+      // carousel without a roundtrip back to generated_posts.
+      visualUrls: generatedPosts.visualUrls,
     })
     .from(generatedPosts)
     .innerJoin(projects, eq(projects.id, generatedPosts.projectId))
@@ -177,6 +181,8 @@ export async function POST(
       // PR #63 — Sprint 7.0.6: copy structured-draft metadata.
       contentType: draft.contentType,
       structuredContent: draft.structuredContent ?? null,
+      // PR #65 — Sprint 7.0.8: carry slide image URLs for carousels.
+      visualUrls: (draft.visualUrls as string[] | null) ?? null,
     })
     .returning();
 
@@ -220,11 +226,23 @@ function unpostableReason(draft: {
   contentType: string | null;
   visualUrl?: string | null;
   videoUrl?: string | null;
+  visualUrls?: unknown;
+  structuredContent?: unknown;
 }): string | null {
   const ct = draft.contentType;
   if (!ct) return null; // legacy plain-text — existing flow handles it
 
-  // Non-Meta platforms: no publisher wired yet.
+  // PR #65 — Sprint 7.0.8: X is now postable when env creds are
+  // configured. We probe the env var here (server-side); if missing
+  // we refuse the schedule rather than letting the cron fail.
+  const xConfigured = Boolean(
+    process.env.X_API_KEY &&
+      process.env.X_API_SECRET &&
+      process.env.X_ACCESS_TOKEN &&
+      process.env.X_ACCESS_TOKEN_SECRET,
+  );
+
+  // Non-Meta platforms.
   if (draft.platform === 'linkedin') {
     return 'LinkedIn auto-publish isn\'t wired yet. Save the draft and copy it manually for now.';
   }
@@ -235,7 +253,33 @@ function unpostableReason(draft: {
     return 'Threads auto-publish isn\'t wired yet. Sprint 7.0.9 will add this.';
   }
   if (draft.platform === 'x') {
-    return 'X (Twitter) auto-publish needs a pay-per-use API key. Sprint 7.0.8 will wire this.';
+    if (!xConfigured) {
+      return 'X (Twitter) publishing needs API credentials (X_API_KEY + secrets) configured server-side.';
+    }
+    // single_tweet + thread both supported. Other types fall through.
+    if (ct === 'single_tweet') {
+      const text =
+        getStringField(draft.structuredContent, 'content') ?? '';
+      if (!text) {
+        return 'Tweet body is empty. Regenerate the draft.';
+      }
+      if (text.length > 280) {
+        return `Tweet is ${text.length} chars (over 280). Regenerate shorter.`;
+      }
+      return null;
+    }
+    if (ct === 'thread') {
+      const tweets = getThreadTweets(draft.structuredContent);
+      if (tweets.length === 0) {
+        return 'Thread body is empty. Regenerate the draft.';
+      }
+      const tooLong = tweets.findIndex((t) => t.length > 280);
+      if (tooLong !== -1) {
+        return `Thread tweet ${tooLong + 1} is over 280 chars. Regenerate.`;
+      }
+      return null;
+    }
+    return `Don't know how to publish "${ct}" on X yet.`;
   }
 
   // Instagram & Facebook formats.
@@ -246,7 +290,21 @@ function unpostableReason(draft: {
     return null;
   }
   if (ct === 'carousel') {
-    return 'Carousel auto-publish needs slide images (one per slide). Sprint 7.0.8 will add slide-image generation; for now copy the slides and post manually.';
+    // PR #65 — Sprint 7.0.8: now postable when slide images are
+    // generated. We require one URL per slide.
+    const slides = getSlideCount(draft.structuredContent);
+    const urls = Array.isArray(draft.visualUrls)
+      ? (draft.visualUrls as unknown[]).filter(
+          (u) => typeof u === 'string' && u.length > 0,
+        )
+      : [];
+    if (slides === 0) {
+      return 'Carousel has no slides. Regenerate the draft.';
+    }
+    if (urls.length < slides) {
+      return `Carousel has ${slides} slides but only ${urls.length} slide image(s). Click "Generate slides" on the draft first.`;
+    }
+    return null;
   }
   if (ct === 'photo' || ct === 'single_image') {
     if (!draft.visualUrl) {
@@ -270,4 +328,22 @@ function unpostableReason(draft: {
 
   // Unknown contentType — refuse rather than guess.
   return `Don't know how to publish "${ct}" on ${draft.platform} yet. Copy manually for now.`;
+}
+
+// Tiny helpers for structuredContent shape introspection.
+function getSlideCount(structured: unknown): number {
+  if (!structured || typeof structured !== 'object') return 0;
+  const slides = (structured as { slides?: unknown }).slides;
+  return Array.isArray(slides) ? slides.length : 0;
+}
+function getStringField(structured: unknown, key: string): string | null {
+  if (!structured || typeof structured !== 'object') return null;
+  const v = (structured as Record<string, unknown>)[key];
+  return typeof v === 'string' ? v : null;
+}
+function getThreadTweets(structured: unknown): string[] {
+  if (!structured || typeof structured !== 'object') return [];
+  const tweets = (structured as { tweets?: unknown }).tweets;
+  if (!Array.isArray(tweets)) return [];
+  return tweets.filter((t): t is string => typeof t === 'string');
 }
