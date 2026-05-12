@@ -51,12 +51,84 @@ interface Props {
 
 type Phase = 'generating' | 'done' | 'failed';
 
+// PR #75 — Sprint 7.2C hotfix: error kinds shared with
+// /api/ai/generate-structured (and /api/research/analyze-brand
+// via PR #72). The endpoint now categorizes its failures so this
+// screen can render specific, actionable copy instead of "Algo
+// falló" — important for the wizard's WOW moment where a generic
+// error loses the founder right at the finish line.
+type ErrorKind =
+  | 'overloaded'
+  | 'rate_limit'
+  | 'timeout'
+  | 'json'
+  | 'auth'
+  | 'insufficient_context'
+  | 'unknown';
+
+interface CategorizedError {
+  message: string;
+  kind: ErrorKind;
+  retry: boolean;
+  hint: string;
+}
+
+const ERROR_DISPLAY: Record<
+  ErrorKind,
+  { icon: string; title: string; defaultHint: string }
+> = {
+  overloaded: {
+    icon: '⏳',
+    title: 'Anthropic está saturado',
+    defaultHint:
+      'Esto es temporal — esperá ~1 minuto y reintentá. Generalmente funciona al segundo intento.',
+  },
+  rate_limit: {
+    icon: '🚦',
+    title: 'Demasiadas requests muy rápido',
+    defaultHint: 'Esperá ~30 segundos y dale otra vez.',
+  },
+  timeout: {
+    icon: '⏱️',
+    title: 'La generación tardó demasiado',
+    defaultHint:
+      'Probable que el contexto es muy denso. Reintentá — la red pudo ser el problema.',
+  },
+  json: {
+    icon: '🔧',
+    title: 'Opus devolvió output malformado',
+    defaultHint:
+      'Esto es transient — reintentá, casi siempre funciona al segundo.',
+  },
+  auth: {
+    icon: '🔐',
+    title: 'Problema técnico con el servicio AI',
+    defaultHint:
+      'No es algo que puedas resolver vos — contactanos por soporte.',
+  },
+  insufficient_context: {
+    icon: '📝',
+    title: 'Falta brand context',
+    defaultHint:
+      'Volvé al step de Brand y agregá niche + audience. Eso le da a Opus material para trabajar.',
+  },
+  unknown: {
+    icon: '😞',
+    title: 'Algo falló al generar',
+    defaultHint:
+      'Reintentá una vez más — si persiste, escribinos con el detalle.',
+  },
+};
+
 export function FirstContentClient({ projectId, seedPrompt }: Props) {
   const router = useRouter();
   const [phase, setPhase] = useState<Phase>('generating');
   const [draft, setDraft] = useState<Draft | null>(null);
   const [elapsed, setElapsed] = useState(0);
-  const [error, setError] = useState<string | null>(null);
+  // PR #75 — Sprint 7.2C hotfix: structured error so the fail UI
+  // can branch on kind (overloaded vs timeout vs insufficient
+  // context). Null when no error has happened yet.
+  const [error, setError] = useState<CategorizedError | null>(null);
   // Same Strict-Mode guard pattern as the research step. Without
   // it, dev double-mount fires the generation twice and burns a
   // duplicate Opus call.
@@ -90,21 +162,72 @@ export function FirstContentClient({ projectId, seedPrompt }: Props) {
           prompt: seedPrompt.slice(0, 1000),
         }),
       });
+      // PR #75 — Sprint 7.2C hotfix: the endpoint now returns
+      // errorKind + hint + retry at the top level when zero drafts
+      // succeeded. Per-draft errors also carry errorKind for the
+      // partial-failure path, which we don't hit here (we only ask
+      // for one type) but the type stays compatible.
       const data = (await res.json()) as {
         success?: boolean;
-        drafts?: Draft[];
+        drafts?: Array<
+          Draft & {
+            errorKind?: ErrorKind;
+            errorHint?: string;
+            errorRetry?: boolean;
+            error?: string;
+            structuredContent?: StructuredDraft | null;
+          }
+        >;
         error?: string;
+        errorKind?: ErrorKind;
         hint?: string;
+        retry?: boolean;
       };
-      if (!res.ok || !data.success || !data.drafts?.[0]) {
-        const msg = [data.error, data.hint].filter(Boolean).join(' — ');
-        setError(msg || 'No pudimos generar el post');
+      // Total failure: endpoint returns success=false with the
+      // categorized kind. Old behavior was success=true even when
+      // every draft failed — see the route's PR #75 comment.
+      if (!res.ok || !data.success) {
+        const kind: ErrorKind = data.errorKind ?? 'unknown';
+        setError({
+          kind,
+          message: data.error ?? 'No pudimos generar el post',
+          retry: data.retry ?? true,
+          hint:
+            data.hint ?? ERROR_DISPLAY[kind].defaultHint,
+        });
+        setPhase('failed');
+        return;
+      }
+      // Defensive: success=true but the first draft has no
+      // structured content (shouldn't happen post-7.2C, but guard
+      // anyway so old responses still degrade cleanly).
+      if (
+        !data.drafts?.[0] ||
+        data.drafts[0].structuredContent == null
+      ) {
+        const perDraft = data.drafts?.[0];
+        const kind: ErrorKind = perDraft?.errorKind ?? 'unknown';
+        setError({
+          kind,
+          message: perDraft?.error ?? 'Draft no se generó',
+          retry: perDraft?.errorRetry ?? true,
+          hint:
+            perDraft?.errorHint ?? ERROR_DISPLAY[kind].defaultHint,
+        });
         setPhase('failed');
         return;
       }
 
       const firstDraft = data.drafts[0];
-      setDraft(firstDraft);
+      // The extended draft shape carries optional error fields; strip
+      // them when storing — the rendering path only cares about
+      // structuredContent at this point.
+      setDraft({
+        id: firstDraft.id,
+        contentType: firstDraft.contentType,
+        displayName: firstDraft.displayName,
+        structuredContent: firstDraft.structuredContent as StructuredDraft,
+      });
 
       // Persist + mark whole wizard complete in one POST. Bumps
       // users.onboardingStep=99 + hasCompletedOnboarding=true so
@@ -123,7 +246,16 @@ export function FirstContentClient({ projectId, seedPrompt }: Props) {
 
       setPhase('done');
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Network error');
+      // Network errors don't come from Anthropic so they don't get
+      // a categorized kind from the helper — bucket them as
+      // 'unknown' with the actual message preserved.
+      const message = e instanceof Error ? e.message : 'Network error';
+      setError({
+        kind: 'unknown',
+        message,
+        retry: true,
+        hint: ERROR_DISPLAY.unknown.defaultHint,
+      });
       setPhase('failed');
     }
   };
@@ -174,31 +306,65 @@ export function FirstContentClient({ projectId, seedPrompt }: Props) {
 
   // ── PHASE: FAILED ─────────────────────────────────────────────
   if (phase === 'failed') {
+    const kind = error?.kind ?? 'unknown';
+    const display = ERROR_DISPLAY[kind];
+    const isInsufficient = kind === 'insufficient_context';
     return (
       <div className="text-center py-8">
         <div className="text-5xl mb-3" aria-hidden>
-          😞
+          {display.icon}
         </div>
         <h1 className="font-display text-2xl font-light mb-2">
-          Algo falló al generar
+          {display.title}
         </h1>
-        <p className="text-text-3 mb-2 max-w-md mx-auto">
-          {error ?? 'Generation failed.'}
+        {error?.message && (
+          <p className="text-text-3 text-xs mb-2 max-w-md mx-auto font-mono">
+            {error.message.slice(0, 200)}
+          </p>
+        )}
+        <p className="text-text-2 text-sm mb-6 max-w-md mx-auto">
+          {error?.hint ?? display.defaultHint}
         </p>
-        <p className="text-text-3 text-sm mb-6 max-w-md mx-auto">
-          Podés generar contenido manualmente desde /marketing/generate. Tu
-          brand context y research scan ya quedaron guardados.
-        </p>
+
+        {/* PR #75 — Sprint 7.2C hotfix: insufficient_context gets a
+            distinct CTA back to the brand step (the gap is upstream,
+            not in the generation pass) plus a one-line "why this
+            matters" reminder. */}
+        {isInsufficient && (
+          <div className="max-w-md mx-auto mb-6 p-4 bg-bg-elev/40 rounded-lg border border-border text-sm text-text-2">
+            <strong className="text-text-1">Tip:</strong> el step de Brand
+            toma ~2 minutos pero impacta TODO lo que Helm genere después.
+            Vale la pena.
+          </div>
+        )}
+
         <div className="flex gap-3 justify-center flex-wrap">
-          <Button onClick={() => void generate()}>Reintentar</Button>
-          <button
-            type="button"
-            onClick={skipToLibrary}
-            className="px-4 py-2 border border-border rounded-lg text-sm hover:border-border-bright"
-          >
-            Saltar a Marketing
-          </button>
+          {error?.retry && (
+            <Button onClick={() => void generate()}>Reintentar</Button>
+          )}
+          {isInsufficient ? (
+            <button
+              type="button"
+              onClick={() => router.push('/onboarding/brand')}
+              className="px-4 py-2 border border-border rounded-lg text-sm hover:border-border-bright"
+            >
+              Volver al step de Brand →
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={skipToLibrary}
+              className="px-4 py-2 border border-border rounded-lg text-sm hover:border-border-bright"
+            >
+              Saltar a Marketing →
+            </button>
+          )}
         </div>
+
+        <p className="text-xs text-text-3 mt-6">
+          Tu onboarding está casi completo. Podés generar contenido más tarde
+          desde /marketing/generate.
+        </p>
       </div>
     );
   }

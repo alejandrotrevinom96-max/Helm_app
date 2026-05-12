@@ -26,6 +26,11 @@ import { NextResponse } from 'next/server';
 import { anthropic, MODELS, cachedSystem } from '@/lib/ai/claude';
 import { trackUsage } from '@/lib/ai/usage-tracker';
 import { checkRateLimit } from '@/lib/rate-limit';
+import {
+  categorizeAnthropicError,
+  describeError,
+  type ErrorKind,
+} from '@/lib/ai/categorize-error';
 import type { BrandBible } from '@/lib/types/brand';
 
 export const maxDuration = 60;
@@ -42,12 +47,21 @@ const VALID_PLATFORMS = new Set([
   'x',
 ]);
 
+// PR #75 — Sprint 7.2C hotfix: per-draft error payloads now carry
+// a categorized errorKind + actionable hint so callers (the
+// onboarding wizard's step 5 in particular) can render specific
+// states like "Anthropic is overloaded, retry in 60s" instead of
+// the previous generic "Algo falló".
 interface DraftPayload {
   id: string;
   contentType: string;
   displayName: string;
   structuredContent: unknown;
+  // When the per-type Opus call failed: kind + raw message + hint.
   error?: string;
+  errorKind?: ErrorKind;
+  errorHint?: string;
+  errorRetry?: boolean;
 }
 
 function brandContextSummary(bible: BrandBible | null): string {
@@ -258,7 +272,8 @@ ${JSON.stringify(template.structureSchema, null, 2)}
 Return STRICT JSON matching the schema. No markdown fences, no prose outside JSON.`;
 
     let parsed: unknown = null;
-    let parseError: string | null = null;
+    let typeErrorKind: ErrorKind | null = null;
+    let typeErrorMsg: string | null = null;
     try {
       const response = await anthropic.messages.create({
         model: MODELS.OPUS,
@@ -275,28 +290,55 @@ Return STRICT JSON matching the schema. No markdown fences, no prose outside JSO
         projectId,
       });
 
-      const textBlock = response.content.find((b) => b.type === 'text');
-      const raw = textBlock?.type === 'text' ? textBlock.text.trim() : '';
-      const cleaned = raw
-        .replace(/^```(?:json)?\s*/i, '')
-        .replace(/\s*```$/i, '')
-        .trim();
-      parsed = JSON.parse(cleaned);
+      // PR #75 — Sprint 7.2C hotfix: explicit max_tokens guard. The
+      // 2500-token ceiling here is tight for some carousel templates;
+      // a stop_reason='max_tokens' truncation produces invalid JSON
+      // that the parser blames as a parse error. Surface this as its
+      // own categorized failure so the wizard can render a clearer
+      // retry CTA.
+      if (response.stop_reason === 'max_tokens') {
+        typeErrorKind = 'json';
+        typeErrorMsg =
+          'Opus hit the max_tokens ceiling — output truncated before completion.';
+        console.error(
+          `[generate-structured] ${platform}/${template.type} truncated at max_tokens`,
+        );
+      } else {
+        const textBlock = response.content.find((b) => b.type === 'text');
+        const raw = textBlock?.type === 'text' ? textBlock.text.trim() : '';
+        const cleaned = raw
+          .replace(/^```(?:json)?\s*/i, '')
+          .replace(/\s*```$/i, '')
+          .trim();
+        parsed = JSON.parse(cleaned);
+      }
     } catch (err) {
-      parseError = err instanceof Error ? err.message : String(err);
+      // PR #75 — Sprint 7.2C hotfix: categorize instead of dropping
+      // a raw error string. The shared helper distinguishes between
+      // 529 overloaded (retryable in ~60s), 429 rate limit (back off),
+      // 504 timeout (retryable), 502 malformed JSON (transient),
+      // 401 auth (NOT user-fixable), and unknown.
+      const cat = categorizeAnthropicError(err);
+      typeErrorKind = cat.kind;
+      typeErrorMsg = cat.message;
       console.error(
-        `[generate-structured] ${platform}/${template.type} failed:`,
-        parseError,
+        `[generate-structured] ${platform}/${template.type} failed (${cat.kind}):`,
+        typeErrorMsg,
       );
     }
 
     if (!parsed) {
+      const finalKind = typeErrorKind ?? 'unknown';
+      const desc = describeError(finalKind);
       drafts.push({
         id: '',
         contentType: template.type,
         displayName: template.displayName,
         structuredContent: null,
-        error: parseError ?? 'Empty response',
+        error: typeErrorMsg ?? desc.error,
+        errorKind: finalKind,
+        errorHint: desc.hint,
+        errorRetry: desc.retry,
       });
       continue;
     }
@@ -327,10 +369,47 @@ Return STRICT JSON matching the schema. No markdown fences, no prose outside JSO
     });
   }
 
+  // PR #75 — Sprint 7.2C hotfix: top-level success/failure
+  // disambiguation. Before this commit the endpoint returned
+  // success=true even when every per-type Opus call had failed,
+  // forcing clients to inspect drafts[].structuredContent for null.
+  // The wizard's first-content step was doing exactly that wrong —
+  // success=true + drafts[0].structuredContent=null produced a
+  // rendered carousel with empty slides.
+  //
+  // Now: ANY successful draft → success=true (preserves existing
+  // partial-success semantics for /marketing/generate which submits
+  // multiple types). ZERO successful drafts → success=false with the
+  // categorized kind of the first failure (they're usually all the
+  // same — if Opus is overloaded, every loop iteration hits the
+  // same 529).
+  const successful = drafts.filter((d) => d.structuredContent != null);
+  if (successful.length === 0 && drafts.length > 0) {
+    const first = drafts[0];
+    const kind = (first.errorKind ?? 'unknown') as ErrorKind;
+    const desc = describeError(kind);
+    return NextResponse.json(
+      {
+        success: false,
+        error: desc.error,
+        errorKind: kind,
+        retry: desc.retry,
+        retryAfterSeconds: desc.retryAfterSeconds,
+        hint: desc.hint,
+        // Also include the per-type drafts so the legacy
+        // /marketing/generate UI can still render its per-type cards
+        // with categorized errors even on a total failure.
+        drafts,
+        typesGenerated: [],
+      },
+      { status: desc.status },
+    );
+  }
+
   return NextResponse.json({
     success: true,
     drafts,
-    typesGenerated: drafts.map((d) => d.contentType),
+    typesGenerated: successful.map((d) => d.contentType),
   });
 }
 
