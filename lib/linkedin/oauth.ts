@@ -17,6 +17,38 @@ export const LINKEDIN_SCOPES = [
   'w_member_social',
 ];
 
+// PR #79 — Sprint 7.5.1 hotfix: tolerant scope string parser.
+//
+// LinkedIn's token response `scope` field is INCONSISTENTLY formatted
+// across the v2 API era — some versions of their token endpoint
+// return it space-separated (RFC 6749 §3.3 standard:
+// "openid profile email w_member_social"), others comma-separated
+// ("openid,profile,email,w_member_social"), and current rollouts mix
+// the two when the consent screen and the token endpoint are on
+// different deploy versions.
+//
+// PR #66 originally did `scope.split(' ')` which produced
+// `['openid,profile,email,w_member_social']` (a SINGLE-element array
+// with commas inside the string) whenever LinkedIn returned commas —
+// breaking every `.includes('w_member_social')` check downstream.
+// The /integrations LinkedInCard then permanently rendered
+// "MISSING W_MEMBER_SOCIAL" for users who actually had the scope.
+//
+// This helper splits on commas AND whitespace, trims+lowercases each
+// token, and drops empties. Idempotent: re-parsing an already-parsed
+// array (joined back into a string) returns the same array.
+export function parseScopes(raw: string | string[] | undefined | null): string[] {
+  if (!raw) return [];
+  // Some legacy DB rows store the scope as a single-element string
+  // array because of the original bug. Treat that array as a string
+  // and re-parse — lazy fix without a migration.
+  const flat = Array.isArray(raw) ? raw.join(' ') : raw;
+  return flat
+    .split(/[,\s]+/)
+    .map((s) => s.trim().toLowerCase())
+    .filter((s) => s.length > 0);
+}
+
 const AUTH_URL = 'https://www.linkedin.com/oauth/v2/authorization';
 const TOKEN_URL = 'https://www.linkedin.com/oauth/v2/accessToken';
 const USERINFO_URL = 'https://api.linkedin.com/v2/userinfo';

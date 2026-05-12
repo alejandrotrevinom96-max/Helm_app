@@ -17,6 +17,7 @@ import {
   exchangeCodeForTokens,
   fetchUserinfo,
   getRedirectUri,
+  parseScopes,
 } from '@/lib/linkedin/oauth';
 import { encryptToken } from '@/lib/crypto/token-encryption';
 
@@ -92,7 +93,15 @@ export async function GET(request: Request) {
   // LinkedIn token responses set `expires_in` (seconds). Stamp a
   // little early (30s) to dodge clock skew on the publisher side.
   const expiresAt = new Date(Date.now() + (tokens.expires_in - 30) * 1000);
-  const scopes = tokens.scope ? tokens.scope.split(' ') : [];
+  // PR #79 — Sprint 7.5.1 hotfix: parseScopes tolerates LinkedIn's
+  // inconsistent separator. Pre-hotfix this was `split(' ')` which
+  // produced a single-element array when LinkedIn returned commas,
+  // breaking every downstream `.includes('w_member_social')` check.
+  const scopes = parseScopes(tokens.scope);
+  console.log(
+    '[linkedin-callback] scope parsed',
+    JSON.stringify({ raw: tokens.scope, parsed: scopes }),
+  );
 
   await db
     .insert(linkedinIntegrations)
