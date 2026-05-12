@@ -1234,6 +1234,67 @@ export const researchCache = pgTable('research_cache', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
+// PR #74 — Sprint 7.2B: 5-step onboarding wizard state.
+//
+// IMPORTANT: this table is ADDITIVE — it does NOT replace the
+// existing `users.hasCompletedOnboarding / onboardingStep /
+// onboardingCompletedAt` columns, which the old overlay-style
+// OnboardingWizard (components/onboarding/wizard.tsx) still
+// reads/writes via /api/onboarding/progress.
+//
+// The new wizard updates BOTH sources of truth:
+//   - users.onboardingStep ← integer per the legacy contract
+//     (0=not started, 1-4=in flight, 99=completed/skipped). The
+//     dashboard layout already keys off `< 99` for the overlay
+//     wizard, so flipping to 99 on first-content completion makes
+//     the legacy overlay disappear for users who finished the new
+//     wizard.
+//   - onboarding_progress.{step}At ← granular timestamps for
+//     funnel analytics (which steps users skip, how long each
+//     takes). Lives on this table so users.* stays minimal.
+//
+// brandAnswers captures the onboarding inputs verbatim
+// ({ niche, audience, tone, oneLiner }) so downstream flows can
+// rehydrate the founder's original phrasing even after we merge
+// them into the canonical BrandBible shape.
+export const onboardingProgress = pgTable('onboarding_progress', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').notNull().unique(),
+
+  // 'welcome' | 'project' | 'brand' | 'research' | 'first-content'
+  // | 'completed'
+  currentStep: text('current_step').default('welcome').notNull(),
+
+  // Per-step completion timestamps. Column names match the wizard
+  // step keys (with hyphen → camelCase: first-content → firstContent)
+  // so the API can map step→column safely.
+  welcomeAt: timestamp('welcome_at'),
+  projectAt: timestamp('project_at'),
+  brandAt: timestamp('brand_at'),
+  researchAt: timestamp('research_at'),
+  firstContentAt: timestamp('first_content_at'),
+  completedAt: timestamp('completed_at'),
+
+  // The project the founder created/picked during step 2. Soft
+  // ref — if the project is deleted later, we keep the history
+  // pointer null-ish rather than cascading the row away.
+  primaryProjectId: uuid('primary_project_id'),
+  firstDraftId: uuid('first_draft_id'),
+
+  // Array of step keys the founder explicitly skipped (e.g.
+  // ['brand', 'research']). Lets us nudge them later to fill
+  // gaps without retraining the whole flow.
+  skippedSteps: jsonb('skipped_steps').$type<string[]>().default([]),
+
+  // Verbatim wizard answers — { niche?, audience?, tone?, oneLiner? }.
+  // Captured here even when also merged into projects.brandContext
+  // so the founder's original phrasing survives BrandBible edits.
+  brandAnswers: jsonb('brand_answers'),
+
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
 // PR #72 — Sprint 7.2A hotfix: idempotency tracker for the
 // /api/research/analyze-brand POST. The original endpoint kicked off
 // Opus on every call — a re-click during the 30s window, a
@@ -1377,3 +1438,4 @@ export type CompassTask = typeof compassTasks.$inferSelect;
 export type CompassBlindSpot = typeof compassBlindSpots.$inferSelect;
 export type CompassDecision = typeof compassDecisions.$inferSelect;
 export type BrandAnalysisJob = typeof brandAnalysisJobs.$inferSelect;
+export type OnboardingProgressRow = typeof onboardingProgress.$inferSelect;
