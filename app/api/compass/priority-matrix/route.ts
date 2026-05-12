@@ -288,13 +288,17 @@ Output shape:
 }
 
 Discipline:
-- 8-12 items. Mix across the four quadrants (don't pile everything in "do_now").
+- Return EXACTLY 8 items. (Sprint 7.1B hotfix — reduced from 8-12 to keep
+  output bounded; max_tokens truncated the JSON mid-string at 12 items.)
+- Mix across the four quadrants (don't pile everything in "do_now").
 - Title is action-oriented ("Launch X", not "More content about X").
 - sourceContext is REQUIRED — never invent reasons. Cite the actual pain point / benchmark opp / competitor gap.
 - Refuse generic advice ("be authentic", "engage more", "increase posting frequency"). If a move isn't concrete, drop it.
 - Senior strategist tone — brutal honesty over fluff.
 - Impact 0-100: how much this moves the niche-dominance needle.
-- Effort 0-100: time + resources to ship the first version.`;
+- Effort 0-100: time + resources to ship the first version.
+- Keep reasoning + description compact — every word counts against the
+  token budget. Two sentences each, max.`;
 
   const userMessage = `BRAND
 Name: ${project.name}
@@ -340,10 +344,17 @@ ${recentPosts.length === 0 ? '(none yet)' : recentPosts.slice(0, 10).map(postSni
 Generate the matrix. JSON only.`;
 
   let parsed: { items?: OpusItem[] } | null = null;
+  let rawOutput = '';
   try {
+    // Sprint 7.1B hotfix: bumped max_tokens 4000 → 8000. With ~8 items
+    // × the structured schema (title + description + reasoning +
+    // sourceContext + suggestedAction etc.) the JSON output runs
+    // ~10-14k chars, and 4000 tokens was clipping it mid-string.
+    // 8000 leaves comfortable headroom and we still detect truncation
+    // explicitly below as defense-in-depth.
     const response = await anthropic.messages.create({
       model: MODELS.OPUS,
-      max_tokens: 4000,
+      max_tokens: 8000,
       system: cachedSystem(systemPrompt),
       messages: [{ role: 'user', content: userMessage }],
     });
@@ -354,15 +365,39 @@ Generate the matrix. JSON only.`;
       userId: user.id,
       projectId,
     });
+
+    // Explicit truncation guard. If Opus stops because it hit the
+    // token cap, the JSON is by definition malformed — fail fast
+    // with an actionable reason instead of feeding a half-string
+    // into JSON.parse and surfacing "Unexpected end of JSON input".
+    if (response.stop_reason === 'max_tokens') {
+      console.error(
+        '[priority-matrix] Opus hit max_tokens; output too long for the schema.',
+      );
+      return NextResponse.json(
+        {
+          error:
+            'Matrix output too long — Opus hit the token ceiling. Try regenerating; if it keeps failing, the brand context is unusually rich and we need to shorten the prompt.',
+        },
+        { status: 502 },
+      );
+    }
+
     const textBlock = response.content.find((b) => b.type === 'text');
-    const raw = textBlock?.type === 'text' ? textBlock.text : '';
-    parsed = JSON.parse(cleanJson(raw)) as { items?: OpusItem[] };
+    rawOutput = textBlock?.type === 'text' ? textBlock.text : '';
+    parsed = JSON.parse(cleanJson(rawOutput)) as { items?: OpusItem[] };
   } catch (err) {
-    console.error('[priority-matrix] Opus failed:', err);
+    // Log enough detail to diagnose without leaking the full output.
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(
+      `[priority-matrix] Opus failed (raw length=${rawOutput.length}):`,
+      msg,
+    );
     return NextResponse.json(
       {
         error: 'Matrix generation failed',
-        details: err instanceof Error ? err.message : String(err),
+        details: msg,
+        rawLength: rawOutput.length,
       },
       { status: 502 },
     );
