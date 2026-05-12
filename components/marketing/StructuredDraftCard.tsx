@@ -180,17 +180,60 @@ export function StructuredDraftCard({
     ? (structuredContent as Record<string, unknown>)
     : null;
 
+  // PR #76 — Sprint 7.3: HeyGen status badge. The server attaches
+  // heygenJobId + heygenStatus to structuredContent for video-needing
+  // types (reel, ugc). We surface it as a non-blocking badge so the
+  // founder knows the script is ready but the rendered video is
+  // pending. typeof guards because structuredContent is jsonb and
+  // could legally be anything Opus returned.
+  const heygenStatus =
+    payload && typeof payload.heygenStatus === 'string'
+      ? payload.heygenStatus
+      : null;
+  const heygenVideoUrl =
+    payload && typeof payload.videoUrl === 'string'
+      ? payload.videoUrl
+      : null;
+
   return (
     <GlassCard className="p-5">
       <header className="flex items-start justify-between gap-3 mb-4">
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 mb-1">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
             <span className="text-[10px] font-mono uppercase tracking-[0.1em] px-2 py-0.5 rounded bg-text-3/15 text-text-2">
               {platform}
             </span>
             <span className="text-[10px] font-mono uppercase tracking-[0.1em] text-text-3">
               {contentType.replace(/_/g, ' ')}
             </span>
+            {heygenStatus === 'queued' && (
+              <span
+                className="text-[9px] font-mono uppercase tracking-[0.1em] px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-500 border border-purple-500/30"
+                title="The script is ready. Rendered video ships when HeyGen integration goes live."
+              >
+                🎬 video queued
+              </span>
+            )}
+            {heygenStatus === 'processing' && (
+              <span className="text-[9px] font-mono uppercase tracking-[0.1em] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-500 border border-amber-500/30">
+                🎬 video rendering
+              </span>
+            )}
+            {heygenStatus === 'completed' && heygenVideoUrl && (
+              <a
+                href={heygenVideoUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[9px] font-mono uppercase tracking-[0.1em] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-500 border border-emerald-500/30 hover:bg-emerald-500/25"
+              >
+                ▶ watch video
+              </a>
+            )}
+            {heygenStatus === 'failed' && (
+              <span className="text-[9px] font-mono uppercase tracking-[0.1em] px-1.5 py-0.5 rounded bg-danger/15 text-danger border border-danger/30">
+                🎬 video failed
+              </span>
+            )}
           </div>
           <h3 className="font-display text-lg font-light">{displayName}</h3>
         </div>

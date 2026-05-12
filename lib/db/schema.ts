@@ -1234,6 +1234,65 @@ export const researchCache = pgTable('research_cache', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
+// PR #76 — Sprint 7.3: HeyGen video generation queue.
+//
+// CRITICAL: this table is ONLY the queue ledger. We do NOT call
+// the HeyGen API in this sprint — no key, no integration. The
+// generate-structured endpoint inserts a row with status='queued'
+// when the founder asks for a Reel or UGC, and the placeholder
+// /api/heygen/generate-video endpoint refuses with feature_disabled
+// until HEYGEN_ENABLED=true is set + a real key lands.
+//
+// The plan originally suggested FK to a `drafts` table — that
+// doesn't exist. Drafts live in `generated_posts` (structured
+// drafts have contentType + structuredContent jsonb, legacy drafts
+// have a plain `content` string). The FK below points there.
+//
+// When HeyGen ships, the worker reads queued rows for users that
+// have the feature flag on, calls HeyGen, polls for completion,
+// and writes videoUrl + thumbnailUrl + duration back. The
+// errorKind column matches the categorized-error vocabulary from
+// PR #72 / #75 so the same UI can surface the failure reason.
+export const heygenJobs = pgTable('heygen_jobs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  // Soft ref to the draft this video belongs to. Cascade-delete:
+  // if the founder deletes the draft, the job is meaningless.
+  draftId: uuid('draft_id')
+    .notNull()
+    .references(() => generatedPosts.id, { onDelete: 'cascade' }),
+  projectId: uuid('project_id').notNull(),
+  userId: uuid('user_id').notNull(),
+
+  // 'queued' | 'processing' | 'completed' | 'failed'
+  status: text('status').notNull().default('queued'),
+
+  // Input — what we'd send to HeyGen when the worker fires.
+  scriptText: text('script_text').notNull(),
+  avatarId: text('avatar_id'),
+  voiceId: text('voice_id'),
+
+  // Output — populated by the worker on success.
+  videoUrl: text('video_url'),
+  thumbnailUrl: text('thumbnail_url'),
+  durationSeconds: integer('duration_seconds'),
+
+  // HeyGen's own job id (their async API returns one, we poll
+  // with it until the video is ready).
+  heygenJobId: text('heygen_job_id'),
+  heygenStatus: text('heygen_status'),
+
+  // Error tracking. errorKind uses the same vocabulary as
+  // lib/ai/categorize-error.ts (overloaded/rate_limit/timeout/etc.)
+  // even though HeyGen and Anthropic have different failure modes —
+  // the UI rendering layer is shared.
+  errorMessage: text('error_message'),
+  errorKind: text('error_kind'),
+
+  requestedAt: timestamp('requested_at').defaultNow().notNull(),
+  processedAt: timestamp('processed_at'),
+  completedAt: timestamp('completed_at'),
+});
+
 // PR #74 — Sprint 7.2B: 5-step onboarding wizard state.
 //
 // IMPORTANT: this table is ADDITIVE — it does NOT replace the
@@ -1439,3 +1498,4 @@ export type CompassBlindSpot = typeof compassBlindSpots.$inferSelect;
 export type CompassDecision = typeof compassDecisions.$inferSelect;
 export type BrandAnalysisJob = typeof brandAnalysisJobs.$inferSelect;
 export type OnboardingProgressRow = typeof onboardingProgress.$inferSelect;
+export type HeygenJob = typeof heygenJobs.$inferSelect;

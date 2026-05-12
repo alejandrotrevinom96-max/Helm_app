@@ -20,6 +20,7 @@ import {
   projects,
   contentTypes,
   generatedPosts,
+  heygenJobs,
 } from '@/lib/db/schema';
 import { eq, and, inArray } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
@@ -46,6 +47,52 @@ const VALID_PLATFORMS = new Set([
   'threads',
   'x',
 ]);
+
+// PR #76 — Sprint 7.3: types that should produce a queued HeyGen
+// video job alongside the structured draft. The job is INSERTED
+// only; the actual HeyGen call happens in a separate worker once
+// HEYGEN_ENABLED=true and a key are set. We intentionally use the
+// seeded content-type keys verbatim (`reel`, `ugc`) instead of the
+// plan's `reel`/`ugc_script` so the inArray match keeps working.
+const TYPES_NEED_VIDEO = new Set(['reel', 'ugc']);
+
+// Extract a clean script string from a structured draft. Different
+// templates name the script-bearing fields differently — reels
+// use hook + beats + caption, ugc uses opening + body + closing.
+// We concatenate whatever's present into a single string the
+// HeyGen worker can pass straight to the avatar.
+function extractScriptText(
+  contentType: string,
+  structured: unknown,
+): string | null {
+  if (!structured || typeof structured !== 'object') return null;
+  const obj = structured as Record<string, unknown>;
+  const parts: string[] = [];
+
+  // Reel: hook + beat dialogue/audio + caption.
+  if (contentType === 'reel') {
+    if (typeof obj.hook === 'string') parts.push(obj.hook);
+    if (Array.isArray(obj.beats)) {
+      for (const b of obj.beats) {
+        if (b && typeof b === 'object') {
+          const beat = b as Record<string, unknown>;
+          if (typeof beat.audio === 'string') parts.push(beat.audio);
+        }
+      }
+    }
+    if (typeof obj.caption === 'string') parts.push(obj.caption);
+  }
+
+  // UGC: opening + body + closing reads as a natural script.
+  if (contentType === 'ugc') {
+    if (typeof obj.opening === 'string') parts.push(obj.opening);
+    if (typeof obj.body === 'string') parts.push(obj.body);
+    if (typeof obj.closing === 'string') parts.push(obj.closing);
+  }
+
+  const joined = parts.filter((p) => p.trim().length > 0).join('\n\n');
+  return joined.length > 0 ? joined : null;
+}
 
 // PR #75 — Sprint 7.2C hotfix: per-draft error payloads now carry
 // a categorized errorKind + actionable hint so callers (the
@@ -361,11 +408,63 @@ Return STRICT JSON matching the schema. No markdown fences, no prose outside JSO
       })
       .returning({ id: generatedPosts.id });
 
+    // PR #76 — Sprint 7.3: video-needing types (reel, ugc) also
+    // get a queued HeyGen job. The job is INSERTED only — the
+    // actual HeyGen call lives in a future worker behind the
+    // HEYGEN_ENABLED feature flag. We annotate the structured
+    // content with heygenJobId + heygenStatus='queued' so the
+    // Library/draft-card UI can render a "Video queued — coming
+    // soon" badge without a second roundtrip.
+    let outputContent: unknown = parsed;
+    if (TYPES_NEED_VIDEO.has(template.type)) {
+      const scriptText = extractScriptText(template.type, parsed);
+      if (scriptText) {
+        try {
+          const [job] = await db
+            .insert(heygenJobs)
+            .values({
+              draftId: inserted.id,
+              projectId,
+              userId: user.id,
+              status: 'queued',
+              scriptText: scriptText.slice(0, 4000),
+            })
+            .returning({ id: heygenJobs.id });
+
+          // Merge the job ref into the structured content so the
+          // client can render the badge directly from the draft
+          // payload (no separate fetch needed for the common
+          // "is this video queued?" check).
+          outputContent = {
+            ...(parsed as Record<string, unknown>),
+            heygenJobId: job.id,
+            heygenStatus: 'queued' as const,
+          };
+
+          // Also persist the annotated copy on the draft itself so
+          // a Library page reload still sees the badge data.
+          await db
+            .update(generatedPosts)
+            .set({ structuredContent: outputContent as object })
+            .where(eq(generatedPosts.id, inserted.id));
+        } catch (heygenErr) {
+          // Don't fail the whole draft generation if the queue
+          // insert errors — log + continue without the badge. The
+          // founder still gets the script; they just can't queue
+          // a video for it this round.
+          console.error(
+            `[generate-structured] heygen queue insert failed for ${template.type}:`,
+            heygenErr,
+          );
+        }
+      }
+    }
+
     drafts.push({
       id: inserted.id,
       contentType: template.type,
       displayName: template.displayName,
-      structuredContent: parsed,
+      structuredContent: outputContent,
     });
   }
 
