@@ -20,7 +20,8 @@ export type CompassTab =
   | 'priority'
   | 'competitors'
   | 'timeline'
-  | 'blind-spots';
+  | 'blind-spots'
+  | 'decisions';
 
 interface TabDef {
   key: CompassTab;
@@ -35,6 +36,8 @@ const TABS: TabDef[] = [
   { key: 'timeline', href: '/compass/timeline', label: 'Timeline' },
   // PR #70 — Sprint 7.1C: blind spots detector.
   { key: 'blind-spots', href: '/compass/blind-spots', label: 'Blind Spots' },
+  // PR #71 — Sprint 7.1E: decision log (final Compass deep-dive).
+  { key: 'decisions', href: '/compass/decisions', label: 'Decisions' },
 ];
 
 interface Props {

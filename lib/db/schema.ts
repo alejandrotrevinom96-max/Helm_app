@@ -1234,6 +1234,80 @@ export const researchCache = pgTable('research_cache', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
+// PR #71 — Sprint 7.1E: Decision Log. Founders make big strategic
+// moves and forget WHY 30 days later. This table captures pre-
+// decision alignment scoring vs the brand North Star (so we don't
+// rationalize after the fact) + outcome tracking + retrospective.
+//
+// Two passes through Opus:
+//   1. /score — pre-commit alignment + reversibility + pattern match
+//      against prior decisions. NOT persisted — the founder gets the
+//      score and decides whether to commit.
+//   2. /evaluate — after 30+ days, founder marks worked/didn't and
+//      Opus generates an honest retro (was the original score
+//      accurate? did execution fail or scoring fail?).
+//
+// The `aiRetrospective` jsonb captures the post-hoc Opus output so
+// the UI can render "scoring accuracy" as a learning signal over
+// time.
+//
+// Why not snapshot the inputs (like compass_blind_spots)? Decisions
+// are usually about a specific moment that's already documented in
+// the description + reasoning. The North Star is reloaded fresh on
+// evaluate so retrospective uses current strategy, not stale state.
+export const compassDecisions = pgTable('compass_decisions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  projectId: uuid('project_id')
+    .notNull()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull(),
+
+  // Decision content
+  title: text('title').notNull(),
+  description: text('description'),
+  // 'product' | 'pricing' | 'positioning' | 'audience' | 'platform' | 'content' | 'other'
+  category: text('category'),
+
+  // Pre-decision alignment (filled by /score)
+  alignmentScore: integer('alignment_score'), // 0-100 vs North Star
+  alignmentReasoning: text('alignment_reasoning'),
+
+  // Bezos two-way doors. 'easy' | 'medium' | 'hard' | 'irreversible'
+  reversibility: text('reversibility'),
+  reversalCostNotes: text('reversal_cost_notes'),
+
+  // Self-reported founder confidence 0-100 — separate from AI score
+  founderConfidence: integer('founder_confidence'),
+
+  // 'decided' | 'executing' | 'reversed' | 'evaluated'
+  status: text('status').default('decided').notNull(),
+  decidedAt: timestamp('decided_at').notNull(),
+  evaluatedAt: timestamp('evaluated_at'),
+
+  // Outcome (filled by /evaluate)
+  outcomeWorked: boolean('outcome_worked'),
+  outcomeNotes: text('outcome_notes'),
+  lessonsLearned: text('lessons_learned'),
+
+  // AI retrospective: {alignmentRecheck, observedSignals,
+  // patternInsight, scoringAccuracy}
+  aiRetrospective: jsonb('ai_retrospective'),
+
+  // Linked items (optional — soft refs, no FK so a deleted priority
+  // item or task doesn't cascade the decision history away)
+  linkedPriorityItemId: uuid('linked_priority_item_id'),
+  linkedTimelineTaskId: uuid('linked_timeline_task_id'),
+
+  modelUsed: text('model_used').default('claude-opus-4-7'),
+  generationCostUsd: numeric('generation_cost_usd', {
+    precision: 10,
+    scale: 4,
+  }),
+
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
 // ===== Type exports =====
 export type User = typeof users.$inferSelect;
 export type Project = typeof projects.$inferSelect;
@@ -1264,3 +1338,4 @@ export type PriorityMatrix = typeof priorityMatrices.$inferSelect;
 export type PriorityItem = typeof priorityItems.$inferSelect;
 export type CompassTask = typeof compassTasks.$inferSelect;
 export type CompassBlindSpot = typeof compassBlindSpots.$inferSelect;
+export type CompassDecision = typeof compassDecisions.$inferSelect;
