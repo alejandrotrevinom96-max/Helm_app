@@ -62,7 +62,22 @@ html {
   scroll-behavior: smooth;
 }
 
+/* PR #73 — Sprint 7.2A.5: Dark Reader defense layer 2.
+   Failsafe CSS variables on body. Dark Reader inspects these specific
+   names and skips its own inversion when it finds them set to
+   `initial !important` — same trick the extension uses to honor
+   sites that opt out programmatically.
+
+   This is belt-and-braces alongside the `<meta name="darkreader-lock">`
+   in app/layout.tsx. The meta is the official lock; these vars are
+   for older extension versions (or aggressive "Force" mode) that
+   ignore the meta but still respect inline-var hints. */
 body {
+  --darkreader-inline-bgcolor: initial !important;
+  --darkreader-inline-color: initial !important;
+  --darkreader-inline-border: initial !important;
+  --darkreader-inline-fill: initial !important;
+  --darkreader-inline-stroke: initial !important;
   background: var(--bg);
   color: var(--text-1);
   -webkit-font-smoothing: antialiased;

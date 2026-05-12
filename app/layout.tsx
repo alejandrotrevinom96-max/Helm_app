@@ -3,6 +3,7 @@ import { headers } from 'next/headers';
 import { Analytics } from '@vercel/analytics/next';
 import { getServerTheme } from '@/lib/theme';
 import { ToastContainer } from '@/components/toast/toast';
+import { DarkReaderDetector } from '@/components/dark-reader-detector';
 import './globals.css';
 
 // PR #36 — Sprint 6.2.1: copy aligned with the landing rebuild
@@ -68,6 +69,33 @@ export default async function RootLayout({
   return (
     <html lang="en" data-theme={theme} suppressHydrationWarning>
       <head>
+        {/* PR #73 — Sprint 7.2A.5: Dark Reader defense layer 1. The
+            extension respects this meta tag and disables its own
+            inversion for the page, so users with Dark Reader on
+            still see Helm's own theme instead of a double-inverted
+            mess. Three signals layered for older extension versions
+            that ignore the lock meta:
+              - darkreader-lock: official "disable here" hint
+              - color-scheme: tells the browser (and Dark Reader's
+                heuristics) the page handles both modes itself
+              - theme-color per prefers-color-scheme: matches the
+                actual --bg token for each theme so mobile chrome
+                and Dark Reader heuristics line up with what's
+                rendering on-screen.
+            Layer 2 is in globals.css; layer 3 is the JS detector
+            below the toast container. */}
+        <meta name="darkreader-lock" />
+        <meta name="color-scheme" content="light dark" />
+        <meta
+          name="theme-color"
+          content="#fafaf7"
+          media="(prefers-color-scheme: light)"
+        />
+        <meta
+          name="theme-color"
+          content="#1a1a1a"
+          media="(prefers-color-scheme: dark)"
+        />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
         <link
@@ -86,6 +114,14 @@ export default async function RootLayout({
             showToast() without prop-drilling. Renders nothing
             when the queue is empty. */}
         <ToastContainer />
+        {/* PR #73 — Sprint 7.2A.5: Dark Reader layer 3. Detects the
+            extension at runtime and surfaces a dismissible nudge if
+            it slipped past the meta lock (older versions or "Force"
+            mode). Renders nothing when Dark Reader isn't active or
+            when the user previously dismissed it. Mounted in root
+            (not just dashboard) so the landing-page preview doesn't
+            render double-inverted either. */}
+        <DarkReaderDetector />
         <Analytics />
       </body>
     </html>
