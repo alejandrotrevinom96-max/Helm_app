@@ -44,16 +44,67 @@ var update in step 3.
 
 ### Step 2 — Add the CNAME at your DNS provider
 
-| Type  | Name | Value                |
-|-------|------|----------------------|
-| CNAME | auth | `cname.supabase.co`  |
+⚠️ **Use the EXACT target Supabase shows you in step 1.** It's
+project-specific (typically something like
+`<ref>.supabase.co` or a Cloudflare-style hostname). The example
+`cname.supabase.co` floating around in older docs is a placeholder
+and does NOT work on its own — Supabase's verifier will fail with
+"CNAME record cannot be found" if the target is wrong.
 
-Wait ~5–30 min for propagation. Verify with
-`dig auth.trythelm.com CNAME` or
-[dnschecker.org](https://dnschecker.org/#CNAME/auth.trythelm.com).
+| Type  | Name | Value                                       |
+|-------|------|---------------------------------------------|
+| CNAME | auth | `<paste the target Supabase showed you>`    |
 
-Return to Supabase → click **Verify**. Once green, Supabase
-auto-provisions an SSL cert (Let's Encrypt) for the new host.
+Important:
+- **No trailing dot** on the value (some DNS UIs add one automatically;
+  some don't — match whatever the UI expects).
+- **TTL:** anything ≤ 300s (5 min) speeds up future re-tests if you
+  need to fix the target.
+- **Conflicting records:** if `auth.trythelm.com` already has any
+  A / AAAA / CNAME record, delete those before adding the new CNAME.
+  DNS doesn't let two records of differing types coexist on the same
+  name.
+
+### Step 2.5 — Make sure you're editing DNS at the right place
+
+If you bought `trythelm.com` at a registrar (Namecheap, GoDaddy,
+Google Domains, etc.) but pointed the nameservers at a DNS provider
+(Cloudflare, Vercel, Route 53, etc.), the DNS edits have to happen
+**at the DNS provider, not the registrar**. To check:
+
+```
+dig trythelm.com NS
+```
+
+If you see `ns1.cloudflare.com` etc., that's where the CNAME has to
+go. Editing at the registrar UI in that case silently does nothing.
+
+### Step 2.6 — Verify before clicking "Verify" in Supabase
+
+Wait ~5–30 min for propagation (longer if the previous TTL was
+high — up to 24h worst case), then:
+
+```bash
+dig auth.trythelm.com CNAME
+# or
+nslookup -type=CNAME auth.trythelm.com
+```
+
+You should see your CNAME target in the ANSWER section. If you see
+`NXDOMAIN` or no answer:
+- The record didn't save → re-check the DNS provider.
+- Propagation hasn't reached your resolver → check
+  [dnschecker.org/#CNAME/auth.trythelm.com](https://dnschecker.org/#CNAME/auth.trythelm.com)
+  to confirm globally, not just locally.
+
+Only once `dig` returns the CNAME do you return to Supabase →
+**Verify**. Clicking Verify before propagation is the most common
+cause of the "CNAME record cannot be found" error — Supabase's
+verifier asks DNS in real time and only retries on user-action,
+not in the background.
+
+Once green, Supabase auto-provisions an SSL cert (Let's Encrypt)
+for the new host.
 
 ### Step 3 — Update OAuth provider redirect URIs
 
