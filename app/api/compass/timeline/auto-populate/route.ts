@@ -20,7 +20,7 @@ import {
   priorityMatrices,
   projects,
 } from '@/lib/db/schema';
-import { eq, and, gte, lte, desc, inArray, isNotNull } from 'drizzle-orm';
+import { eq, and, gte, lte, desc, isNotNull } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 
 const UUID_RE =
@@ -156,9 +156,19 @@ export async function POST(request: Request) {
 
   // Dedupe: skip any actionable items already scheduled inside this
   // target week, so re-running auto-populate is idempotent.
-  const itemIds = actionable.map((i) => i.id);
+  //
+  // Sprint 7.1D hotfix: the original query also restricted by
+  // `inArray(sourcePriorityItemId, itemIds)`. That filter was
+  // narrower than necessary — when the founder regenerated the
+  // matrix between calls (new item UUIDs), the inArray excluded
+  // every existing row and the dedupe set came back empty,
+  // creating duplicates. The simpler "pull all source-attributed
+  // tasks in the week, then check membership" query is bulletproof
+  // and the data volume per week is tiny anyway.
   const existing = await db
-    .select({ sourceId: compassTasks.sourcePriorityItemId })
+    .select({
+      sourcePriorityItemId: compassTasks.sourcePriorityItemId,
+    })
     .from(compassTasks)
     .where(
       and(
@@ -166,11 +176,12 @@ export async function POST(request: Request) {
         gte(compassTasks.scheduledFor, monday),
         lte(compassTasks.scheduledFor, weekEnd),
         isNotNull(compassTasks.sourcePriorityItemId),
-        inArray(compassTasks.sourcePriorityItemId, itemIds),
       ),
     );
   const alreadyScheduled = new Set(
-    existing.map((e) => e.sourceId).filter(Boolean) as string[],
+    existing
+      .map((e) => e.sourcePriorityItemId)
+      .filter((v): v is string => typeof v === 'string'),
   );
 
   const toInsert: (typeof compassTasks.$inferInsert)[] = [];
@@ -188,13 +199,27 @@ export async function POST(request: Request) {
         ? offsets[doNowIdx++ % offsets.length]
         : offsets[scheduledIdx++ % offsets.length];
 
-    const hour = effectiveQuadrant === 'do_now' ? 10 : 14;
+    // Sprint 7.1D hotfix: timezone. The original code stored 10:00 /
+    // 14:00 UTC, which renders as 4:00 a.m. / 8:00 a.m. in the
+    // founder's browser (Mexico City, UTC-6) — confusing.
+    //
+    // Pragmatic fix: shift the UTC hour by Mexico City's offset so
+    // the displayed local time matches the intent (10am morning
+    // for do_now, 2pm afternoon for scheduled). CDMX abolished DST
+    // in 2022 so it's permanent UTC-6 year-round; no seasonal math.
+    //
+    // FUTURE: store the founder's preferred TZ on the user row and
+    // compute the offset per call. For the single-MX-founder
+    // deployment, hardcoding CDMX (-6) is the right pragmatic call.
+    const CDMX_UTC_OFFSET_HOURS = 6;
+    const localHour = effectiveQuadrant === 'do_now' ? 10 : 14;
+    const utcHour = localHour + CDMX_UTC_OFFSET_HOURS; // 16 = 10am CDMX; 20 = 2pm CDMX
     const scheduledFor = new Date(
       Date.UTC(
         monday.getUTCFullYear(),
         monday.getUTCMonth(),
         monday.getUTCDate() + dayOffset,
-        hour,
+        utcHour,
         0,
         0,
         0,
