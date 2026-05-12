@@ -877,6 +877,75 @@ export const researchInsights = pgTable('research_insights', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
+// ===== Compass Competitors (PR #67 — Sprint 7.1A) =====
+// One row per (project, competitor URL). Detected by Opus 4.7 OR
+// added manually by the founder. Confidence threshold C-3:
+//   - 85+ auto-approves and queues scrape
+//   - 60-84 surfaced to founder for explicit approval
+//   - <60 skipped (still stored but never auto-promoted)
+//
+// Scraped fields land here only after `/api/compass/competitors/
+// scrape` succeeds — Haiku 4.5 normalizes the cheerio-parsed HTML
+// into the structured columns below. Per-row scrape state lives
+// here (status / error / scrapedAt) so retries are observable.
+export const competitors = pgTable(
+  'competitors',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id').notNull(),
+    name: text('name').notNull(),
+    url: text('url').notNull(),
+    type: text('type'), // 'direct' | 'adjacent' | 'inspirational'
+    detectedBy: text('detected_by').default('ai').notNull(), // 'ai' | 'user'
+    confidenceScore: integer('confidence_score'),
+    approvedByUser: boolean('approved_by_user').default(false).notNull(),
+    scrapedAt: timestamp('scraped_at'),
+    headline: text('headline'),
+    valueProp: text('value_prop'),
+    targetAudience: text('target_audience'),
+    pricingVisible: jsonb('pricing_visible'),
+    platformPresence: jsonb('platform_presence'),
+    contentAngles: jsonb('content_angles').$type<string[]>(),
+    positioningSummary: text('positioning_summary'),
+    whereTheyWin: text('where_they_win'),
+    whereTheyLose: text('where_they_lose'),
+    scrapeStatus: text('scrape_status').default('pending').notNull(), // 'pending' | 'success' | 'failed'
+    scrapeError: text('scrape_error'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    uniqueProjectUrl: unique('competitors_project_url_uk').on(t.projectId, t.url),
+  }),
+);
+
+// ===== Compass Positioning Benchmarks (PR #67 — Sprint 7.1A) =====
+// Generated output of `/api/compass/generate-benchmark`. 14-day TTL
+// because the competitive landscape doesn't shift fast enough to
+// justify re-running this on every Compass tab load — and Opus is
+// expensive ($0.15-0.20 per call). Founder can force a regen via
+// the UI's "Regenerate" button.
+export const positioningBenchmarks = pgTable('positioning_benchmarks', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  projectId: uuid('project_id')
+    .notNull()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull(),
+  marketGap: text('market_gap'),
+  uniquePositioning: text('unique_positioning'),
+  opportunitiesAccionable: jsonb('opportunities_accionable'),
+  defensiveWeaknesses: jsonb('defensive_weaknesses'),
+  comparisonDimensions: jsonb('comparison_dimensions'),
+  competitorsAnalyzed: integer('competitors_analyzed'),
+  modelUsed: text('model_used').default('claude-opus-4-7'),
+  generationCostUsd: numeric('generation_cost_usd', { precision: 10, scale: 4 }),
+  expiresAt: timestamp('expires_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
 // ===== LinkedIn Integrations (PR #66 — Sprint 7.0.9) =====
 // Per-project LinkedIn OAuth state. Mirrors the per-project shape
 // of `metaIntegrations` rather than reusing the user-scoped
@@ -1056,3 +1125,5 @@ export type ContentType = typeof contentTypes.$inferSelect;
 export type UserContentPreference = typeof userContentPreferences.$inferSelect;
 export type BrandAnalysisRow = typeof brandAnalysis.$inferSelect;
 export type LinkedinIntegration = typeof linkedinIntegrations.$inferSelect;
+export type Competitor = typeof competitors.$inferSelect;
+export type PositioningBenchmark = typeof positioningBenchmarks.$inferSelect;
