@@ -30,7 +30,11 @@ interface TabDef {
 }
 
 const TABS: TabDef[] = [
-  { key: 'home', href: '/compass', label: 'Score' },
+  // PR #77 — Sprint 7.4: relabeled 'Score' → 'Overview' to match
+  // the new /compass landing (no more VC dial; it's a dashboard of
+  // the deep-dive features). The `key` stays 'home' so existing
+  // pages that pass active='home' don't need to update.
+  { key: 'home', href: '/compass', label: 'Overview' },
   { key: 'priority', href: '/compass/priority', label: 'Priority' },
   { key: 'competitors', href: '/compass/competitors', label: 'Competitors' },
   { key: 'timeline', href: '/compass/timeline', label: 'Timeline' },
