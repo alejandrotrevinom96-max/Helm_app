@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Plus } from 'lucide-react';
 import { AddProjectModal } from '@/components/dashboard/add-project-modal';
@@ -28,6 +28,7 @@ export function OnboardingClient({
   scanError,
   userId,
   noGithub = false,
+  pendingBrandUrl = null,
 }: {
   candidates: Candidate[];
   scanError: string | null;
@@ -36,13 +37,35 @@ export function OnboardingClient({
   // there's no GitHub integration to scan. Switch to a "manual
   // first project" UI instead of showing an empty repo list.
   noGithub?: boolean;
+  // PR #72 — Sprint 7.2A hotfix: URL the user previewed on the
+  // landing-page hero before signup. When present, we auto-open the
+  // AddProjectModal pre-filled with it so the post-confirmation
+  // landing reflects the intent the user expressed pre-signup.
+  pendingBrandUrl?: string | null;
 }) {
   const router = useRouter();
   const [selected, setSelected] = useState<Set<number>>(
     new Set(candidates.map((c) => c.repo.id))
   );
   const [submitting, setSubmitting] = useState(false);
-  const [addProjectOpen, setAddProjectOpen] = useState(false);
+  // PR #72 — auto-open when there's a pending URL from the landing.
+  // We rely on initial state rather than a useEffect so the modal
+  // renders on first paint without a flash of empty onboarding.
+  const [addProjectOpen, setAddProjectOpen] = useState(
+    Boolean(pendingBrandUrl),
+  );
+  // Clear sessionStorage once we've consumed the URL — keeps stale
+  // entries from re-popping the modal on a refresh after the project
+  // was already created.
+  useEffect(() => {
+    if (pendingBrandUrl && typeof window !== 'undefined') {
+      try {
+        window.sessionStorage.removeItem('helm:pendingBrandUrl');
+      } catch {
+        // private mode — non-fatal
+      }
+    }
+  }, [pendingBrandUrl]);
 
   // PR #33 — render the manual-first variant when GitHub isn't
   // connected. The user gets a single big "Add project" button that
@@ -76,6 +99,7 @@ export function OnboardingClient({
           <AddProjectModal
             isOpen={addProjectOpen}
             onClose={() => setAddProjectOpen(false)}
+            defaultBrandUrl={pendingBrandUrl}
           />
         </div>
       </div>

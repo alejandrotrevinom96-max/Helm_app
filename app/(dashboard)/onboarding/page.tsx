@@ -12,6 +12,22 @@ export default async function OnboardingPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
+  // PR #72 — Sprint 7.2A hotfix: pluck the pending brand URL the
+  // landing-page hero stashed via signup user_metadata. If present,
+  // the client auto-opens the manual project modal and pre-fills the
+  // URL field — so a user who clicked "See full bible" on the landing
+  // doesn't lose that intent across the email-confirmation hop.
+  //
+  // The fallback for OAuth signups (Google/GitHub) is the same path:
+  // user_metadata travels with the OAuth session, so the URL persists
+  // through any provider as long as it was set on signup.
+  const meta = (user.user_metadata ?? {}) as { pending_brand_url?: string };
+  const pendingBrandUrl =
+    typeof meta.pending_brand_url === 'string' &&
+    meta.pending_brand_url.trim().length > 0
+      ? meta.pending_brand_url.trim().slice(0, 500)
+      : null;
+
   // Get GitHub token (optional in PR #33+).
   const [githubIntegration] = await db
     .select()
@@ -33,6 +49,7 @@ export default async function OnboardingPage() {
         scanError={null}
         userId={user.id}
         noGithub
+        pendingBrandUrl={pendingBrandUrl}
       />
     );
   }
@@ -48,5 +65,12 @@ export default async function OnboardingPage() {
     scanError = err instanceof Error ? err.message : 'Unknown error';
   }
 
-  return <OnboardingClient candidates={candidates} scanError={scanError} userId={user.id} />;
+  return (
+    <OnboardingClient
+      candidates={candidates}
+      scanError={scanError}
+      userId={user.id}
+      pendingBrandUrl={pendingBrandUrl}
+    />
+  );
 }

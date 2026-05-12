@@ -52,15 +52,34 @@ export function BrandBibleModal({
   const [refineError, setRefineError] = useState<string | null>(null);
   const [bible, setBible] = useState<BrandBible | null>(project.brandContext);
 
+  // PR #72 — Sprint 7.2A hotfix: don't let the user accidentally
+  // dismiss the modal while a long-running Opus call is in flight.
+  // Backdrop click + Escape + the × button all consult `isBusy`. The
+  // original UX let a stray click outside the dialog tear down the
+  // modal mid-discovery; the API call kept running but the founder
+  // had no UI to receive the result and assumed it had failed.
+  //
+  // We only gate the dismissal paths — the founder can still see the
+  // spinner + reassuring copy inside the dialog. If they really want
+  // out, they reload the tab, and the idempotency tracker (Bug #4b)
+  // keeps the in-flight Opus call from being double-billed.
+  const isBusy = discovering || refining;
+
+  const safeClose = () => {
+    if (isBusy) return;
+    onClose();
+  };
+
   // Esc closes the modal — keeps the dialog dismissible without us trapping
   // focus, which would interfere with form fields inside.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') safeClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onClose, isBusy]);
 
   const runDiscovery = async () => {
     if (!discoverUrl.trim()) {
@@ -77,7 +96,23 @@ export function BrandBibleModal({
       });
       const data = await res.json();
       if (!res.ok) {
-        setDiscoverError(data.error ?? 'Discovery failed');
+        // PR #72 — Sprint 7.2A hotfix: surface the categorized hint
+        // when the endpoint provided one. Falls back to the bare
+        // error string otherwise. The discover endpoint hasn't been
+        // categorized yet, but analyze-brand and any future endpoint
+        // that returns {error, hint} will benefit from this rendering.
+        const friendly =
+          [data.error, data.hint].filter(Boolean).join(' — ') ||
+          'Discovery failed';
+        // 409 = "another job is in flight for this project" → tell
+        // the user to wait instead of treating it like a failure.
+        if (res.status === 409 && data.inProgress) {
+          setDiscoverError(
+            'Discovery already running for this project. Wait ~30s for the in-flight call to finish.',
+          );
+        } else {
+          setDiscoverError(friendly);
+        }
         return;
       }
       setBible(data.bible);
@@ -145,7 +180,7 @@ export function BrandBibleModal({
   return (
     <div
       className="fixed inset-0 bg-black/70 z-50 flex items-start justify-center p-4 overflow-auto backdrop-blur-sm"
-      onClick={onClose}
+      onClick={safeClose}
       role="dialog"
       aria-modal="true"
       aria-label="Brand bible"
@@ -159,6 +194,9 @@ export function BrandBibleModal({
           <div className="min-w-0">
             <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-1">
               Brand bible · {mode}
+              {isBusy && (
+                <span className="ml-2 text-accent">· running</span>
+              )}
             </div>
             <h2 className="font-display text-2xl font-light">
               {mode === 'discover' && 'Discover your brand'}
@@ -170,8 +208,14 @@ export function BrandBibleModal({
             </h2>
           </div>
           <button
-            onClick={onClose}
-            className="text-text-3 hover:text-text-1 text-xl leading-none px-1"
+            onClick={safeClose}
+            disabled={isBusy}
+            title={
+              isBusy
+                ? 'Wait for the analysis to finish — closing now would lose the result.'
+                : 'Close'
+            }
+            className="text-text-3 hover:text-text-1 text-xl leading-none px-1 disabled:opacity-40 disabled:cursor-not-allowed"
             aria-label="Close"
           >
             ×
@@ -470,8 +514,14 @@ function DiscoverMode({
 
       {discovering && (
         <div className="py-4">
-          <p className="text-sm text-text-2 mb-3 italic">
+          <p className="text-sm text-text-2 mb-1 italic">
             Scraping pages, then analyzing with Claude Opus…
+          </p>
+          {/* PR #72 — Sprint 7.2A hotfix: tell the founder it's safe
+              to wait + that we won't double-bill if they reload. */}
+          <p className="text-xs text-text-3 mb-3">
+            ~30 seconds. Don&apos;t close this dialog — we&apos;ve disabled
+            backdrop dismiss so you don&apos;t lose the result by accident.
           </p>
           <div className="space-y-2">
             <Skeleton className="h-3 w-full" />

@@ -15,21 +15,43 @@
 //
 // On success the new project is set as the active project and the
 // page revalidates so sidebar/active-project consumers refresh.
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Loader2, X } from 'lucide-react';
+import { Loader2, Sparkles, X } from 'lucide-react';
 
 interface Props {
   isOpen: boolean;
   onClose: () => void;
+  // PR #72 — Sprint 7.2A hotfix: optional pre-fill from the landing
+  // page hero. When the user previewed a brand URL on `/` and clicked
+  // "See full bible", the URL travels through signup → user_metadata
+  // → onboarding and ends up here. We prefill the field so the
+  // submit-it-yourself moment is "click Create" instead of "retype
+  // the URL you literally just typed two minutes ago".
+  defaultBrandUrl?: string | null;
 }
 
-export function AddProjectModal({ isOpen, onClose }: Props) {
+export function AddProjectModal({
+  isOpen,
+  onClose,
+  defaultBrandUrl = null,
+}: Props) {
   const router = useRouter();
   const [name, setName] = useState('');
-  const [brandUrl, setBrandUrl] = useState('');
+  const [brandUrl, setBrandUrl] = useState(defaultBrandUrl ?? '');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // If the prop changes after mount (parent navigates between flows
+  // with different URLs), keep the field in sync — but only when the
+  // user hasn't already started typing. Treating their input as the
+  // source of truth past first edit avoids stomping the typed value.
+  useEffect(() => {
+    if (defaultBrandUrl && !brandUrl) {
+      setBrandUrl(defaultBrandUrl);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultBrandUrl]);
 
   if (!isOpen) return null;
 
@@ -78,7 +100,9 @@ export function AddProjectModal({ isOpen, onClose }: Props) {
           <div>
             <h3 className="font-display text-2xl font-light">New project</h3>
             <p className="text-sm text-text-3 mt-1">
-              Add a project manually. You can connect integrations later.
+              {defaultBrandUrl
+                ? 'We carried your URL over from the landing. Name it and go.'
+                : 'Add a project manually. You can connect integrations later.'}
             </p>
           </div>
           <button
@@ -95,6 +119,19 @@ export function AddProjectModal({ isOpen, onClose }: Props) {
           {error && (
             <div className="p-3 bg-danger/10 border border-danger/30 rounded-lg text-sm text-danger">
               {error}
+            </div>
+          )}
+
+          {defaultBrandUrl && !error && (
+            <div className="p-3 bg-accent/10 border border-accent/30 rounded-lg text-xs text-accent flex items-start gap-2">
+              <Sparkles className="w-4 h-4 shrink-0 mt-0.5" />
+              <div>
+                We carried{' '}
+                <strong className="break-all">{defaultBrandUrl}</strong>{' '}
+                over from the landing. Right after you name the project we
+                drop you in /marketing/generate where you can build the full
+                brand bible.
+              </div>
             </div>
           )}
 

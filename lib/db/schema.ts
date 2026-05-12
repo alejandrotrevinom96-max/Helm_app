@@ -1234,6 +1234,43 @@ export const researchCache = pgTable('research_cache', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
+// PR #72 — Sprint 7.2A hotfix: idempotency tracker for the
+// /api/research/analyze-brand POST. The original endpoint kicked off
+// Opus on every call — a re-click during the 30s window, a
+// double-tap, or a tab reopened mid-flight all produced parallel
+// Opus calls (billed, and prone to race writes on brand_analysis).
+//
+// This table is NOT the analysis cache — that's brand_analysis with
+// its 30-day TTL. This is the running-job ledger: one row per
+// active Opus pass, status flips to completed/failed/timeout when
+// the call returns or stalls. The endpoint reads "is there a
+// running job for (project, force)?" before paying Opus, and skips
+// to a 409 response with the existing jobId when there is.
+//
+// Why per-project not per-user: a founder with two projects might
+// legitimately analyze both in parallel — only same-project
+// in-flight requests should collide.
+//
+// A "stale" job (still running but startedAt > 5 min ago) is
+// treated as dead — Vercel maxDuration caps at 90s, so anything
+// older than that is a crashed/abandoned run. The endpoint marks
+// stale jobs as failed and proceeds.
+export const brandAnalysisJobs = pgTable('brand_analysis_jobs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  projectId: uuid('project_id')
+    .notNull()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull(),
+  // 'running' | 'completed' | 'failed' | 'timeout'
+  status: text('status').notNull().default('running'),
+  // 'overloaded' | 'timeout' | 'json' | 'rate_limit' | 'unknown' —
+  // set when status='failed' so the UI can show a categorized error.
+  errorKind: text('error_kind'),
+  errorMessage: text('error_message'),
+  startedAt: timestamp('started_at').notNull().defaultNow(),
+  completedAt: timestamp('completed_at'),
+});
+
 // PR #71 — Sprint 7.1E: Decision Log. Founders make big strategic
 // moves and forget WHY 30 days later. This table captures pre-
 // decision alignment scoring vs the brand North Star (so we don't
@@ -1339,3 +1376,4 @@ export type PriorityItem = typeof priorityItems.$inferSelect;
 export type CompassTask = typeof compassTasks.$inferSelect;
 export type CompassBlindSpot = typeof compassBlindSpots.$inferSelect;
 export type CompassDecision = typeof compassDecisions.$inferSelect;
+export type BrandAnalysisJob = typeof brandAnalysisJobs.$inferSelect;

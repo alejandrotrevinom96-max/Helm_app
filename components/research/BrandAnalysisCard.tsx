@@ -123,11 +123,32 @@ export function BrandAnalysisCard({ projectId }: Props) {
         cached?: boolean;
         error?: string;
         hint?: string;
+        // PR #72 — Sprint 7.2A hotfix: idempotency + categorized errors.
+        inProgress?: boolean;
+        jobId?: string;
+        errorKind?: string;
+        retry?: boolean;
+        retryAfterSeconds?: number;
       };
+      // 409 means another in-flight Opus call is already running for
+      // this project. Treat it as "wait", not "failed".
+      if (res.status === 409 && data.inProgress) {
+        setFeedback({
+          kind: 'info',
+          msg:
+            data.hint ??
+            'Analysis already running — wait ~30s and try again.',
+        });
+        return;
+      }
       if (!res.ok || !data.success || !data.analysis) {
+        // Build a human message from error + hint when both come
+        // from the categorized error path. Falls back to the bare
+        // error string for non-categorized 4xx/5xx responses.
+        const msg = [data.error, data.hint].filter(Boolean).join(' — ');
         setFeedback({
           kind: 'error',
-          msg: data.error ?? data.hint ?? 'Analysis failed',
+          msg: msg || 'Analysis failed',
         });
         return;
       }

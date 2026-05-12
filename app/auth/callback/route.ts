@@ -108,13 +108,19 @@ export async function GET(request: NextRequest) {
   // token is provider-specific — saving a Google token under
   // provider='github' would corrupt the integrations table.
   if (isGithub && providerToken) {
+    // PR #72 — Sprint 7.2A hotfix: scope string trimmed in sync with
+    // _oauth-buttons.tsx. The actual granted scopes live on GitHub's
+    // side; this column is just bookkeeping for what we asked for.
+    // The repo-scan path in onboarding will skip gracefully when the
+    // token can't read repos (the GitHub API returns 403 for those
+    // calls and the scanner already swallows that into scanError).
     await db
       .insert(integrations)
       .values({
         userId: user.id,
         provider: 'github',
         encryptedAccessToken: encrypt(providerToken),
-        scope: 'read:user user:email repo',
+        scope: 'read:user user:email',
       })
       .onConflictDoUpdate({
         target: [integrations.userId, integrations.provider],

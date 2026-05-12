@@ -20,15 +20,27 @@ export function OAuthButtons() {
     setLoading(provider);
     setError(null);
     const supabase = createClient();
-    // GitHub still asks for the repo scopes — the original sign-in
-    // flow uses them to scan repos during onboarding. Google needs
-    // no extra scopes; default profile + email is enough.
+    // PR #72 — Sprint 7.2A hotfix: dropped the `repo` scope from the
+    // GitHub OAuth request. The original onboarding flow used it to
+    // auto-scan repos for SaaS signals, but a real signup attempt
+    // (Sprint 7.2A user test) reported the GitHub consent screen as a
+    // hard conversion killer — "Helm wants to read AND write all your
+    // repos" is the wrong first impression for a marketing tool.
+    //
+    // The repo scan in app/(dashboard)/onboarding/page.tsx still runs
+    // when a token IS present, so existing accounts that already
+    // granted `repo` keep working. New signups land without the scope
+    // and see the manual-project path (already wired in PR #33 via
+    // `noGithub` branch). A future opt-in "Connect repos" button in
+    // Settings can re-request `repo` separately for users who want it.
+    //
+    // Google needs no extra scopes; default profile + email is enough.
     const { error: oauthError } = await supabase.auth.signInWithOAuth({
       provider,
       options: {
         redirectTo: `${window.location.origin}/auth/callback`,
         scopes:
-          provider === 'github' ? 'read:user user:email repo' : undefined,
+          provider === 'github' ? 'read:user user:email' : undefined,
       },
     });
     if (oauthError) {

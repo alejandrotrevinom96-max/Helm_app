@@ -18,9 +18,10 @@ import { db } from '@/lib/db';
 import {
   projects,
   brandAnalysis,
+  brandAnalysisJobs,
   researchConfig,
 } from '@/lib/db/schema';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, gte } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 import { anthropic, MODELS, cachedSystem } from '@/lib/ai/claude';
 import { trackUsage } from '@/lib/ai/usage-tracker';
@@ -31,6 +32,108 @@ export const maxDuration = 90;
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// PR #72 — Sprint 7.2A hotfix: jobs older than this are treated as
+// dead. Vercel's maxDuration above is 90s, so anything still
+// 'running' past 5 minutes is a crashed handler (or a Vercel cold
+// start that timed out client-side and we never got the completion
+// write). We mark them failed and proceed.
+const STALE_JOB_MS = 5 * 60 * 1000;
+
+// Categorize an unknown error into one of our known buckets so the
+// UI can render an actionable message instead of "AI analysis
+// failed". Order matters — the matches cascade, first hit wins.
+function categorizeError(
+  err: unknown,
+): { kind: 'overloaded' | 'timeout' | 'json' | 'rate_limit' | 'unknown'; message: string } {
+  const msg = err instanceof Error ? err.message : String(err);
+  const lc = msg.toLowerCase();
+  if (lc.includes('overloaded') || lc.includes('529')) {
+    return { kind: 'overloaded', message: msg };
+  }
+  if (
+    lc.includes('rate limit') ||
+    lc.includes('429') ||
+    lc.includes('too many requests')
+  ) {
+    return { kind: 'rate_limit', message: msg };
+  }
+  if (
+    lc.includes('timeout') ||
+    lc.includes('timed out') ||
+    lc.includes('aborted')
+  ) {
+    return { kind: 'timeout', message: msg };
+  }
+  if (
+    lc.includes('json') ||
+    lc.includes('unexpected token') ||
+    lc.includes('unterminated string')
+  ) {
+    return { kind: 'json', message: msg };
+  }
+  return { kind: 'unknown', message: msg };
+}
+
+// Builds the user-facing error response with a hint that depends on
+// the categorized kind. Status code is also kind-specific so the
+// client can disambiguate transient from terminal errors.
+function errorResponse(kind: ReturnType<typeof categorizeError>['kind']) {
+  switch (kind) {
+    case 'overloaded':
+      return NextResponse.json(
+        {
+          error: 'Anthropic está saturado ahora mismo.',
+          errorKind: 'overloaded',
+          retry: true,
+          retryAfterSeconds: 60,
+          hint: 'Reintentá en ~1 minuto. La cola de Anthropic se libera rápido.',
+        },
+        { status: 503 },
+      );
+    case 'rate_limit':
+      return NextResponse.json(
+        {
+          error: 'Anthropic rate-limit alcanzado.',
+          errorKind: 'rate_limit',
+          retry: true,
+          retryAfterSeconds: 120,
+          hint: 'Esperá ~2 minutos antes del próximo intento.',
+        },
+        { status: 503 },
+      );
+    case 'timeout':
+      return NextResponse.json(
+        {
+          error: 'El análisis tardó más de 60s y se cortó.',
+          errorKind: 'timeout',
+          retry: true,
+          hint: 'Tu brand bible puede ser muy extensa. Simplificá o reintentá — la red puede haber sido el problema.',
+        },
+        { status: 504 },
+      );
+    case 'json':
+      return NextResponse.json(
+        {
+          error: 'Opus devolvió respuesta malformada.',
+          errorKind: 'json',
+          retry: true,
+          hint: 'Esto es transient. Reintentá una vez.',
+        },
+        { status: 502 },
+      );
+    default:
+      return NextResponse.json(
+        {
+          error: 'Algo falló al analizar tu brand.',
+          errorKind: 'unknown',
+          retry: true,
+          hint: 'Si vuelve a pasar, contactanos con el ID del job.',
+        },
+        { status: 500 },
+      );
+  }
+}
 
 interface DeepAnalysis {
   niche: string;
@@ -177,6 +280,7 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         error: 'Rate limit exceeded',
+        errorKind: 'rate_limit',
         hint: `Try again in ${Math.ceil(limit.resetMs / 60000)} minutes.`,
       },
       { status: 429 },
@@ -188,11 +292,79 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         error: 'Brand bible not configured',
+        errorKind: 'missing_bible',
         hint: 'Complete brand bible in /marketing first.',
       },
       { status: 400 },
     );
   }
+
+  // PR #72 — Sprint 7.2A hotfix: idempotency check.
+  //
+  // Before paying Opus, look for a running job on this project. If
+  // one exists and is fresh (< STALE_JOB_MS old), reject the new call
+  // with 409 + the existing job id so the client can show "Analysis
+  // already running, wait ~30s" instead of starting a parallel call.
+  //
+  // If a "running" row exists but is older than STALE_JOB_MS, the
+  // handler obviously crashed (no completion write) — we mark it
+  // failed and proceed with a fresh job.
+  const staleThreshold = new Date(Date.now() - STALE_JOB_MS);
+  const [inFlight] = await db
+    .select()
+    .from(brandAnalysisJobs)
+    .where(
+      and(
+        eq(brandAnalysisJobs.projectId, projectId),
+        eq(brandAnalysisJobs.status, 'running'),
+        gte(brandAnalysisJobs.startedAt, staleThreshold),
+      ),
+    )
+    .orderBy(desc(brandAnalysisJobs.startedAt))
+    .limit(1);
+
+  if (inFlight) {
+    return NextResponse.json(
+      {
+        success: false,
+        inProgress: true,
+        jobId: inFlight.id,
+        startedAt: inFlight.startedAt,
+        hint: 'Analysis already running for this project. Wait ~30s for the in-flight call to finish.',
+      },
+      { status: 409 },
+    );
+  }
+
+  // Sweep stale 'running' rows for this project. There won't be many
+  // (max one or two from prior crashes); the partial index keeps this
+  // O(log n).
+  await db
+    .update(brandAnalysisJobs)
+    .set({
+      status: 'failed',
+      errorKind: 'timeout',
+      errorMessage: 'Marked failed by stale-sweep (>5min running).',
+      completedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(brandAnalysisJobs.projectId, projectId),
+        eq(brandAnalysisJobs.status, 'running'),
+      ),
+    );
+
+  // Claim a fresh job row. From here on every exit path MUST update
+  // this row to completed/failed before returning, otherwise the
+  // next call will block until the stale-sweep above kicks in.
+  const [job] = await db
+    .insert(brandAnalysisJobs)
+    .values({
+      projectId,
+      userId: user.id,
+      status: 'running',
+    })
+    .returning();
 
   // Pull configured competitors so Opus has signal on what to
   // contrast against.
@@ -256,20 +428,30 @@ Analyze. Return JSON.`;
     pass1 = JSON.parse(cleanJson(raw)) as DeepAnalysis;
   } catch (err) {
     console.error('[analyze-brand] pass 1 failed:', err);
-    return NextResponse.json(
-      {
-        error: 'Brand analysis (pass 1) failed',
-        details: err instanceof Error ? err.message : String(err),
-      },
-      { status: 502 },
-    );
+    const cat = categorizeError(err);
+    await db
+      .update(brandAnalysisJobs)
+      .set({
+        status: 'failed',
+        errorKind: cat.kind,
+        errorMessage: cat.message.slice(0, 1000),
+        completedAt: new Date(),
+      })
+      .where(eq(brandAnalysisJobs.id, job.id));
+    return errorResponse(cat.kind);
   }
 
   if (!pass1 || !pass1.niche) {
-    return NextResponse.json(
-      { error: 'Pass 1 returned unusable output' },
-      { status: 502 },
-    );
+    await db
+      .update(brandAnalysisJobs)
+      .set({
+        status: 'failed',
+        errorKind: 'json',
+        errorMessage: 'Pass 1 returned unusable output (missing niche).',
+        completedAt: new Date(),
+      })
+      .where(eq(brandAnalysisJobs.id, job.id));
+    return errorResponse('json');
   }
 
   // Clamp specificity to the three allowed values.
@@ -427,10 +609,18 @@ Expand into search keywords + suggested sources + tone guidance + competitor ang
     })
     .returning();
 
+  // Mark the job complete. We don't store the result on the job row —
+  // brand_analysis IS the result. The job table just tracks lifecycle.
+  await db
+    .update(brandAnalysisJobs)
+    .set({ status: 'completed', completedAt: new Date() })
+    .where(eq(brandAnalysisJobs.id, job.id));
+
   return NextResponse.json({
     success: true,
     cached: false,
     analysis: saved,
+    jobId: job.id,
   });
 }
 
