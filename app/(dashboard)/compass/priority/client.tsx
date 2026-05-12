@@ -19,6 +19,7 @@ import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { GlassCard } from '@/components/ui/glass-card';
 import { Button } from '@/components/ui/button';
+import { CompassSubNav } from '@/components/compass/sub-nav';
 
 interface MatrixSummary {
   id: string;
@@ -395,43 +396,6 @@ export function PriorityClient({
           All items dismissed or done. Regenerate to surface new moves.
         </GlassCard>
       )}
-    </div>
-  );
-}
-
-// Sibling-page nav so the founder can hop between Compass surfaces
-// without going through the dashboard sidebar each time.
-function CompassSubNav({
-  active,
-}: {
-  active: 'home' | 'priority' | 'competitors';
-}) {
-  const tabs: Array<{ key: typeof active; href: string; label: string }> = [
-    { key: 'home', href: '/compass', label: 'Score' },
-    { key: 'priority', href: '/compass/priority', label: 'Priority' },
-    { key: 'competitors', href: '/compass/competitors', label: 'Competitors' },
-  ];
-  return (
-    <div className="flex items-center gap-1 text-xs font-mono uppercase tracking-[0.15em] text-text-3">
-      <Link href="/compass" className="hover:text-text-1 transition-colors">
-        Compass
-      </Link>
-      <span>/</span>
-      {tabs.map((t, i) => (
-        <span key={t.key} className="flex items-center gap-1">
-          <Link
-            href={t.href}
-            className={
-              t.key === active
-                ? 'text-text-1'
-                : 'hover:text-text-1 transition-colors'
-            }
-          >
-            {t.label}
-          </Link>
-          {i < tabs.length - 1 && <span className="opacity-50">·</span>}
-        </span>
-      ))}
     </div>
   );
 }

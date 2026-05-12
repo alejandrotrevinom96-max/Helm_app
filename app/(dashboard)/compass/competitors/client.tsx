@@ -17,6 +17,7 @@ import { useCallback, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { GlassCard } from '@/components/ui/glass-card';
 import { Button } from '@/components/ui/button';
+import { CompassSubNav } from '@/components/compass/sub-nav';
 
 interface CompetitorRow {
   id: string;
@@ -366,13 +367,7 @@ export function CompetitorsClient({
   return (
     <div className="p-4 md:p-8 space-y-8 max-w-5xl mx-auto">
       <header className="space-y-2">
-        <div className="flex items-center gap-3 text-text-3 text-xs font-mono uppercase tracking-[0.15em]">
-          <Link href="/compass" className="hover:text-text-1 transition-colors">
-            Compass
-          </Link>
-          <span>/</span>
-          <span>Positioning</span>
-        </div>
+        <CompassSubNav active="competitors" />
         <h1 className="font-display text-display-md font-light tracking-tight">
           Positioning Benchmark
         </h1>

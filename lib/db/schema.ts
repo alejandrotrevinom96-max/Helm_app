@@ -877,6 +877,47 @@ export const researchInsights = pgTable('research_insights', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
+// ===== Compass Strategic Timeline (PR #69 — Sprint 7.1D) =====
+//
+// Weekly canvas of STRATEGIC tasks (research / decision / review /
+// positioning / generate / other) — deliberately separate from the
+// Marketing Calendar which holds tactical scheduled posts.
+//
+// `sourcePriorityItemId` references a priorityItems row but is NOT
+// a foreign key — when a matrix is regenerated, its items get
+// cascade-deleted (priorityMatrices → priorityItems), and we'd
+// rather keep the historical task with an orphaned attribution
+// than lose the founder's work. The column documents provenance.
+//
+// `generatedDraftId` + `linkedScheduledPostId` are connect-back
+// pointers for "generate" tasks (filled in once the founder
+// actually creates the draft from /marketing/generate).
+export const compassTasks = pgTable('compass_tasks', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  projectId: uuid('project_id')
+    .notNull()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull(),
+  title: text('title').notNull(),
+  description: text('description'),
+  taskType: text('task_type').notNull(), // 'research' | 'decision' | 'review' | 'positioning' | 'generate' | 'other'
+  scheduledFor: timestamp('scheduled_for').notNull(),
+  estimatedMinutes: integer('estimated_minutes'),
+  effortLevel: text('effort_level'), // 'low' | 'medium' | 'high'
+  status: text('status').default('pending').notNull(), // 'pending' | 'in_progress' | 'done' | 'skipped'
+  completedAt: timestamp('completed_at'),
+  sourceType: text('source_type'), // 'priority_item' | 'manual'
+  sourcePriorityItemId: uuid('source_priority_item_id'), // unenforced ref to priorityItems
+  sourceContext: text('source_context'),
+  generatedDraftId: uuid('generated_draft_id'),
+  linkedScheduledPostId: uuid('linked_scheduled_post_id'),
+  suggestedPlatform: text('suggested_platform'),
+  suggestedContentType: text('suggested_content_type'),
+  suggestedPrompt: text('suggested_prompt'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
 // ===== Compass Priority Matrix (PR #68 — Sprint 7.1B) =====
 //
 // Strategic moves matrix scored on Impact (0-100) × Effort (0-100),
@@ -1183,3 +1224,4 @@ export type Competitor = typeof competitors.$inferSelect;
 export type PositioningBenchmark = typeof positioningBenchmarks.$inferSelect;
 export type PriorityMatrix = typeof priorityMatrices.$inferSelect;
 export type PriorityItem = typeof priorityItems.$inferSelect;
+export type CompassTask = typeof compassTasks.$inferSelect;
