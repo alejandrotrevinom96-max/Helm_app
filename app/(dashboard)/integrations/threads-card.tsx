@@ -84,9 +84,30 @@ export function ThreadsCard({ projectId }: Props) {
         </div>
       </div>
 
-      {!state.connected && state.error && (
-        <div className="mt-3 text-xs text-danger break-words">
-          {state.error}
+      {!state.connected && !state.loading && (
+        <div className="mt-4 pt-4 border-t border-border space-y-2">
+          {state.error && (
+            <div className="text-xs text-danger break-words">
+              {state.error}
+            </div>
+          )}
+          {/* PR #78 — Sprint 7.5: explicit re-auth CTA. The Meta
+              OAuth flow now requests threads_basic +
+              threads_content_publish (see
+              app/api/integrations/meta/authorize/route.ts) and
+              passes auth_type=rerequest so existing users who
+              already granted the pre-Threads scope set are
+              prompted again for the new permissions. */}
+          <a
+            href={`/api/integrations/meta/authorize?projectId=${projectId}`}
+            className="inline-flex items-center gap-2 px-3 py-1.5 rounded bg-accent text-white text-xs font-medium hover:opacity-90"
+          >
+            Re-authorize Meta with Threads scopes →
+          </a>
+          <p className="text-[10px] font-mono text-text-3">
+            opens Meta consent · re-uses the same Meta integration · no
+            second login needed
+          </p>
         </div>
       )}
     </GlassCard>

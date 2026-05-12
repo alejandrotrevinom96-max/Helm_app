@@ -21,6 +21,15 @@ import { signState } from '@/lib/security/oauth-state';
 
 // Scopes — keep this list MINIMAL. Meta App Review explicitly rejects
 // apps that request permissions they don't exercise.
+//
+// PR #78 — Sprint 7.5: added `threads_basic` + `threads_content_publish`
+// so the same Meta OAuth flow grants the token that lib/threads/client.ts
+// needs to publish to Threads. The /integrations Threads card was already
+// surfacing "Meta token missing threads scope" — that error existed
+// because we tried to publish without ever asking for the permission.
+// These scopes require Meta App Review approval before they appear in
+// the consent dialog for non-developer users. For the operator's own
+// account in development, they show up immediately.
 const META_SCOPES = [
   'pages_show_list', // list user's pages
   'pages_read_engagement', // read page metadata
@@ -28,6 +37,9 @@ const META_SCOPES = [
   'instagram_basic', // basic IG info
   'instagram_content_publish', // publish IG media
   'business_management', // resolve IG Business ↔ FB Page
+  // Threads (PR #78 — Sprint 7.5):
+  'threads_basic',
+  'threads_content_publish',
 ];
 
 export async function GET(request: Request) {
@@ -84,6 +96,13 @@ export async function GET(request: Request) {
   authUrl.searchParams.set('scope', META_SCOPES.join(','));
   authUrl.searchParams.set('state', state);
   authUrl.searchParams.set('response_type', 'code');
+  // PR #78 — Sprint 7.5: force the consent dialog to re-prompt for
+  // any scopes the user previously declined or skipped. Without this,
+  // a user who already granted the original scopes (pre-Threads) would
+  // be sent through a silent re-auth — the new `threads_*` scopes
+  // would be silently dropped and we'd end up with the same "missing
+  // scopes" state. `rerequest` makes Meta explicitly ask again.
+  authUrl.searchParams.set('auth_type', 'rerequest');
 
   return NextResponse.redirect(authUrl.toString());
 }
