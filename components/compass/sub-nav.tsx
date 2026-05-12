@@ -15,7 +15,12 @@
 // single render-time decision.
 import Link from 'next/link';
 
-export type CompassTab = 'home' | 'priority' | 'competitors' | 'timeline';
+export type CompassTab =
+  | 'home'
+  | 'priority'
+  | 'competitors'
+  | 'timeline'
+  | 'blind-spots';
 
 interface TabDef {
   key: CompassTab;
@@ -28,6 +33,8 @@ const TABS: TabDef[] = [
   { key: 'priority', href: '/compass/priority', label: 'Priority' },
   { key: 'competitors', href: '/compass/competitors', label: 'Competitors' },
   { key: 'timeline', href: '/compass/timeline', label: 'Timeline' },
+  // PR #70 — Sprint 7.1C: blind spots detector.
+  { key: 'blind-spots', href: '/compass/blind-spots', label: 'Blind Spots' },
 ];
 
 interface Props {

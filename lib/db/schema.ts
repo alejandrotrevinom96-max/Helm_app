@@ -877,6 +877,44 @@ export const researchInsights = pgTable('research_insights', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
+// ===== Compass Blind Spots (PR #70 — Sprint 7.1C) =====
+//
+// Strategic blind-spot detection across 6 fixed frameworks:
+// credibility_gap, pricing_psychology, icp_drift,
+// content_product_mismatch, platform_scatter, social_proof_vacuum.
+//
+// Always 6 rows per project per scan (one per framework, even when
+// `detected=false`) — transparency over hiding. Scan endpoint
+// DELETEs the previous batch before INSERTing a fresh one, so the
+// most recent scan is always the source of truth.
+//
+// 14-day TTL — the strategic picture doesn't shift that fast and
+// each scan is ~$0.15 Opus.
+export const compassBlindSpots = pgTable('compass_blind_spots', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  projectId: uuid('project_id')
+    .notNull()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull(),
+  framework: text('framework').notNull(), // 6-value closed set, validated upstream
+  detected: boolean('detected').notNull(),
+  severity: text('severity'), // 'low' | 'medium' | 'high' | 'critical' | null
+  confidenceScore: integer('confidence_score'),
+  title: text('title').notNull(),
+  description: text('description').notNull(),
+  evidence: jsonb('evidence'), // string[] of concrete citations
+  recommendation: text('recommendation'),
+  suggestedActions: jsonb('suggested_actions'), // string[]
+  inputsAnalyzed: jsonb('inputs_analyzed'),
+  userStatus: text('user_status').default('open').notNull(), // 'open' | 'acknowledged' | 'dismissed' | 'resolved'
+  userNotes: text('user_notes'),
+  modelUsed: text('model_used').default('claude-opus-4-7'),
+  generationCostUsd: numeric('generation_cost_usd', { precision: 10, scale: 4 }),
+  expiresAt: timestamp('expires_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
 // ===== Compass Strategic Timeline (PR #69 — Sprint 7.1D) =====
 //
 // Weekly canvas of STRATEGIC tasks (research / decision / review /
@@ -1225,3 +1263,4 @@ export type PositioningBenchmark = typeof positioningBenchmarks.$inferSelect;
 export type PriorityMatrix = typeof priorityMatrices.$inferSelect;
 export type PriorityItem = typeof priorityItems.$inferSelect;
 export type CompassTask = typeof compassTasks.$inferSelect;
+export type CompassBlindSpot = typeof compassBlindSpots.$inferSelect;
