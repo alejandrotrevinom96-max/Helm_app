@@ -877,6 +877,60 @@ export const researchInsights = pgTable('research_insights', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
+// ===== Compass Priority Matrix (PR #68 — Sprint 7.1B) =====
+//
+// Strategic moves matrix scored on Impact (0-100) × Effort (0-100),
+// quadrant-bucketed. One matrix row per generation; child rows in
+// priority_items hold the actual moves with source attribution.
+//
+// Cached 7 days so Compass dashboard loads are cheap (Opus ~$0.15
+// per regen). Founder can force-regenerate via the UI's "Regenerate"
+// button.
+export const priorityMatrices = pgTable('priority_matrices', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  projectId: uuid('project_id')
+    .notNull()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull(),
+  sourcesUsed: jsonb('sources_used'), // {brandAnalysisId, benchmarkId, insightsCount, postsCount}
+  totalItems: integer('total_items'),
+  itemsDoNow: integer('items_do_now'),
+  itemsScheduled: integer('items_scheduled'),
+  itemsFillers: integer('items_fillers'),
+  itemsAvoid: integer('items_avoid'),
+  modelUsed: text('model_used').default('claude-opus-4-7'),
+  generationCostUsd: numeric('generation_cost_usd', { precision: 10, scale: 4 }),
+  expiresAt: timestamp('expires_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// Each row is one strategic move. `userOverrideQuadrant` lets the
+// founder manually re-bucket without re-running Opus. `userStatus`
+// is a kanban-lite lifecycle (pending → in_progress → done) so the
+// matrix stays useful as work happens.
+export const priorityItems = pgTable('priority_items', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  matrixId: uuid('matrix_id')
+    .notNull()
+    .references(() => priorityMatrices.id, { onDelete: 'cascade' }),
+  projectId: uuid('project_id').notNull(),
+  title: text('title').notNull(),
+  description: text('description'),
+  impactScore: integer('impact_score').notNull(),
+  effortScore: integer('effort_score').notNull(),
+  quadrant: text('quadrant').notNull(), // 'do_now' | 'scheduled' | 'fillers' | 'avoid'
+  sourceType: text('source_type'), // 'pain_point' | 'opportunity' | 'competitor_gap' | 'content_gap'
+  sourceContext: text('source_context'),
+  suggestedAction: text('suggested_action'),
+  suggestedContentType: text('suggested_content_type'),
+  suggestedPlatform: text('suggested_platform'),
+  userStatus: text('user_status').default('pending').notNull(), // 'pending' | 'in_progress' | 'done' | 'dismissed'
+  userOverrideQuadrant: text('user_override_quadrant'),
+  reasoning: text('reasoning'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
 // ===== Compass Competitors (PR #67 — Sprint 7.1A) =====
 // One row per (project, competitor URL). Detected by Opus 4.7 OR
 // added manually by the founder. Confidence threshold C-3:
@@ -1127,3 +1181,5 @@ export type BrandAnalysisRow = typeof brandAnalysis.$inferSelect;
 export type LinkedinIntegration = typeof linkedinIntegrations.$inferSelect;
 export type Competitor = typeof competitors.$inferSelect;
 export type PositioningBenchmark = typeof positioningBenchmarks.$inferSelect;
+export type PriorityMatrix = typeof priorityMatrices.$inferSelect;
+export type PriorityItem = typeof priorityItems.$inferSelect;
