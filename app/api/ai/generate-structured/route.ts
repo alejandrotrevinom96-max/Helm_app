@@ -54,6 +54,13 @@ import {
 // after structured-draft path skipped it during the Sprint 7.0.4
 // pipeline migration.
 import { computeConsistencyScore } from '@/lib/ai/consistency-score';
+// PR Sprint 7.14 — feedback memory loop. Voice Memory (👍/👎 on
+// drafts) + Performance Memory (worked/flopped on published
+// rows) were captured by the UI but never reached this generator
+// — only the legacy /api/ai/generate-post pipeline read them.
+// Now the same dual-learning blocks flow into the cached system
+// prompt here so the new structured generator honors them too.
+import { loadFeedbackMemoryBlock } from '@/lib/ai/feedback-memory';
 
 export const maxDuration = 60;
 
@@ -306,9 +313,36 @@ export async function POST(request: Request) {
   );
   const userPrompt = (prompt ?? '').trim() || 'Generate content based on brand context.';
 
+  // PR Sprint 7.14 — load Voice Memory + Performance Memory.
+  // Best-effort: a DB failure leaves the blocks as their
+  // "not-enough-data" stubs (the builders are tolerant) so a
+  // transient outage on the feedback side doesn't kill the
+  // whole generate call. Goes in the SYSTEM prompt because
+  // (a) Anthropic's prompt cache amortizes it across the N
+  // content types in this batch and (b) feedback signals
+  // change rarely (per-vote, per-rating events), so the cache
+  // window stays warm for typical session activity.
+  let feedbackBlock = '';
+  try {
+    const fb = await loadFeedbackMemoryBlock(projectId);
+    feedbackBlock = fb.block;
+  } catch (err) {
+    console.warn(
+      '[generate-structured] feedback memory load failed:',
+      err instanceof Error ? err.message : err,
+    );
+  }
+
   // The cached system prompt is the same for every type in this
   // batch. Once warmed it costs ~10% of regular input on subsequent
   // calls inside the 5-min cache window.
+  //
+  // PR Sprint 7.14 — Voice Memory + Performance Memory blocks
+  // join Brand + Voice Fingerprint in the system block. The
+  // DUAL_LEARNING_GUIDANCE bundled inside feedbackBlock makes
+  // the voice-vs-performance separation explicit so Claude
+  // doesn't conflate "this style worked" with "this style
+  // sounds like the founder."
   const systemPrompt = `You are Helm's content generator. You produce one structured draft per request, matching the brand voice and the exact schema specified by the caller.
 
 BRAND
@@ -316,6 +350,8 @@ ${brand}
 
 VOICE FINGERPRINT
 ${voice}
+
+${feedbackBlock}
 
 RULES (every output)
 - Match the brand voice exactly — use brand phrases, avoid banned terms.

@@ -6,7 +6,7 @@ import {
   brandQuotes,
   scheduledPosts,
 } from '@/lib/db/schema';
-import { eq, and, inArray, sql, desc, isNotNull } from 'drizzle-orm';
+import { eq, and, inArray, sql, desc } from 'drizzle-orm';
 import { anthropic } from '@/lib/ai/claude';
 import { getTemplateById } from '@/lib/marketing/templates';
 import {
@@ -15,6 +15,19 @@ import {
 } from '@/lib/ai/consistency-score';
 import { isVoiceFingerprint } from '@/lib/types/voice';
 import type { VoiceFingerprint } from '@/lib/types/voice';
+// PR Sprint 7.14 — shared feedback-memory module. Replaces the
+// inline buildVoiceMemoryBlock + buildPerformanceBlock + loaders
+// that lived in this file (Sprint 6.8). Same behavior; the
+// extraction lets /api/ai/generate-structured consume the same
+// blocks so the new structured generator honors 👍/👎 / worked /
+// flopped signals too.
+import {
+  loadVoiceMemory,
+  loadPerformanceMemory,
+  buildVoiceMemoryBlock,
+  buildPerformanceBlock,
+  DUAL_LEARNING_GUIDANCE,
+} from '@/lib/ai/feedback-memory';
 // PR #47 — Sprint 6.7.5: removed `generateVisual` /
 // `uploadVisualFromUrl` imports along with the auto-visual
 // block they served. Visuals now go exclusively through
@@ -63,26 +76,10 @@ function isPlatform(p: unknown): p is Platform {
 // enough data" stub so the prompt structure stays stable across
 // projects with zero, partial, and full learning history.
 
-const VOICE_MEMORY_THRESHOLD = 5; // total votes before learning kicks in
-const PERFORMANCE_THRESHOLD = 5; // total ratings before learning kicks in
-const VOICE_MEMORY_LIMIT = 10; // recent N liked + N disliked
-const PERFORMANCE_LIMIT = 10; // recent N worked + N flopped
-
-interface VotedDraftRow {
-  content: string;
-  votedAt: Date | null;
-}
-
-interface RatedScheduledRow {
-  content: string;
-  performanceRating: string | null;
-  performanceNote: string | null;
-  metricsImpressions: number | null;
-  metricsLikes: number | null;
-  metricsComments: number | null;
-  metricsShares: number | null;
-  ratedAt: Date | null;
-}
+// PR Sprint 7.14 — thresholds, row interfaces, voice / performance
+// builders, and DUAL_LEARNING_GUIDANCE moved to
+// lib/ai/feedback-memory.ts. This route imports + uses them
+// unchanged; the structured generator imports the same module.
 
 function buildVoiceFingerprintBlock(
   fingerprint: VoiceFingerprint | null
@@ -113,98 +110,9 @@ No voice fingerprint yet. Add 3+ quotes to this project's Quote Vault and Helm w
   return parts.join('\n');
 }
 
-function buildVoiceMemoryBlock(
-  liked: VotedDraftRow[],
-  disliked: VotedDraftRow[]
-): string {
-  const total = liked.length + disliked.length;
-  if (total < VOICE_MEMORY_THRESHOLD) {
-    return `## VOICE MEMORY
-
-Not enough draft feedback yet (${total}/${VOICE_MEMORY_THRESHOLD} votes needed before patterns can be inferred). Use Brand Bible voice settings only for now.`;
-  }
-  const truncate = (s: string) => (s.length > 200 ? s.slice(0, 200) + '…' : s);
-  const parts: string[] = [
-    '## VOICE MEMORY (founder feedback on previous AI drafts)',
-    '',
-    'When generating new drafts, lean toward LIKED structural patterns (opening style, hook shape, length, emoji usage, question types) and avoid DISLIKED patterns. These are about HOW to write — not WHAT to write about.',
-  ];
-  if (liked.length > 0) {
-    parts.push('');
-    parts.push('Liked drafts (mimic the structure, tone, length):');
-    liked.forEach((d, i) => {
-      parts.push(`  Liked #${i + 1}: "${truncate(d.content)}"`);
-    });
-  }
-  if (disliked.length > 0) {
-    parts.push('');
-    parts.push('Disliked drafts (avoid these patterns):');
-    disliked.forEach((d, i) => {
-      parts.push(`  Disliked #${i + 1}: "${truncate(d.content)}"`);
-    });
-  }
-  return parts.join('\n');
-}
-
-function buildPerformanceBlock(rows: RatedScheduledRow[]): string {
-  const worked = rows.filter((r) => r.performanceRating === 'worked');
-  const flopped = rows.filter((r) => r.performanceRating === 'flopped');
-  const total = worked.length + flopped.length;
-  if (total < PERFORMANCE_THRESHOLD) {
-    return `## PERFORMANCE LEARNING
-
-Not enough rated published posts yet (${total}/${PERFORMANCE_THRESHOLD} ratings needed before topic-level patterns can be inferred). Use Brand Bible pillars only for topic selection.`;
-  }
-  const truncate = (s: string) => (s.length > 150 ? s.slice(0, 150) + '…' : s);
-  const renderMetrics = (r: RatedScheduledRow): string => {
-    const m: string[] = [];
-    if (r.metricsImpressions != null) m.push(`reach=${r.metricsImpressions}`);
-    if (r.metricsLikes != null) m.push(`likes=${r.metricsLikes}`);
-    if (r.metricsComments != null) m.push(`comments=${r.metricsComments}`);
-    if (r.metricsShares != null) m.push(`shares=${r.metricsShares}`);
-    return m.join(', ');
-  };
-  const parts: string[] = [
-    '## PERFORMANCE LEARNING (real-world feedback from published posts)',
-    '',
-    'When generating new posts, prioritize TOPICS and ANGLES similar to WORKED posts. Avoid TOPICS and ANGLES similar to FLOPPED posts. These are about WHAT to write about — not HOW to write.',
-  ];
-  if (worked.length > 0) {
-    parts.push('');
-    parts.push('Worked (replicate these angles/topics):');
-    worked.forEach((r, i) => {
-      const metrics = renderMetrics(r);
-      parts.push(`  Worked #${i + 1}: "${truncate(r.content)}"`);
-      if (r.performanceNote) parts.push(`    Why it worked: ${r.performanceNote}`);
-      if (metrics) parts.push(`    Metrics: ${metrics}`);
-    });
-  }
-  if (flopped.length > 0) {
-    parts.push('');
-    parts.push('Flopped (avoid these angles/topics):');
-    flopped.forEach((r, i) => {
-      parts.push(`  Flopped #${i + 1}: "${truncate(r.content)}"`);
-      if (r.performanceNote) parts.push(`    Why it flopped: ${r.performanceNote}`);
-    });
-  }
-  return parts.join('\n');
-}
-
-const DUAL_LEARNING_GUIDANCE = `## DUAL LEARNING SIGNAL ARCHITECTURE
-
-You receive TWO different signal types above. Treat them separately:
-
-🎨 VOICE signals (Brand Bible + Voice Fingerprint + Voice Memory):
-   These tell you HOW to write — structure, tone, length, hooks, vocabulary.
-   Honor them strictly: the founder has chosen this voice.
-
-📊 PERFORMANCE signals (Performance Learning):
-   These tell you WHAT to write about — topics, angles, framing.
-   Use them for topic selection and angle bias.
-
-Optimize for BOTH simultaneously: write in the founder's authentic voice ABOUT topics that have validated performance. Each draft should feel like the founder wrote it about a topic that resonates with their audience.
-
-If you only have one signal type (e.g. lots of voice data, no performance data), use the available signal and don't compensate by mixing.`;
+// PR Sprint 7.14 — buildVoiceMemoryBlock + buildPerformanceBlock
+// + DUAL_LEARNING_GUIDANCE moved to lib/ai/feedback-memory.ts so
+// /api/ai/generate-structured can consume the same blocks.
 
 // PR #42 — Sprint 6.7: bumped 3 → 4 so the generate page can show
 // drafts in a balanced 2-column grid (4 → 2×2). Founder feedback:
@@ -478,64 +386,14 @@ export async function POST(request: Request) {
       ? fingerprintRaw
       : null;
 
-  const [likedDrafts, dislikedDrafts] = await Promise.all([
-    db
-      .select({
-        content: generatedPosts.content,
-        votedAt: generatedPosts.votedAt,
-      })
-      .from(generatedPosts)
-      .where(
-        and(
-          eq(generatedPosts.projectId, projectId),
-          eq(generatedPosts.userVote, 'liked')
-        )
-      )
-      .orderBy(desc(generatedPosts.votedAt))
-      .limit(VOICE_MEMORY_LIMIT),
-    db
-      .select({
-        content: generatedPosts.content,
-        votedAt: generatedPosts.votedAt,
-      })
-      .from(generatedPosts)
-      .where(
-        and(
-          eq(generatedPosts.projectId, projectId),
-          eq(generatedPosts.userVote, 'disliked')
-        )
-      )
-      .orderBy(desc(generatedPosts.votedAt))
-      .limit(VOICE_MEMORY_LIMIT),
-  ]);
-
-  // PR #52 — Sprint 6.8.3: scheduled_posts is the only source
-  // of performance ratings. Pre-PR-52 we briefly merged from
-  // generated_posts too (Sprint 6.8.2), but Sprint 6.8.3 made
-  // drafts un-rateable: performance is post-fact reality, and
-  // a draft hasn't happened yet. The merge produced zero rows
-  // in practice and added complexity. Cleaner to query the
-  // one table that holds the signal.
-  const ratedScheduled = await db
-    .select({
-      content: scheduledPosts.content,
-      performanceRating: scheduledPosts.performanceRating,
-      performanceNote: scheduledPosts.performanceNote,
-      metricsImpressions: scheduledPosts.metricsImpressions,
-      metricsLikes: scheduledPosts.metricsLikes,
-      metricsComments: scheduledPosts.metricsComments,
-      metricsShares: scheduledPosts.metricsShares,
-      ratedAt: scheduledPosts.ratedAt,
-    })
-    .from(scheduledPosts)
-    .where(
-      and(
-        eq(scheduledPosts.projectId, projectId),
-        isNotNull(scheduledPosts.performanceRating)
-      )
-    )
-    .orderBy(desc(scheduledPosts.ratedAt))
-    .limit(PERFORMANCE_LIMIT * 2);
+  // PR Sprint 7.14 — Voice + Performance Memory loaders moved
+  // into lib/ai/feedback-memory.ts. Same queries, same shape,
+  // same thresholds; just shared with the structured generator.
+  const [{ liked: likedDrafts, disliked: dislikedDrafts }, ratedScheduled] =
+    await Promise.all([
+      loadVoiceMemory(projectId),
+      loadPerformanceMemory(projectId),
+    ]);
 
   const voiceFingerprintBlock = buildVoiceFingerprintBlock(fingerprint);
   const voiceMemoryBlock = buildVoiceMemoryBlock(likedDrafts, dislikedDrafts);
