@@ -79,44 +79,43 @@ const ERROR_DISPLAY: Record<
 > = {
   overloaded: {
     icon: '⏳',
-    title: 'Anthropic está saturado',
+    title: 'Anthropic is overloaded',
     defaultHint:
-      'Esto es temporal — esperá ~1 minuto y reintentá. Generalmente funciona al segundo intento.',
+      "This is temporary — wait ~1 minute and retry. It usually works on the second try.",
   },
   rate_limit: {
     icon: '🚦',
-    title: 'Demasiadas requests muy rápido',
-    defaultHint: 'Esperá ~30 segundos y dale otra vez.',
+    title: 'Too many requests too fast',
+    defaultHint: 'Wait ~30 seconds and try again.',
   },
   timeout: {
     icon: '⏱️',
-    title: 'La generación tardó demasiado',
+    title: 'Generation took too long',
     defaultHint:
-      'Probable que el contexto es muy denso. Reintentá — la red pudo ser el problema.',
+      'Probably a dense context. Retry — the network may have been the issue.',
   },
   json: {
     icon: '🔧',
-    title: 'Opus devolvió output malformado',
+    title: 'Opus returned malformed output',
     defaultHint:
-      'Esto es transient — reintentá, casi siempre funciona al segundo.',
+      "This is transient — retry, almost always works on the second try.",
   },
   auth: {
     icon: '🔐',
-    title: 'Problema técnico con el servicio AI',
-    defaultHint:
-      'No es algo que puedas resolver vos — contactanos por soporte.',
+    title: 'Technical issue with the AI service',
+    defaultHint: "Not something you can fix — contact support.",
   },
   insufficient_context: {
     icon: '📝',
-    title: 'Falta brand context',
+    title: 'Brand context missing',
     defaultHint:
-      'Volvé al step de Brand y agregá niche + audience. Eso le da a Opus material para trabajar.',
+      'Go back to the Brand step and add niche + audience. That gives Opus material to work with.',
   },
   unknown: {
     icon: '😞',
-    title: 'Algo falló al generar',
+    title: 'Something failed during generation',
     defaultHint:
-      'Reintentá una vez más — si persiste, escribinos con el detalle.',
+      "Retry once more — if it keeps happening, send us the details.",
   },
 };
 
@@ -190,7 +189,7 @@ export function FirstContentClient({ projectId, seedPrompt }: Props) {
         const kind: ErrorKind = data.errorKind ?? 'unknown';
         setError({
           kind,
-          message: data.error ?? 'No pudimos generar el post',
+          message: data.error ?? 'Could not generate the post',
           retry: data.retry ?? true,
           hint:
             data.hint ?? ERROR_DISPLAY[kind].defaultHint,
@@ -209,7 +208,7 @@ export function FirstContentClient({ projectId, seedPrompt }: Props) {
         const kind: ErrorKind = perDraft?.errorKind ?? 'unknown';
         setError({
           kind,
-          message: perDraft?.error ?? 'Draft no se generó',
+          message: perDraft?.error ?? 'Draft was not generated',
           retry: perDraft?.errorRetry ?? true,
           hint:
             perDraft?.errorHint ?? ERROR_DISPLAY[kind].defaultHint,
@@ -285,19 +284,19 @@ export function FirstContentClient({ projectId, seedPrompt }: Props) {
           ✨
         </div>
         <h1 className="font-display text-2xl font-light mb-2">
-          Generando tu primer post
+          Generating your first post
         </h1>
         <p className="text-text-3 mb-2">
-          Opus 4.7 con tu brand context + pain points reales.
+          Opus 4.7 with your brand context + real pain points.
         </p>
         <p className="text-xs text-text-3 mt-1">
           {elapsed < 12
-            ? 'Cargando contexto…'
+            ? 'Loading context…'
             : elapsed < 25
-              ? 'Generando carousel slides…'
+              ? 'Generating carousel slides…'
               : elapsed < 40
-                ? 'Refinando voice…'
-                : 'Casi listo…'}
+                ? 'Refining voice…'
+                : 'Almost there…'}
         </p>
         <div className="text-xs font-mono text-text-3 mt-3">{elapsed}s</div>
       </div>
@@ -332,15 +331,15 @@ export function FirstContentClient({ projectId, seedPrompt }: Props) {
             matters" reminder. */}
         {isInsufficient && (
           <div className="max-w-md mx-auto mb-6 p-4 bg-bg-elev/40 rounded-lg border border-border text-sm text-text-2">
-            <strong className="text-text-1">Tip:</strong> el step de Brand
-            toma ~2 minutos pero impacta TODO lo que Helm genere después.
-            Vale la pena.
+            <strong className="text-text-1">Tip:</strong> the Brand step
+            takes ~2 minutes but impacts EVERYTHING Helm generates
+            afterward. It&apos;s worth it.
           </div>
         )}
 
         <div className="flex gap-3 justify-center flex-wrap">
           {error?.retry && (
-            <Button onClick={() => void generate()}>Reintentar</Button>
+            <Button onClick={() => void generate()}>Retry</Button>
           )}
           {isInsufficient ? (
             <button
@@ -348,7 +347,7 @@ export function FirstContentClient({ projectId, seedPrompt }: Props) {
               onClick={() => router.push('/onboarding/brand')}
               className="px-4 py-2 border border-border rounded-lg text-sm hover:border-border-bright"
             >
-              Volver al step de Brand →
+              Back to Brand step →
             </button>
           ) : (
             <button
@@ -356,14 +355,14 @@ export function FirstContentClient({ projectId, seedPrompt }: Props) {
               onClick={skipToLibrary}
               className="px-4 py-2 border border-border rounded-lg text-sm hover:border-border-bright"
             >
-              Saltar a Marketing →
+              Skip to Marketing →
             </button>
           )}
         </div>
 
         <p className="text-xs text-text-3 mt-6">
-          Tu onboarding está casi completo. Podés generar contenido más tarde
-          desde /marketing/generate.
+          Your onboarding is almost complete. You can generate content
+          later from /marketing/generate.
         </p>
       </div>
     );
@@ -371,7 +370,7 @@ export function FirstContentClient({ projectId, seedPrompt }: Props) {
 
   // ── PHASE: DONE ───────────────────────────────────────────────
   const sc = draft?.structuredContent ?? {};
-  const headline = sc.hook ?? sc.caption ?? sc.title ?? 'Tu post';
+  const headline = sc.hook ?? sc.caption ?? sc.title ?? 'Your post';
   const slides = Array.isArray(sc.slides) ? sc.slides : [];
   const previewSlides = slides.slice(0, 3);
 
@@ -382,10 +381,11 @@ export function FirstContentClient({ projectId, seedPrompt }: Props) {
           🎉
         </div>
         <h1 className="font-display text-3xl md:text-4xl font-light tracking-tight mb-2">
-          Tu primer post está listo
+          Your first post is ready
         </h1>
         <p className="text-text-2">
-          Generado en TU voice, basado en pain point real de tu audiencia.
+          Generated in YOUR voice, based on a real pain point from your
+          audience.
         </p>
       </div>
 
@@ -412,43 +412,41 @@ export function FirstContentClient({ projectId, seedPrompt }: Props) {
             ))}
             {slides.length > 3 && (
               <p className="text-xs text-text-3 italic">
-                + {slides.length - 3} slide{slides.length - 3 === 1 ? '' : 's'}{' '}
-                más
+                + {slides.length - 3} more slide
+                {slides.length - 3 === 1 ? '' : 's'}
               </p>
             )}
           </div>
         ) : (
           <p className="text-sm text-text-3 italic">
-            (Estructura completa visible en Library.)
+            (Full structure visible in Library.)
           </p>
         )}
       </GlassCard>
 
       <div className="flex items-center justify-center gap-3 flex-wrap mb-12">
         <Button onClick={() => router.push('/marketing/library')} size="lg">
-          Ver en mi Library →
+          View in my Library →
         </Button>
         <button
           type="button"
           onClick={() => void generate()}
           className="px-4 py-3 border border-border rounded-lg text-sm hover:border-border-bright"
         >
-          Regenerar
+          Regenerate
         </button>
       </div>
 
       <GlassCard className="p-6">
         <h3 className="font-display text-lg font-light mb-3">
-          🎉 Onboarding completo
+          🎉 Onboarding complete
         </h3>
-        <p className="text-sm text-text-3 mb-4">
-          Próximos pasos sugeridos:
-        </p>
+        <p className="text-sm text-text-3 mb-4">Suggested next steps:</p>
         <ul className="text-sm space-y-2">
           <li className="flex items-start gap-2">
             <span aria-hidden>📅</span>
             <span>
-              Schedule tu primer post desde{' '}
+              Schedule your first post from{' '}
               <a
                 href="/marketing/library"
                 className="text-accent hover:underline"
@@ -460,17 +458,17 @@ export function FirstContentClient({ projectId, seedPrompt }: Props) {
           <li className="flex items-start gap-2">
             <span aria-hidden>🧭</span>
             <span>
-              Run un Compass scan en{' '}
+              Run a Compass scan at{' '}
               <a href="/compass" className="text-accent hover:underline">
                 /compass
               </a>{' '}
-              para estrategia semanal
+              for weekly strategy
             </span>
           </li>
           <li className="flex items-start gap-2">
             <span aria-hidden>📊</span>
             <span>
-              Explorá más pain points en{' '}
+              Explore more pain points at{' '}
               <a href="/research" className="text-accent hover:underline">
                 /research
               </a>

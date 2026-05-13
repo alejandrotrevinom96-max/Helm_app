@@ -29,7 +29,12 @@ import {
   compassDecisions,
 } from '@/lib/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
-import { anthropic, MODELS, cachedSystem } from '@/lib/ai/claude';
+import {
+  anthropic,
+  MODELS,
+  cachedSystem,
+  LANGUAGE_INSTRUCTION_ANALYSIS,
+} from '@/lib/ai/claude';
 import { trackUsage } from '@/lib/ai/usage-tracker';
 import { checkRateLimit } from '@/lib/rate-limit';
 
@@ -222,8 +227,9 @@ Reversibility (Bezos two-way doors):
 Discipline:
 - Cite brand context specifically (niche, audience, pillars).
 - No generic advice. If a risk isn't concrete, drop it.
-- Match the founder's working language (Spanish for LATAM brands).
-- Reasoning ≤ 600 chars total. Bounded output, no rambling.`;
+- Reasoning ≤ 600 chars total. Bounded output, no rambling.
+
+${LANGUAGE_INSTRUCTION_ANALYSIS}`;
 
   const userMessage = `BRAND NORTH STAR
 Name: ${project.name}

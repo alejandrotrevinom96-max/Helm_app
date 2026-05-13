@@ -21,26 +21,26 @@ const STEP_PREVIEWS = [
   {
     n: 1,
     icon: '📦',
-    label: 'Tu proyecto',
-    desc: 'Nombre + website. ~30 segundos.',
+    label: 'Your project',
+    desc: 'Name + website. ~30 seconds.',
   },
   {
     n: 2,
     icon: '🎯',
     label: 'Brand context',
-    desc: 'Nicho + audiencia. Lo más importante — 2 minutos.',
+    desc: 'Niche + audience. The most important step — 2 minutes.',
   },
   {
     n: 3,
     icon: '🔍',
     label: 'Research scan',
-    desc: 'Pain points reales de Reddit + HN. Automático.',
+    desc: 'Real pain points from Reddit + HN. Automatic.',
   },
   {
     n: 4,
     icon: '✨',
-    label: 'Tu primer post',
-    desc: 'Carrusel de Instagram en TU voice. Opus 4.7.',
+    label: 'Your first post',
+    desc: 'Instagram carousel in YOUR voice. Opus 4.7.',
   },
 ];
 
@@ -70,12 +70,12 @@ export function WelcomeClient({ userName }: Props) {
         👋
       </div>
       <h1 className="font-display text-4xl md:text-5xl font-light tracking-tight leading-tight mb-3">
-        Hey {userName}, bienvenido a Helm
+        Hey {userName}, welcome to Helm
       </h1>
       <p className="text-lg text-text-2 mb-10 max-w-xl mx-auto">
-        Vamos a setupear tu agencia de marketing AI en{' '}
-        <span className="text-text-1 font-medium">~5 minutos</span>. Al final
-        vas a tener tu primer carrusel generado en tu voice.
+        Let&apos;s set up your AI marketing agency in{' '}
+        <span className="text-text-1 font-medium">~5 minutes</span>. By the
+        end you&apos;ll have your first carousel generated in your voice.
       </p>
 
       <div className="max-w-md mx-auto space-y-2 mb-10 text-left">
@@ -86,7 +86,7 @@ export function WelcomeClient({ userName }: Props) {
             </span>
             <div className="min-w-0">
               <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-0.5">
-                Paso {s.n}
+                Step {s.n}
               </div>
               <div className="font-medium text-sm text-text-1">{s.label}</div>
               <div className="text-xs text-text-3 mt-0.5">{s.desc}</div>
@@ -96,12 +96,12 @@ export function WelcomeClient({ userName }: Props) {
       </div>
 
       <Button onClick={handleStart} disabled={busy} size="lg">
-        {busy ? 'Empezando…' : 'Empezar →'}
+        {busy ? 'Starting…' : 'Get started →'}
       </Button>
 
       <p className="text-xs text-text-3 mt-4">
-        Podés saltar pasos. Recomiendo NO saltar Brand — es el que más
-        impacta la quality de todo lo demás.
+        You can skip steps. I&apos;d recommend NOT skipping Brand — it&apos;s
+        what most impacts the quality of everything else.
       </p>
     </div>
   );

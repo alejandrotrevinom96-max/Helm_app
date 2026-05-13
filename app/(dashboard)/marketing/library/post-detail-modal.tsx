@@ -92,7 +92,7 @@ export function PostDetailModal({
     if (posting) return;
     if (
       !window.confirm(
-        '¿Publicar este post AHORA? Va directo a la integración conectada.',
+        'Publish this post NOW? Goes straight to the connected integration.',
       )
     ) {
       return;

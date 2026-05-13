@@ -189,9 +189,10 @@ export function DecisionsClient({
               Decision Log
             </h1>
             <p className="text-text-2 text-sm max-w-2xl">
-              Pre-decision alignment scoring + outcome tracking. La fricción
-              de scorear ANTES de commit es lo que evita pivots por impulso —
-              y el histórico revela patrones que solo se ven con tiempo.
+              Pre-decision alignment scoring + outcome tracking. The
+              friction of scoring BEFORE you commit is what prevents
+              impulse pivots — and the historical view surfaces patterns
+              you only see over time.
             </p>
           </div>
           {hasBrandAnalysis && (
@@ -215,8 +216,8 @@ export function DecisionsClient({
             Brand analysis required
           </h3>
           <p className="text-sm text-text-3 mb-3">
-            Sin un North Star no hay baseline para scorear alignment. Corré
-            Smart Auto-configure en /research primero.
+            Without a North Star there's no baseline to score alignment
+            against. Run Smart Auto-configure at /research first.
           </p>
           <Link href="/research">
             <Button size="sm">Open Research →</Button>
@@ -411,7 +412,7 @@ function NewDecisionForm({
 
       <input
         type="text"
-        placeholder="Decisión (ej: focusear solo en women solo travelers)"
+        placeholder="Decision (e.g. focus only on women solo travelers)"
         value={title}
         onChange={(e) => setTitle(e.target.value)}
         disabled={Boolean(scoring) || scoringLoading}
@@ -419,7 +420,7 @@ function NewDecisionForm({
       />
 
       <textarea
-        placeholder="¿Por qué? Context, opciones consideradas, signals..."
+        placeholder="Why? Context, options considered, signals..."
         value={description}
         onChange={(e) => setDescription(e.target.value)}
         rows={3}
@@ -442,7 +443,7 @@ function NewDecisionForm({
         </select>
 
         <label className="flex items-center gap-2 text-xs text-text-3">
-          Tu confianza:
+          Your confidence:
           <input
             type="range"
             min={0}
@@ -924,7 +925,7 @@ function EvalForm({
       </div>
 
       <textarea
-        placeholder="¿Qué pasó? Outcomes específicos observados…"
+        placeholder="What happened? Specific outcomes you observed…"
         value={notes}
         onChange={(e) => setNotes(e.target.value)}
         rows={2}
@@ -932,7 +933,7 @@ function EvalForm({
       />
 
       <textarea
-        placeholder="Lessons learned para la próxima…"
+        placeholder="Lessons learned for next time…"
         value={lessons}
         onChange={(e) => setLessons(e.target.value)}
         rows={2}
@@ -970,9 +971,9 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
           Log your first strategic decision
         </h3>
         <p className="text-sm text-text-3 max-w-md mx-auto">
-          Compass scorea alignment con tu North Star ANTES de commit. Después
-          podés trackear si funcionó — y con el tiempo se ven los patrones de
-          decisión que repiten errores o aciertos.
+          Compass scores alignment with your North Star BEFORE you commit.
+          Then you can track whether it worked — and over time the
+          decision patterns that repeat (wins or mistakes) become visible.
         </p>
       </div>
       <Button onClick={onCreate}>+ New decision</Button>

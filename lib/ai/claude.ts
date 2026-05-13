@@ -31,6 +31,39 @@ export const MODELS = {
   OPUS: OPUS_MODEL,
 } as const;
 
+// PR #81 — Sprint 7.6: shared language directive for Anthropic
+// system prompts.
+//
+// Pre-PR-81 no AI endpoint instructed the model about output
+// language. That worked when the founder + early users were
+// Mexican Spanish-speaking and the implicit input language carried
+// through. With a mixed user base, the same prompt could
+// occasionally respond in Spanish when the brand bible was
+// English — confusing for the founder and inconsistent with the
+// rest of the product chrome.
+//
+// The directive is split into two contracts so callers can pick:
+//
+//   LANGUAGE_INSTRUCTION_AUDIENCE — for CONTENT generation
+//     (Instagram captions, X tweets, LinkedIn essays). Generated
+//     content must match the brand's primary audience language so
+//     a Mexican-Spanish brand keeps producing Spanish posts; if no
+//     audience language is specified, defaults to English.
+//
+//   LANGUAGE_INSTRUCTION_ANALYSIS — for STRATEGIC analysis
+//     (Compass: blind spots, priority matrix, decision scoring,
+//     positioning benchmark, brand analysis). The reasoning the
+//     founder consumes is always English regardless of brand
+//     language, because the chrome around it is English and
+//     switching mid-screen reads as broken.
+//
+// Endpoint authors append the relevant constant near the end of
+// the system prompt (Anthropic respects directives placed close
+// to the task instruction better than buried at the top).
+export const LANGUAGE_INSTRUCTION_AUDIENCE = `LANGUAGE: Write in the brand's primary audience language as defined in the brand bible's audience.primary.description. If unspecified or unclear, default to English. Never switch language mid-output.`;
+
+export const LANGUAGE_INSTRUCTION_ANALYSIS = `LANGUAGE: Respond in English. Helm's product chrome is English-only and your reasoning is read alongside it. Brand bible inputs may be in any language — translate as needed when you summarize them in your output.`;
+
 // Marks a system prompt for ephemeral caching. SDK v0.32 only types
 // `cache_control` on the beta surface, but the runtime accepts it on
 // the regular endpoint — so we cast at the boundary. When the SDK

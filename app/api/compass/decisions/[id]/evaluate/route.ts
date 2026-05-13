@@ -24,7 +24,12 @@ import { createClient } from '@/lib/supabase/server';
 import { db } from '@/lib/db';
 import { projects, compassDecisions } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
-import { anthropic, MODELS, cachedSystem } from '@/lib/ai/claude';
+import {
+  anthropic,
+  MODELS,
+  cachedSystem,
+  LANGUAGE_INSTRUCTION_ANALYSIS,
+} from '@/lib/ai/claude';
 import { trackUsage } from '@/lib/ai/usage-tracker';
 import { checkRateLimit } from '@/lib/rate-limit';
 
@@ -154,7 +159,8 @@ Interpretation matrix:
 Discipline:
 - Cite the actual decision and outcome. No generic "this teaches that..."
 - patternInsight is 1 sentence MAX. Bounded output.
-- Match the founder's working language (Spanish for LATAM brands).`;
+
+${LANGUAGE_INSTRUCTION_ANALYSIS}`;
 
   const userMessage = `DECISION
 Title: ${decision.title}

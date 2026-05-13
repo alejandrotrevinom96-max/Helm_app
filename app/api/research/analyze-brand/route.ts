@@ -78,57 +78,63 @@ function categorizeError(
 // Builds the user-facing error response with a hint that depends on
 // the categorized kind. Status code is also kind-specific so the
 // client can disambiguate transient from terminal errors.
+//
+// PR #81 — Sprint 7.6: copy converted to English as part of the
+// i18n cleanup. A future refactor could collapse this into
+// describeError() from lib/ai/categorize-error.ts; for now both
+// produce the same English-language shape so the wire format is
+// consistent regardless of which endpoint surfaces the error.
 function errorResponse(kind: ReturnType<typeof categorizeError>['kind']) {
   switch (kind) {
     case 'overloaded':
       return NextResponse.json(
         {
-          error: 'Anthropic está saturado ahora mismo.',
+          error: 'Anthropic is overloaded right now.',
           errorKind: 'overloaded',
           retry: true,
           retryAfterSeconds: 60,
-          hint: 'Reintentá en ~1 minuto. La cola de Anthropic se libera rápido.',
+          hint: 'Retry in ~1 minute. The Anthropic queue clears fast.',
         },
         { status: 503 },
       );
     case 'rate_limit':
       return NextResponse.json(
         {
-          error: 'Anthropic rate-limit alcanzado.',
+          error: 'Anthropic rate limit hit.',
           errorKind: 'rate_limit',
           retry: true,
           retryAfterSeconds: 120,
-          hint: 'Esperá ~2 minutos antes del próximo intento.',
+          hint: 'Wait ~2 minutes before retrying.',
         },
         { status: 503 },
       );
     case 'timeout':
       return NextResponse.json(
         {
-          error: 'El análisis tardó más de 60s y se cortó.',
+          error: 'Analysis took longer than 60s and was cut off.',
           errorKind: 'timeout',
           retry: true,
-          hint: 'Tu brand bible puede ser muy extensa. Simplificá o reintentá — la red puede haber sido el problema.',
+          hint: 'Your brand bible may be too long. Simplify or retry — the network may have been the issue.',
         },
         { status: 504 },
       );
     case 'json':
       return NextResponse.json(
         {
-          error: 'Opus devolvió respuesta malformada.',
+          error: 'Opus returned malformed output.',
           errorKind: 'json',
           retry: true,
-          hint: 'Esto es transient. Reintentá una vez.',
+          hint: 'This is transient. Retry once.',
         },
         { status: 502 },
       );
     default:
       return NextResponse.json(
         {
-          error: 'Algo falló al analizar tu brand.',
+          error: 'Something failed while analyzing your brand.',
           errorKind: 'unknown',
           retry: true,
-          hint: 'Si vuelve a pasar, contactanos con el ID del job.',
+          hint: 'If it keeps happening, contact us with the job ID.',
         },
         { status: 500 },
       );

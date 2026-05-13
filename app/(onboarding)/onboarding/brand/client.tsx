@@ -64,7 +64,7 @@ export function BrandClient({
         error?: string;
       };
       if (!saveRes.ok || !saveData.success) {
-        setError(saveData.error ?? 'No pudimos guardar el brand context');
+        setError(saveData.error ?? 'Could not save brand context');
         setBusy(false);
         return;
       }
@@ -127,14 +127,14 @@ export function BrandClient({
         Brand context
       </h1>
       <p className="text-text-2 mb-3">
-        Helm necesita entender tu nicho para generar content específico (no
-        genérico).
+        Helm needs to understand your niche to generate specific content
+        (not generic).
       </p>
       <div className="mb-8 p-3 bg-accent/10 border border-accent/30 rounded-lg flex items-start gap-2">
         <Sparkles className="w-4 h-4 text-accent shrink-0 mt-0.5" />
         <p className="text-sm text-accent">
-          Este paso es el que más impacta la quality de TODO lo que Helm
-          genere. Vale los 2 minutos.
+          This step is what most impacts the quality of EVERYTHING Helm
+          generates. Worth the 2 minutes.
         </p>
       </div>
 
@@ -144,20 +144,20 @@ export function BrandClient({
             htmlFor="brand-niche"
             className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2 block"
           >
-            ¿Qué hace tu producto? (lo más específico posible) *
+            What does your product do? (as specific as possible) *
           </label>
           <textarea
             id="brand-niche"
             value={niche}
             onChange={(e) => setNiche(e.target.value.slice(0, 500))}
-            placeholder="ej: AI travel planning para mujeres mexicanas 28-42 en transición vital (duelo, divorcio, burnout)"
+            placeholder="e.g. AI travel planning for Mexican women 28-42 in life transitions (grief, divorce, burnout)"
             rows={2}
             disabled={busy}
             className="w-full px-3 py-2 bg-bg border border-border rounded-lg text-sm outline-none focus:border-accent resize-none"
           />
           <p className="text-xs text-text-3 mt-1">
-            &quot;App de viajes&quot; es muy genérico. La especificidad es donde están
-            las ideas.
+            &quot;Travel app&quot; is too generic. Specificity is where the ideas
+            live.
           </p>
         </div>
 
@@ -166,13 +166,13 @@ export function BrandClient({
             htmlFor="brand-audience"
             className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2 block"
           >
-            ¿Quién es tu audiencia primaria? *
+            Who is your primary audience? *
           </label>
           <textarea
             id="brand-audience"
             value={audience}
             onChange={(e) => setAudience(e.target.value.slice(0, 500))}
-            placeholder="ej: Mujeres mexicanas 28-42 saliendo de duelo / divorcio / burnout, profesionales clase media-alta CDMX/MTY"
+            placeholder="e.g. Mexican women 28-42 coming out of grief / divorce / burnout, upper-middle-class professionals in CDMX/MTY"
             rows={2}
             disabled={busy}
             className="w-full px-3 py-2 bg-bg border border-border rounded-lg text-sm outline-none focus:border-accent resize-none"
@@ -184,13 +184,13 @@ export function BrandClient({
             htmlFor="brand-tone"
             className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2 block"
           >
-            Voice / tono de tu brand (opcional)
+            Brand voice / tone (optional)
           </label>
           <textarea
             id="brand-tone"
             value={tone}
             onChange={(e) => setTone(e.target.value.slice(0, 1000))}
-            placeholder="ej: Directa, empática, sin tono utilitario gringo. Español mexicano natural, no neutro."
+            placeholder="e.g. Direct, empathetic, no utilitarian American tech tone. Natural Mexican Spanish, not neutral."
             rows={3}
             disabled={busy}
             className="w-full px-3 py-2 bg-bg border border-border rounded-lg text-sm outline-none focus:border-accent resize-none"
@@ -209,7 +209,7 @@ export function BrandClient({
           href="/onboarding/project"
           className="text-sm text-text-3 hover:text-text-1"
         >
-          ← Atrás
+          ← Back
         </a>
         <div className="flex items-center gap-3">
           <button
@@ -218,13 +218,13 @@ export function BrandClient({
             disabled={busy}
             className="text-sm text-text-3 hover:text-text-1 px-2"
           >
-            Skip por ahora
+            Skip for now
           </button>
           <Button
             onClick={handleContinue}
             disabled={!niche.trim() || !audience.trim() || busy}
           >
-            {busy ? 'Guardando…' : 'Continuar →'}
+            {busy ? 'Saving…' : 'Continue →'}
           </Button>
         </div>
       </div>

@@ -24,7 +24,12 @@ import {
 } from '@/lib/db/schema';
 import { eq, and, inArray } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
-import { anthropic, MODELS, cachedSystem } from '@/lib/ai/claude';
+import {
+  anthropic,
+  MODELS,
+  cachedSystem,
+  LANGUAGE_INSTRUCTION_AUDIENCE,
+} from '@/lib/ai/claude';
 import { trackUsage } from '@/lib/ai/usage-tracker';
 import { checkRateLimit } from '@/lib/rate-limit';
 import {
@@ -297,7 +302,9 @@ RULES (every output)
 - Respect the per-type guidelines provided in the user message.
 - Return STRICT JSON only — no prose outside the JSON, no markdown fences.
 - The JSON must validate against the provided structureSchema.
-- Never invent facts about the audience or product beyond the brand bible.`;
+- Never invent facts about the audience or product beyond the brand bible.
+
+${LANGUAGE_INSTRUCTION_AUDIENCE}`;
 
   const drafts: DraftPayload[] = [];
 

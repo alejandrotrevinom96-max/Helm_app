@@ -130,7 +130,7 @@ export function CompassLandingClient({
           <p className="text-text-2 text-sm max-w-2xl">
             Strategic dashboard for{' '}
             <span className="text-text-1 font-medium">{project.name}</span>.
-            Cliqueá cualquier feature para ver detalle.
+            Click any feature for the deep dive.
           </p>
         </div>
       </header>
@@ -180,7 +180,7 @@ export function CompassLandingClient({
               </div>
             ) : (
               <p className="text-sm text-text-3 mt-3">
-                Generá tu primer Priority Matrix para ver tareas por Impact ×
+                Generate your first Priority Matrix to see tasks by Impact ×
                 Effort.
               </p>
             )}
@@ -224,7 +224,7 @@ export function CompassLandingClient({
               </div>
             ) : (
               <p className="text-sm text-text-3 mt-3">
-                Identificá competidores + market gap en ~30 segundos.
+                Identify competitors + market gap in ~30 seconds.
               </p>
             )}
           </GlassCard>
@@ -240,8 +240,8 @@ export function CompassLandingClient({
               eyebrow="Strategic Timeline"
               title={
                 upcomingTasks.length > 0
-                  ? `${upcomingTasks.length} próximas tareas`
-                  : 'Sin tareas programadas'
+                  ? `${upcomingTasks.length} upcoming task${upcomingTasks.length === 1 ? '' : 's'}`
+                  : 'No tasks scheduled'
               }
               meta={null}
             />
@@ -258,7 +258,7 @@ export function CompassLandingClient({
               </ul>
             ) : (
               <p className="text-sm text-text-3 mt-3">
-                Auto-popular desde Priority Matrix.
+                Auto-populate from Priority Matrix.
               </p>
             )}
           </GlassCard>
@@ -275,7 +275,7 @@ export function CompassLandingClient({
               title={
                 openBlindSpots.length > 0
                   ? `${openBlindSpots.length} open issues`
-                  : 'Sin findings abiertos'
+                  : 'No open findings'
               }
               meta={null}
             />
@@ -298,8 +298,8 @@ export function CompassLandingClient({
               </ul>
             ) : (
               <p className="text-sm text-text-3 mt-3">
-                6 frameworks scanean credibility, pricing, audience, content
-                fit, platform scatter, social proof.
+                6 frameworks scan credibility, pricing, audience, content
+                fit, platform scatter, and social proof.
               </p>
             )}
           </GlassCard>
@@ -315,8 +315,8 @@ export function CompassLandingClient({
               eyebrow="Decision Log"
               title={
                 recentDecisions.length > 0
-                  ? `${recentDecisions.length} decisión${recentDecisions.length === 1 ? '' : 'es'} reciente${recentDecisions.length === 1 ? '' : 's'}`
-                  : 'Loggeá tu primera decisión estratégica'
+                  ? `${recentDecisions.length} recent decision${recentDecisions.length === 1 ? '' : 's'}`
+                  : 'Log your first strategic decision'
               }
               meta={null}
             />
@@ -358,7 +358,7 @@ export function CompassLandingClient({
             ) : (
               <p className="text-sm text-text-3 mt-3">
                 Pre-decision alignment scoring + outcome tracking + pattern
-                detection con histórico.
+                detection over time.
               </p>
             )}
           </GlassCard>

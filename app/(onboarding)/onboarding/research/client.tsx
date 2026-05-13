@@ -45,16 +45,16 @@ interface Props {
 
 const PHASE_COPY: Record<Phase, { title: string; subtitle: string }> = {
   configuring: {
-    title: 'Configurando research sources',
-    subtitle: 'Opus está eligiendo subreddits, keywords + competitors…',
+    title: 'Configuring research sources',
+    subtitle: 'Opus is picking subreddits, keywords + competitors…',
   },
   scanning: {
-    title: 'Escaneando Reddit + Hacker News + IndieHackers',
-    subtitle: 'Buscamos lo que tu audiencia REALMENTE dice…',
+    title: 'Scanning Reddit + Hacker News + IndieHackers',
+    subtitle: "Looking for what your audience REALLY says…",
   },
   extracting: {
-    title: 'Extrayendo pain points reales',
-    subtitle: 'Agrupamos quejas repetidas en temas accionables…',
+    title: 'Extracting real pain points',
+    subtitle: 'Grouping repeated complaints into actionable themes…',
   },
   done: { title: '', subtitle: '' },
   failed: { title: '', subtitle: '' },
@@ -185,13 +185,13 @@ export function ResearchClient({ projectId }: Props) {
           </div>
           <h1 className="font-display text-3xl md:text-4xl font-light tracking-tight mb-2">
             {visible.length > 0
-              ? `Encontramos ${painPoints.length} pain point${painPoints.length === 1 ? '' : 's'} ${painPoints.length === 1 ? 'real' : 'reales'}`
-              : 'Research listo'}
+              ? `Found ${painPoints.length} real pain point${painPoints.length === 1 ? '' : 's'}`
+              : 'Research ready'}
           </h1>
           <p className="text-text-2">
             {visible.length > 0
-              ? 'Esto es lo que tu audiencia dice en Reddit, Hacker News y IndieHackers.'
-              : 'No encontramos pain points temáticos esta vez — podés correr más scans desde /research después.'}
+              ? 'This is what your audience is saying on Reddit, Hacker News, and IndieHackers.'
+              : "We didn't find themed pain points this time — you can run more scans from /research later."}
           </p>
         </div>
 
@@ -205,7 +205,7 @@ export function ResearchClient({ projectId }: Props) {
                   </div>
                   {typeof p.frequency === 'number' && (
                     <div className="text-[10px] font-mono text-text-3 shrink-0">
-                      {p.frequency}× menciones
+                      {p.frequency}× mentions
                     </div>
                   )}
                 </div>
@@ -226,7 +226,7 @@ export function ResearchClient({ projectId }: Props) {
 
         <div className="text-center">
           <Button onClick={handleContinue} size="lg">
-            Generar mi primer post →
+            Generate my first post →
           </Button>
         </div>
       </div>
@@ -241,17 +241,17 @@ export function ResearchClient({ projectId }: Props) {
           😞
         </div>
         <h1 className="font-display text-2xl font-light mb-2">
-          El research scan falló
+          Research scan failed
         </h1>
         <p className="text-text-3 mb-2 max-w-md mx-auto">
-          {error ?? 'No pudimos completar el scan.'}
+          {error ?? 'Could not complete the scan.'}
         </p>
         <p className="text-text-3 text-sm mb-6 max-w-md mx-auto">
-          No te preocupes — podés correr research más tarde desde{' '}
-          <span className="font-mono">/research</span>. Sigamos al primer
-          post; las pruebas iniciales funcionan sin pain points específicos.
+          No worries — you can run research later from{' '}
+          <span className="font-mono">/research</span>. Let&apos;s move to the
+          first post; initial drafts work without specific pain points.
         </p>
-        <Button onClick={handleSkip}>Continuar al primer post →</Button>
+        <Button onClick={handleSkip}>Continue to first post →</Button>
       </div>
     );
   }
@@ -273,7 +273,7 @@ export function ResearchClient({ projectId }: Props) {
           onClick={handleSkip}
           className="mt-6 text-xs text-text-3 underline hover:text-text-1"
         >
-          Tarda mucho — saltar y seguir
+          Taking too long — skip and continue
         </button>
       )}
     </div>

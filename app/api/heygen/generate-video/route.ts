@@ -51,7 +51,7 @@ export async function POST(request: Request) {
         error: 'HeyGen integration not enabled yet.',
         errorKind: 'feature_disabled',
         retry: false,
-        hint: 'Tu video está en cola. Cuando habilitemos la integración con HeyGen te notificamos y se procesa automáticamente.',
+        hint: 'Your video is queued. When we enable the HeyGen integration we\'ll notify you and process it automatically.',
       },
       { status: 503 },
     );

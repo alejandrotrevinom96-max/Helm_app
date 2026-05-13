@@ -19,7 +19,12 @@ import {
 } from '@/lib/db/schema';
 import { eq, and, gte, desc } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
-import { anthropic, MODELS, cachedSystem } from '@/lib/ai/claude';
+import {
+  anthropic,
+  MODELS,
+  cachedSystem,
+  LANGUAGE_INSTRUCTION_ANALYSIS,
+} from '@/lib/ai/claude';
 import { trackUsage } from '@/lib/ai/usage-tracker';
 import { checkRateLimit } from '@/lib/rate-limit';
 
@@ -213,7 +218,9 @@ Discipline:
 - NEVER invent private metrics (revenue, users, MRR, etc.). Only use the scraped data.
 - Be honest. If competitors beat us on a dimension, say so + recommend "don't fight here".
 - 5-7 opportunities, 3-5 defensive weaknesses.
-- Senior-strategist tone. No fluff, no "leverage synergies".`;
+- Senior-strategist tone. No fluff, no "leverage synergies".
+
+${LANGUAGE_INSTRUCTION_ANALYSIS}`;
 
   const userMessage = `OUR BRAND
 Name: ${project.name}

@@ -65,7 +65,7 @@ export function ProjectClient({ existingProject, priorOneLiner }: Props) {
           error?: string;
         };
         if (!res.ok || !data.project?.id) {
-          setError(data.error ?? 'No pudimos crear el proyecto');
+          setError(data.error ?? 'Could not create project');
           setBusy(false);
           return;
         }
@@ -96,15 +96,15 @@ export function ProjectClient({ existingProject, priorOneLiner }: Props) {
   return (
     <div>
       <h1 className="font-display text-3xl md:text-4xl font-light tracking-tight mb-2">
-        Tu proyecto
+        Your project
       </h1>
       <p className="text-text-2 mb-8">
-        Empezamos por un proyecto. Después podés agregar más desde la sidebar.
+        Start with one project. You can add more later from the sidebar.
         {existingProject && (
           <span className="block text-sm text-text-3 mt-2">
-            ✓ Detectamos que ya creaste{' '}
-            <strong>{existingProject.name}</strong> — podés editar acá o
-            simplemente continuar.
+            ✓ We detected you already created{' '}
+            <strong>{existingProject.name}</strong> — you can edit here or
+            just continue.
           </span>
         )}
       </p>
@@ -115,14 +115,14 @@ export function ProjectClient({ existingProject, priorOneLiner }: Props) {
             htmlFor="project-name"
             className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2 block"
           >
-            Nombre del proyecto *
+            Project name *
           </label>
           <input
             id="project-name"
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="ej: Voya"
+            placeholder="e.g. Voya"
             maxLength={80}
             disabled={busy}
             className="w-full px-3 py-2 bg-bg border border-border rounded-lg text-sm outline-none focus:border-accent"
@@ -134,20 +134,20 @@ export function ProjectClient({ existingProject, priorOneLiner }: Props) {
             htmlFor="project-oneliner"
             className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2 block"
           >
-            ¿Qué hace? (1 oración) *
+            What does it do? (1 sentence) *
           </label>
           <input
             id="project-oneliner"
             type="text"
             value={oneLiner}
             onChange={(e) => setOneLiner(e.target.value.slice(0, 300))}
-            placeholder="ej: AI travel planning para mujeres mexicanas en transición vital"
+            placeholder="e.g. AI travel planning for Mexican women in life transitions"
             disabled={busy}
             className="w-full px-3 py-2 bg-bg border border-border rounded-lg text-sm outline-none focus:border-accent"
           />
           <p className="text-xs text-text-3 mt-1">
-            Sé específico. &quot;App de viajes&quot; es muy genérico — &quot;Travel para
-            mujeres mexicanas en transición vital&quot; es donde están las ideas.
+            Be specific. &quot;Travel app&quot; is too generic — &quot;Travel for
+            Mexican women in life transitions&quot; is where the ideas live.
           </p>
         </div>
 
@@ -156,7 +156,7 @@ export function ProjectClient({ existingProject, priorOneLiner }: Props) {
             htmlFor="project-website"
             className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2 block"
           >
-            Website (opcional)
+            Website (optional)
           </label>
           <input
             id="project-website"
@@ -168,8 +168,8 @@ export function ProjectClient({ existingProject, priorOneLiner }: Props) {
             className="w-full px-3 py-2 bg-bg border border-border rounded-lg text-sm outline-none focus:border-accent"
           />
           <p className="text-xs text-text-3 mt-1">
-            Si tenés sitio, lo usamos después en /marketing para auto-generar
-            tu brand bible completo desde el contenido.
+            If you have a site, we use it later in /marketing to auto-generate
+            your full brand bible from the content.
           </p>
         </div>
       </GlassCard>
@@ -185,13 +185,13 @@ export function ProjectClient({ existingProject, priorOneLiner }: Props) {
           href="/onboarding/welcome"
           className="text-sm text-text-3 hover:text-text-1"
         >
-          ← Atrás
+          ← Back
         </a>
         <Button
           onClick={handleContinue}
           disabled={!name.trim() || !oneLiner.trim() || busy}
         >
-          {busy ? 'Creando…' : 'Continuar →'}
+          {busy ? 'Creating…' : 'Continue →'}
         </Button>
       </div>
     </div>

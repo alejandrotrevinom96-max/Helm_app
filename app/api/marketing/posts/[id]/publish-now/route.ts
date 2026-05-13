@@ -165,7 +165,7 @@ export async function POST(
         error: err instanceof Error ? err.message : 'Publish failed',
         errorKind: 'unknown',
         scheduledPostId: scheduled.id,
-        hint: 'Tu draft quedó en scheduled_posts con status=failed. Retry desde Library.',
+        hint: 'Your draft was moved to scheduled_posts with status=failed. Retry from Library.',
       },
       { status: 500 },
     );
@@ -181,8 +181,8 @@ export async function POST(
           : 'permanent',
         scheduledPostId: scheduled.id,
         hint: publishResult.isTransient
-          ? 'Falló pero es transient — retry desde Library.'
-          : 'Falló y no es retryable — chequeá integration en /integrations.',
+          ? 'Failed but it\'s transient — retry from Library.'
+          : 'Failed and not retryable — check the integration at /integrations.',
       },
       { status: 502 },
     );

@@ -26,7 +26,12 @@ import {
 } from '@/lib/db/schema';
 import { eq, and, desc, gte } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
-import { anthropic, MODELS, cachedSystem } from '@/lib/ai/claude';
+import {
+  anthropic,
+  MODELS,
+  cachedSystem,
+  LANGUAGE_INSTRUCTION_ANALYSIS,
+} from '@/lib/ai/claude';
 import { trackUsage } from '@/lib/ai/usage-tracker';
 import { checkRateLimit } from '@/lib/rate-limit';
 
@@ -298,7 +303,9 @@ Discipline:
 - Impact 0-100: how much this moves the niche-dominance needle.
 - Effort 0-100: time + resources to ship the first version.
 - Keep reasoning + description compact — every word counts against the
-  token budget. Two sentences each, max.`;
+  token budget. Two sentences each, max.
+
+${LANGUAGE_INSTRUCTION_ANALYSIS}`;
 
   const userMessage = `BRAND
 Name: ${project.name}

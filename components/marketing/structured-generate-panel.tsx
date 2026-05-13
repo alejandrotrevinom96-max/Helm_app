@@ -116,39 +116,39 @@ const ERROR_DISPLAY: Record<
 > = {
   overloaded: {
     icon: '⏳',
-    title: 'Anthropic está saturado',
-    defaultHint: 'Esperá ~1 minuto y reintentá.',
+    title: 'Anthropic is overloaded',
+    defaultHint: 'Wait ~1 minute and retry.',
   },
   rate_limit: {
     icon: '🚦',
-    title: 'Demasiadas requests muy rápido',
-    defaultHint: 'Esperá ~30 segundos antes del próximo intento.',
+    title: 'Too many requests too fast',
+    defaultHint: 'Wait ~30 seconds before the next attempt.',
   },
   timeout: {
     icon: '⏱️',
-    title: 'La generación tardó demasiado',
-    defaultHint: 'Reintentá — la red pudo ser el problema.',
+    title: 'Generation took too long',
+    defaultHint: 'Retry — the network may have been the issue.',
   },
   json: {
     icon: '🔧',
-    title: 'Opus devolvió output malformado',
-    defaultHint: 'Reintentá — esto es transient.',
+    title: 'Opus returned malformed output',
+    defaultHint: 'Retry — this is transient.',
   },
   auth: {
     icon: '🔐',
-    title: 'Problema técnico con el servicio AI',
-    defaultHint: 'Contactanos por soporte.',
+    title: 'Technical issue with the AI service',
+    defaultHint: 'Contact support.',
   },
   insufficient_context: {
     icon: '📝',
-    title: 'Falta brand context',
+    title: 'Brand context missing',
     defaultHint:
-      'Completá brand bible (niche + audience) para que Opus tenga material.',
+      'Fill out the brand bible (niche + audience) so Opus has material to work with.',
   },
   unknown: {
     icon: '😞',
-    title: 'Algo falló al generar',
-    defaultHint: 'Reintentá una vez más.',
+    title: 'Something failed during generation',
+    defaultHint: 'Retry once more.',
   },
 };
 
@@ -282,7 +282,7 @@ export function StructuredGeneratePanel({ projectId }: Props) {
         const kind: ErrorKind = data.errorKind ?? 'unknown';
         setError({
           kind,
-          message: data.error ?? 'No pudimos generar los drafts',
+          message: data.error ?? 'Could not generate drafts',
           retry: data.retry ?? true,
           hint: data.hint ?? ERROR_DISPLAY[kind].defaultHint,
         });
@@ -323,9 +323,9 @@ export function StructuredGeneratePanel({ projectId }: Props) {
           Generate
         </h2>
         <p className="text-sm text-text-3 mt-1">
-          Per-platform structured drafts. Opus 4.7 escribe; Flux genera
-          imágenes on-demand desde cada draft; HeyGen para videos
-          (próximamente).
+          Per-platform structured drafts. Opus 4.7 writes; Flux generates
+          images on-demand from each draft; HeyGen for videos (coming
+          soon).
         </p>
       </div>
 
@@ -422,9 +422,9 @@ export function StructuredGeneratePanel({ projectId }: Props) {
           </div>
         )}
         <p className="text-xs text-text-3 mt-3">
-          1 structured draft per type seleccionado (Opus 4.7). Imágenes Flux
-          se generan después por carrusel desde Library. Videos HeyGen entran
-          en cola — la integración real ships pronto.
+          1 structured draft per selected type (Opus 4.7). Flux images are
+          generated on-demand per carousel from the Library. HeyGen videos
+          land in a queue — the live integration ships soon.
         </p>
       </GlassCard>
 
@@ -436,7 +436,7 @@ export function StructuredGeneratePanel({ projectId }: Props) {
         <textarea
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
-          placeholder="Describí qué cubrir en este batch. Brand bible + voice fingerprint se cargan automáticamente."
+          placeholder="Describe what this batch should cover. Brand bible + voice fingerprint load automatically."
           rows={5}
           className="w-full px-3 py-2 bg-bg border border-border rounded-lg text-sm placeholder:text-text-3 focus:outline-none focus:border-border-bright resize-none"
         />
@@ -452,11 +452,11 @@ export function StructuredGeneratePanel({ projectId }: Props) {
         </Button>
         {selected.length > 0 && (
           <p className="text-xs text-text-3 mt-2">
-            Estimado: ~{estimatedSeconds}s
+            Estimated: ~{estimatedSeconds}s
             {hasVideoSelection && (
               <span>
                 {' '}
-                · videos quedan en cola — HeyGen ships en próxima sprint.
+                · videos queue up — HeyGen ships in a future sprint.
               </span>
             )}
           </p>

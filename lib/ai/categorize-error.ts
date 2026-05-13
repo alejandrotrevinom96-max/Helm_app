@@ -121,10 +121,17 @@ export function categorizeAnthropicError(err: unknown): CategorizedError {
 }
 
 /**
- * Build a Spanish-language hint + retry guidance per kind. The
+ * Build an English-language hint + retry guidance per kind. The
  * returned object is shape-compatible with the legacy
  * /api/research/analyze-brand error responses (PR #72) so
  * client code that already handles those fields keeps working.
+ *
+ * PR #81 — Sprint 7.6: copy converted to English as part of the
+ * i18n cleanup. The previous Spanish hints were carried over from
+ * PR #72/75 when the founder + early users were all Spanish-
+ * speaking. New users are mixed, and product copy is English-only
+ * elsewhere, so consistency wins. The error KIND vocabulary is
+ * unchanged so downstream callers don't need to update.
  */
 export function describeError(kind: ErrorKind): {
   error: string;
@@ -137,60 +144,60 @@ export function describeError(kind: ErrorKind): {
   switch (kind) {
     case 'overloaded':
       return {
-        error: 'Anthropic está saturado ahora mismo.',
+        error: 'Anthropic is overloaded right now.',
         errorKind: 'overloaded',
         retry: true,
         retryAfterSeconds: 60,
-        hint: 'Esperá ~1 minuto y reintentá — la cola de Anthropic se libera rápido.',
+        hint: 'Wait ~1 minute and retry — the Anthropic queue clears fast.',
         status: 503,
       };
     case 'rate_limit':
       return {
-        error: 'Demasiadas requests en poco tiempo.',
+        error: 'Too many requests in a short window.',
         errorKind: 'rate_limit',
         retry: true,
         retryAfterSeconds: 30,
-        hint: 'Esperá ~30 segundos antes del próximo intento.',
+        hint: 'Wait ~30 seconds before retrying.',
         status: 429,
       };
     case 'timeout':
       return {
-        error: 'La generación tardó más del límite y se cortó.',
+        error: 'Generation took longer than the limit and was cut off.',
         errorKind: 'timeout',
         retry: true,
-        hint: 'Reintentá — la red puede haber sido el problema. Si vuelve a pasar, simplificá el contexto.',
+        hint: 'Retry — the network may have been the issue. If it keeps happening, shorten the context.',
         status: 504,
       };
     case 'json':
       return {
-        error: 'Opus devolvió respuesta malformada.',
+        error: 'Opus returned malformed output.',
         errorKind: 'json',
         retry: true,
-        hint: 'Esto es transient — casi siempre funciona al segundo intento.',
+        hint: 'This is transient — it almost always works on the second try.',
         status: 502,
       };
     case 'auth':
       return {
-        error: 'Problema técnico con el servicio de IA.',
+        error: 'Technical issue with the AI service.',
         errorKind: 'auth',
         retry: false,
-        hint: 'Esto no se resuelve reintentando — contactá soporte.',
+        hint: 'Retrying won\'t help — contact support.',
         status: 500,
       };
     case 'insufficient_context':
       return {
-        error: 'Falta brand context para generar.',
+        error: 'Brand context missing for generation.',
         errorKind: 'insufficient_context',
         retry: false,
-        hint: 'Completá niche + audience en el step de Brand. Eso le da a Opus material concreto para trabajar.',
+        hint: 'Fill in niche + audience in the Brand step so Opus has concrete material to work with.',
         status: 400,
       };
     default:
       return {
-        error: 'Algo falló al generar el contenido.',
+        error: 'Something failed while generating content.',
         errorKind: 'unknown',
         retry: true,
-        hint: 'Reintentá una vez. Si persiste, escribinos con el detalle.',
+        hint: 'Retry once. If it keeps happening, send us the details.',
         status: 500,
       };
   }

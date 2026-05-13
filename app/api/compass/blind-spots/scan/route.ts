@@ -31,7 +31,12 @@ import {
 } from '@/lib/db/schema';
 import { eq, and, desc, gte } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
-import { anthropic, MODELS, cachedSystem } from '@/lib/ai/claude';
+import {
+  anthropic,
+  MODELS,
+  cachedSystem,
+  LANGUAGE_INSTRUCTION_ANALYSIS,
+} from '@/lib/ai/claude';
 import { trackUsage } from '@/lib/ai/usage-tracker';
 import { checkRateLimit } from '@/lib/rate-limit';
 import type { BrandBible } from '@/lib/types/brand';
@@ -297,8 +302,9 @@ Discipline:
 - No generic advice ("post more consistently", "be authentic"). If the move isn't concrete, drop it.
 - severity=null when detected=false. Otherwise use the actual band.
 - confidenceScore reflects how sure you are about the call — low confidence is fine when data is thin.
-- Match the founder's working language (Spanish for Mexican brands etc.).
-- Each item ≤ ~600 chars total — bounded output, no rambling.`;
+- Each item ≤ ~600 chars total — bounded output, no rambling.
+
+${LANGUAGE_INSTRUCTION_ANALYSIS}`;
 
   const userMessage = `BRAND
 Name: ${project.name}
