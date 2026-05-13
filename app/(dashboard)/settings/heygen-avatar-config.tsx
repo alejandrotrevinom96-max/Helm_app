@@ -591,14 +591,20 @@ function AvatarPickerModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 md:p-8"
+      className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-2 md:p-4"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
       aria-modal="true"
       role="dialog"
     >
-      <div className="bg-bg-elev border border-border rounded-2xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden shadow-2xl">
+      {/* PR Sprint 7.13 hotfix v3 — modal grew to consume the
+          available viewport. Pre-fix the modal capped at
+          max-w-5xl (1024px) which on the founder's 1800px+
+          monitor left huge dead space to the right of the
+          catalog. Now: w-[96vw] floor with max-w-screen-2xl
+          ceiling and max-h-[95vh] so the grid breathes. */}
+      <div className="bg-bg-elev border border-border rounded-2xl w-[96vw] max-w-screen-2xl max-h-[95vh] flex flex-col overflow-hidden shadow-2xl">
         {/* Header */}
         <div className="px-5 md:px-7 py-4 border-b border-border flex items-start justify-between gap-4 shrink-0">
           <div>
@@ -654,7 +660,12 @@ function AvatarPickerModal({
               No avatars match this filter.
             </div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+            // Responsive column counts scale with screen real
+            // estate. At 1800-2200px wide viewport (the
+            // founder's setup) we get 6 columns of ~280px each;
+            // at 2560px+ we hit 7 columns. Tablet stays at 3-4,
+            // phone at 2.
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-3 md:gap-4">
               {filtered.map((a) => {
                 const selected = a.avatarId === selectedId;
                 const genderLabel = a.gender
