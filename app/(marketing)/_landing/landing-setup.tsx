@@ -19,26 +19,25 @@ function LandingCTA() {
         <div className="text-[10px] font-mono uppercase tracking-[0.2em] text-text-3 mb-3">
           Pricing
         </div>
-        {/* PR #41 — Sprint 6.6: pricing copy rewrite. Out:
-            "Free until launch" sounds like enterprise SaaS soft-
-            launch theater; "after we earn your trust" leans on a
-            cliché. In: "Free for now" is what we actually mean,
-            and "once Helm is clearly worth paying for" is the
-            real bar we're holding ourselves to. */}
+        {/* PR #82 — Sprint 7.7: pricing copy refresh for v3.0
+            positioning. Same "free for first 20" scarcity anchor;
+            the disclaimer now names what the founder is paying
+            with (feedback) instead of waving at a pricing TBD. CTA
+            label kept as "Claim your spot →" per the v3.0 plan. */}
         <h2 className="font-display text-4xl md:text-5xl tracking-tight font-light mb-4">
-          Free for now
+          Free for the first 20 founders.
         </h2>
         <p className="text-base md:text-lg text-text-2 max-w-xl mx-auto mb-10 leading-relaxed">
-          We&apos;re still early. The first 20 founders get full access
-          while we ship the rough edges. We&apos;ll figure out pricing
-          once Helm is clearly worth paying for.
+          Helm is currently free during open beta for the first 20
+          founders. We&apos;re shipping in public — your feedback shapes
+          the roadmap.
         </p>
 
         <Link
           href="/signup"
           className="inline-flex items-center gap-2 px-8 py-3.5 bg-accent text-white rounded-xl text-base font-medium hover:opacity-90 transition-opacity shadow-editorial hover:shadow-editorial-lg"
         >
-          Start free
+          Claim your spot
           <ArrowRight className="w-5 h-5" />
         </Link>
 

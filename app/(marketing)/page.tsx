@@ -20,24 +20,27 @@ import { LandingPage } from './_landing/landing-page';
 // In: positioning that names the actual customer ("people who
 // built the product first") and a description in the founder's
 // own voice.
+// PR #82 — Sprint 7.7: metadata updated for v3.0 positioning.
+// Title compresses the new category claim ("Marketing OS"). Description
+// names the actual swap (replaces Buffer / ChatGPT / Notion) so the
+// SERP snippet earns the click on intent rather than vibes.
 export const metadata = {
-  title:
-    'Helm: Marketing for people who built the product first',
+  title: 'Helm — Your Marketing OS, built for builders',
   description:
-    'You built the product. Now you have to market it. Helm reads your brand from any URL or Instagram, writes posts that sound like you, and ships them anywhere. Free for the first 20 founders.',
+    'Stop juggling 7 marketing tabs. Helm replaces Buffer, ChatGPT, Notion, and 4 other tools with one workspace built around your brand voice and strategy.',
   openGraph: {
-    title:
-      'Helm: Marketing for people who built the product first',
+    title: 'Helm — Your Marketing OS, built for builders',
     description:
-      "You built the product. Now you have to market it. Helm does the part you avoid. Free for the first 20 founders.",
+      'Stop juggling 7 marketing tabs. One workspace for voice-aware drafts, multi-platform publishing, and strategic clarity. Free for the first 20 founders.',
     url: 'https://trythelm.com',
     siteName: 'Helm',
     type: 'website',
   },
   twitter: {
     card: 'summary_large_image' as const,
-    title: 'Helm: Marketing for people who built the product first',
-    description: 'You built the product. Now you have to market it.',
+    title: 'Helm — Your Marketing OS, built for builders',
+    description:
+      'One workspace replaces Buffer + ChatGPT + Notion + 4 other tabs. Built for builders.',
   },
 };
 

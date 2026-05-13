@@ -16,55 +16,55 @@ interface Pillar {
   features: string[];
 }
 
-// PR #41 — Sprint 6.6: pillar copy rewrite. Out: parallel one-word
-// titles ("Generate. Schedule. Share." / "Find pain. Find users." /
-// "Score your startup like a VC.") that read as ChatGPT pattern
-// matching, plus VC-aimed framing on Compass that addresses the
-// wrong audience. In: situation-specific titles that name a real
-// founder moment, body copy in one consistent voice across all
-// three tools, bullets as present-tense verbs instead of feature
-// nouns. Compass renamed to "Strategy" because that's what the
-// product is — "compass" was the metaphor, "strategy" is the noun.
+// PR #82 — Sprint 7.7: pillar copy rewrite to match v3.0 positioning
+// (Marketing OS). Out: "Strategy" label (PR #41 had renamed
+// Compass → Strategy because "compass" was the metaphor; v3.0
+// positioning treats "Compass" as the named module, same as
+// "Marketing" and "Research", because the product surfaces it that
+// way in the dashboard sub-nav). Each pillar is now: one-sentence
+// tagline + 2-paragraph body + 5 features. Tone shifts from "voice
+// of the founder" to "voice of the product", because the new copy
+// is selling a Marketing OS, not selling a hands-on assistant.
 const PILLARS: Pillar[] = [
   {
     icon: Megaphone,
     label: 'Marketing',
-    title: 'Stop staring at the empty caption box',
+    title: 'AI-powered, voice-aware content',
     description:
-      "Helm reads your website or Instagram, learns how you actually sound, then writes posts that match. You review, you tap to share, you go back to building. The calendar tells you when your audience is actually online (not when LinkedIn says they are).",
+      'Generate brand-aware drafts in your voice. Schedule across Instagram, X, LinkedIn, Threads, Facebook, and Reddit. Track what works.\n\nPowered by Claude Opus 4.7 with your voice fingerprint, pillars, and brand bible loaded automatically — every draft sounds like you, not like a marketing intern.',
     features: [
-      'Reads your existing brand from a URL',
-      'Validates the visual style with 12 image options',
-      'Writes for Instagram, Facebook, LinkedIn, Threads, Reddit',
-      'Calendar shows your real golden times',
-      'One tap to share anywhere',
-      'Native auto-post to Meta arriving in v3',
+      'Brand-aware drafts (Claude Opus 4.7)',
+      'Multi-platform publishing',
+      'Calendar + scheduling',
+      'Voice fingerprint learning',
+      'Performance memory',
     ],
   },
   {
     icon: Search,
     label: 'Research',
-    title: 'Read where your customers actually complain',
+    title: 'Pain points from your real audience',
     description:
-      'Reddit threads at 2am, Hacker News flame wars, Indie Hackers lurkers asking for the thing you build. Helm pulls real complaints and questions from where your audience hangs out, not from a generic SEO tool.',
+      'Stop guessing what your audience wants. Helm scans Reddit, forums, and your community to extract pain points, opportunities, and quotes — ranked by frequency and intensity.\n\nEach insight comes with a one-click "Generate post" button that turns audience signal into shipping content.',
     features: [
-      'Pulls posts from Reddit, Hacker News, Indie Hackers',
-      'Tracks Google Trends for your topic',
-      'Builds an audience profile from real conversations',
-      'Saves what matters so you can reference it later',
+      'Reddit + forum mining',
+      'Pain point ranking',
+      'Direct quote extraction',
+      'One-click post generation',
     ],
   },
   {
     icon: Compass,
-    label: 'Strategy',
-    title: 'Spot the gap before you waste a quarter',
+    label: 'Compass',
+    title: 'Strategic clarity in 30 seconds',
     description:
-      "You're guessing what to build next. Helm runs a strategy review on what you already have, finds the gaps that will hurt you in 6 months, and tells you what to fix first. No VC theater, no 40-slide framework. Just where you're weak and what to do.",
+      'What should you actually work on this week? Compass scores your moves by Impact × Effort, benchmarks you against competitors, surfaces blind spots, and tracks every strategic decision you make.\n\nNo more "I think we should…" meetings. Just signal-backed direction.',
     features: [
-      'Reviews your current strategy across 8 dimensions',
-      'Flags the weak spots most founders miss',
-      'Compares your positioning to actual competitors',
-      'Tells you the next thing worth working on',
+      'Priority Matrix (Impact × Effort)',
+      'Positioning Benchmark',
+      'Strategic Timeline',
+      'Blind Spots Detector',
+      'Decision Log',
     ],
   },
 ];
@@ -81,7 +81,7 @@ function LandingPillars() {
             What&apos;s inside
           </div>
           <h2 className="font-display text-4xl md:text-5xl tracking-tight font-light">
-            Three tools that work together
+            One workspace. Three modules. Zero context-switching.
           </h2>
         </div>
 
@@ -102,9 +102,11 @@ function LandingPillars() {
                 <h3 className="font-display text-xl mb-3 font-light">
                   {pillar.title}
                 </h3>
-                <p className="text-sm text-text-2 leading-relaxed mb-5">
-                  {pillar.description}
-                </p>
+                <div className="text-sm text-text-2 leading-relaxed mb-5 space-y-3">
+                  {pillar.description.split('\n\n').map((para, i) => (
+                    <p key={i}>{para}</p>
+                  ))}
+                </div>
                 <ul className="space-y-1.5 mt-auto">
                   {pillar.features.map((f, i) => (
                     <li

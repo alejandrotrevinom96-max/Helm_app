@@ -196,25 +196,24 @@ export function LandingHero() {
           </span>
         </div>
 
-        {/* PR #41 — Sprint 6.6: H1 rewrite. Out: "Brand-aware
-            content that sounds like you. Ship it your way." (clichés
-            'sounds like you' + 'ship it your way' + decorative
-            italic on 'you'). In: confessional 3-line opener that
-            names the actual customer (someone who built a thing
-            and now has to sell it) in their own voice. */}
-        <h1 className="font-display text-5xl md:text-6xl lg:text-7xl font-light tracking-tight leading-[1.05] mb-6">
-          You built the thing.
-          <br />
-          Now you have to sell it.
-          <br />
-          <span className="text-text-3">We help with that part.</span>
+        {/* PR #41 — Sprint 6.6: H1 rewrite to confessional 3-line opener.
+            PR #82 — Sprint 7.7: positioning shift to "Marketing OS" — same
+            confessional tone but compressed into a category-naming move.
+            H2 carries the emotional anchor ("ship") that runs through the
+            footer + roadmap copy. The original URL-preview state machine
+            below is preserved verbatim — it's the conversion engine
+            (PR #34 + #36) and we don't touch its strings. */}
+        <h1 className="font-display text-5xl md:text-6xl lg:text-7xl font-light tracking-tight leading-[1.05] mb-4">
+          Your Marketing OS.
         </h1>
+        <h2 className="font-display text-2xl md:text-3xl lg:text-4xl font-light tracking-tight leading-tight text-text-3 mb-8">
+          Built for the people who&apos;d rather ship.
+        </h2>
 
         <p className="text-base md:text-lg text-text-2 max-w-2xl mx-auto mb-10 leading-relaxed">
-          Paste your website or Instagram. Helm reads what you already
-          built, figures out your voice, and writes posts that sound like
-          you (not like ChatGPT). Tap once to share to Instagram, Facebook,
-          X, or anywhere else.
+          Helm replaces 7 marketing tabs with one workspace. Voice-aware
+          drafts, multi-platform publishing, and strategic clarity — all
+          in one place.
         </p>
 
         {!preview ? (
