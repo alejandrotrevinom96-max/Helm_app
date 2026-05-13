@@ -4,6 +4,7 @@ import { getActiveProject } from '@/lib/active-project';
 import { WebhooksConfig } from './webhooks-config';
 import { VisualsStatus } from './visuals-status';
 import { WeeklyBriefConfig } from './weekly-brief-config';
+import { HeygenAvatarConfig } from './heygen-avatar-config';
 
 export default async function SettingsPage() {
   const supabase = await createClient();
@@ -26,6 +27,18 @@ export default async function SettingsPage() {
         <WeeklyBriefConfig projectId={activeProject?.id ?? null} />
         <WebhooksConfig />
         <VisualsStatus />
+        {/* PR #86 — Sprint 7.10: Video Avatar settings. Requires a
+            project context to read/save the per-project avatar
+            choice. We hide the card entirely when there's no
+            active project (typical for users mid-onboarding) so
+            the empty state doesn't surface a saveable form with
+            nowhere to write to. */}
+        {activeProject && (
+          <HeygenAvatarConfig
+            projectId={activeProject.id}
+            userId={user.id}
+          />
+        )}
       </div>
     </div>
   );

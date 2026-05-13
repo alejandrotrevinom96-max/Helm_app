@@ -134,6 +134,26 @@ export const projects = pgTable(
     //   }
     voiceFingerprint: jsonb('voice_fingerprint'),
     voiceFingerprintUpdatedAt: timestamp('voice_fingerprint_updated_at'),
+    // PR #86 — Sprint 7.10: HeyGen avatar configuration. Lives on
+    // projects (not a separate project_settings table) because
+    // every project gets exactly one avatar and the column count
+    // is small. heygenAvatarType drives a dispatch in the
+    // generate-video route:
+    //   - 'stock': use heygenAvatarId against HeyGen's stock
+    //     avatar library (GET /v2/avatars).
+    //   - 'photo': use heygenPhotoUrl against the Photo Avatar IV
+    //     model (talking_photo + use_avatar_iv_model: true).
+    //   - 'twin' (locked, Coming Soon): would record a 15s clip
+    //     and create a Digital Twin avatar. Reserved as a paid-
+    //     plan feature; the dispatcher refuses 'twin' until the
+    //     enrollment flow ships.
+    // heygenVoiceId is optional — when null we fall back to the
+    // avatar's default voice (HeyGen returns one with the avatar
+    // metadata).
+    heygenAvatarType: text('heygen_avatar_type').default('stock'),
+    heygenAvatarId: text('heygen_avatar_id'),
+    heygenPhotoUrl: text('heygen_photo_url'),
+    heygenVoiceId: text('heygen_voice_id'),
   },
   (t) => ({
     uniqueUserRepo: unique().on(t.userId, t.githubRepoId),

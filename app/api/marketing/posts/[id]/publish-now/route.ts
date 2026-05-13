@@ -1,4 +1,18 @@
 // PR #80 — Sprint 7.5.2: publish-now endpoint.
+// PR #86 — Sprint 7.10 (Bug #3): two follow-ups against this route:
+//
+//   FIX 1: After publishPost succeeds, this route now UPDATEs
+//          scheduledPosts with status='posted', publishStatus=
+//          'published', publishedAt/postedAt, metaPostId,
+//          metaPermalink — matching the cron's success path. Pre-
+//          fix the row stayed at status='scheduled' (the Library
+//          would show "Scheduled" forever even after Twitter
+//          accepted the tweet).
+//
+//   FIX 3: ?fromScheduled=1 dispatches against an existing
+//          scheduled_posts row instead of a draft. Lets the
+//          founder click "Post now" on an already-scheduled row
+//          to flip it to immediate publish.
 //
 // Before this commit there was no way to publish a draft
 // IMMEDIATELY from the UI. The flow required scheduling a row in
@@ -8,27 +22,24 @@
 // success/failure until the next cron pass.
 //
 // This route:
-//   1. Pulls the draft from generated_posts (ownership-join).
-//   2. Inserts a scheduled_posts row with scheduledFor=now +
-//      status='scheduled'. We reuse scheduled_posts (not a
-//      separate "publish queue") so the publishPost dispatcher,
-//      the Library, and the Calendar all see the post the same
-//      way they see scheduled rows.
-//   3. Deletes the draft (mirrors /api/marketing/library/[id]/
-//      schedule which does the same).
-//   4. Calls publishPost(newScheduledId) SYNCHRONOUSLY so the
+//   1. Pulls the draft from generated_posts (ownership-join), OR
+//      pulls the scheduled_posts row directly when
+//      ?fromScheduled=1.
+//   2. (Draft path only) Inserts a scheduled_posts row with
+//      scheduledFor=now + status='scheduled'. We reuse
+//      scheduled_posts (not a separate "publish queue") so the
+//      publishPost dispatcher, the Library, and the Calendar all
+//      see the post the same way they see scheduled rows.
+//   3. (Draft path only) Deletes the draft.
+//   4. Calls publishPost(scheduledId) SYNCHRONOUSLY so the
 //      caller gets the success/failure in the response.
+//   5. On success, UPDATEs the scheduled row with the terminal
+//      publishStatus + metaPostId + metaPermalink (FIX 1).
 //
 // On publish failure, the scheduled_posts row stays put with
-// status='failed' — the founder can retry via the existing
+// publishStatus='failed' — the founder can retry via the existing
 // /api/marketing/library/[id]/retry-publish endpoint. No data
 // loss.
-//
-// Plan-correction note: the original sprint plan suggested
-// updating generated_posts directly (set status='published').
-// That breaks downstream consumers — the Library/Calendar +
-// publisher dispatch all key off scheduled_posts. Routing
-// through scheduled_posts keeps the data model coherent.
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { db } from '@/lib/db';
@@ -62,9 +73,49 @@ export async function POST(
     return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
   }
 
-  // Ownership-join — generated_posts has no user_id column so we
-  // verify via projects.userId. Same pattern as the schedule
-  // endpoint.
+  // PR #86 — Sprint 7.10 (FIX 3): ?fromScheduled=1 routes the call
+  // against an existing scheduled_posts row.
+  const url = new URL(request.url);
+  const fromScheduled = url.searchParams.get('fromScheduled') === '1';
+
+  // ------------------------------------------------------------
+  // SCHEDULED PATH — already in scheduled_posts; just dispatch.
+  // ------------------------------------------------------------
+  if (fromScheduled) {
+    const [existing] = await db
+      .select()
+      .from(scheduledPosts)
+      .where(
+        and(
+          eq(scheduledPosts.id, id),
+          eq(scheduledPosts.userId, user.id),
+        ),
+      )
+      .limit(1);
+
+    if (!existing) {
+      return NextResponse.json(
+        { error: 'Scheduled post not found or forbidden' },
+        { status: 404 },
+      );
+    }
+
+    if (existing.status !== 'scheduled') {
+      return NextResponse.json(
+        {
+          error: `Cannot post now from status='${existing.status}'.`,
+          errorKind: 'invalid_state',
+        },
+        { status: 409 },
+      );
+    }
+
+    return await dispatchPublish(existing.id);
+  }
+
+  // ------------------------------------------------------------
+  // DRAFT PATH — migrate generated_posts row to scheduled_posts.
+  // ------------------------------------------------------------
   const [draft] = await db
     .select({
       id: generatedPosts.id,
@@ -91,9 +142,6 @@ export async function POST(
   }
 
   // Stories + Reels validation — same as the schedule endpoint.
-  // A draft flagged as Story has no image attached at the draft
-  // layer, so we refuse fast rather than letting the publisher
-  // surface a cryptic "media missing" later.
   if (draft.isStory) {
     return NextResponse.json(
       {
@@ -146,56 +194,102 @@ export async function POST(
     .returning();
 
   // Best-effort draft cleanup. If this fails the founder ends up
-  // with the same row in BOTH tables — surfaceable, not data
-  // loss. Same trade-off as the schedule endpoint.
+  // with the same row in BOTH tables — surfaceable, not data loss.
   await db.delete(generatedPosts).where(eq(generatedPosts.id, id));
 
-  // Now publish. publishPost reads scheduled_posts by id, branches
-  // on platform (x / linkedin / threads / facebook / instagram),
-  // and either calls the platform-specific helper or the Meta
-  // Graph path. Synchronous — the founder waits for the result.
+  return await dispatchPublish(scheduled.id);
+}
+
+// ------------------------------------------------------------
+// Shared dispatch — runs publishPost + writes back terminal
+// state. Extracted so the draft path and the scheduled-row path
+// converge on identical success/failure handling.
+// ------------------------------------------------------------
+async function dispatchPublish(scheduledId: string): Promise<Response> {
+  // Mark publishing so a concurrent click (rare but possible)
+  // doesn't double-fire.
+  await db
+    .update(scheduledPosts)
+    .set({ publishStatus: 'publishing' })
+    .where(eq(scheduledPosts.id, scheduledId));
+
   let publishResult;
   try {
-    publishResult = await publishPost(scheduled.id);
+    publishResult = await publishPost(scheduledId);
   } catch (err) {
     console.error('[publish-now] publishPost threw:', err);
+    const msg = err instanceof Error ? err.message : 'Publish failed';
+    await db
+      .update(scheduledPosts)
+      .set({
+        publishStatus: 'failed',
+        publishFailureReason: msg.slice(0, 500),
+      })
+      .where(eq(scheduledPosts.id, scheduledId));
     return NextResponse.json(
       {
         success: false,
-        error: err instanceof Error ? err.message : 'Publish failed',
+        error: msg,
         errorKind: 'unknown',
-        scheduledPostId: scheduled.id,
-        hint: 'Your draft was moved to scheduled_posts with status=failed. Retry from Library.',
+        scheduledPostId: scheduledId,
+        hint: 'Your row stayed in scheduled_posts with status=failed. Retry from Library.',
       },
       { status: 500 },
     );
   }
 
   if (!publishResult.success) {
+    await db
+      .update(scheduledPosts)
+      .set({
+        publishStatus: 'failed',
+        publishFailureReason: (publishResult.error ?? 'Unknown error').slice(
+          0,
+          500,
+        ),
+      })
+      .where(eq(scheduledPosts.id, scheduledId));
     return NextResponse.json(
       {
         success: false,
         error: publishResult.error ?? 'Publish failed',
-        errorKind: publishResult.isTransient
-          ? 'transient'
-          : 'permanent',
-        scheduledPostId: scheduled.id,
+        errorKind: publishResult.isTransient ? 'transient' : 'permanent',
+        scheduledPostId: scheduledId,
         hint: publishResult.isTransient
-          ? 'Failed but it\'s transient — retry from Library.'
+          ? "Failed but it's transient — retry from Library."
           : 'Failed and not retryable — check the integration at /integrations.',
       },
       { status: 502 },
     );
   }
 
+  // PR #86 — Sprint 7.10 (FIX 1): write the success terminal
+  // state. Mirrors the cron worker exactly so a row published
+  // via "Post now" looks identical to one published via the
+  // cron schedule.
+  const now = new Date();
+  await db
+    .update(scheduledPosts)
+    .set({
+      publishStatus: 'published',
+      status: 'posted',
+      publishedAt: now,
+      postedAt: now,
+      metaPostId: publishResult.metaPostId ?? null,
+      metaPermalink: publishResult.permalink ?? null,
+      publishFailureReason: null,
+      publishNextRetryAt: null,
+    })
+    .where(eq(scheduledPosts.id, scheduledId));
+
   return NextResponse.json({
     success: true,
-    scheduledPostId: scheduled.id,
-    // PublishResult only carries metaPostId + permalink for Meta-
-    // platform success. X/LinkedIn/Threads helpers persist their
-    // own external IDs onto the scheduled_posts row directly
-    // (publishedExternalId column) — the client can refetch the
-    // row via /api/marketing/library to get them.
+    scheduledPostId: scheduledId,
+    // X publisher returns metaPostId=tweet_id and permalink=
+    // https://x.com/i/web/status/<id>; LinkedIn/Threads/Meta
+    // return their own equivalents. Either way the client can
+    // open the permalink directly from the response banner
+    // without an extra refetch.
     metaPostId: publishResult.metaPostId ?? null,
     permalink: publishResult.permalink ?? null,
   });

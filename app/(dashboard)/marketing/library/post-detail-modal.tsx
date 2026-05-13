@@ -12,10 +12,61 @@
 //
 // The feedback Save button issues PATCH /api/marketing/library/[id].
 // Clone issues POST /api/marketing/library/[id]/clone and redirects.
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { LibraryPost } from '@/app/api/marketing/library/route';
 import { ShareButton } from '@/components/share/share-button';
 import { ScheduleModal } from './schedule-modal';
+
+// PR #86 — Sprint 7.10: HeyGen video job lifecycle types. Mirrors
+// the serializeJob() shape in /api/heygen/jobs.
+interface HeygenJobView {
+  id: string;
+  status: 'queued' | 'processing' | 'completed' | 'failed' | string;
+  videoUrl: string | null;
+  thumbnailUrl: string | null;
+  durationSeconds: number | null;
+  errorMessage: string | null;
+  errorKind: string | null;
+}
+
+// PR #86 — Sprint 7.10: video content types eligible for HeyGen.
+// The brief mentions "Reel" and "UGC Script"; we key off the
+// canonical contentType strings the structured-draft pipeline
+// emits.
+const VIDEO_CONTENT_TYPES = new Set<string | null>(['reel', 'ugc']);
+
+// PR #86 — Sprint 7.10: which platforms map "View on platform"
+// to a known external URL. For X we synthesize the tweet URL
+// from metaPostId (which is the tweet id for x-platform rows).
+// Future entries: 'linkedin', 'threads' — once those publishers
+// persist their post id in a queryable way the same map handles
+// them.
+function platformPostUrl(post: LibraryPost): string | null {
+  if (post.metaPermalink) return post.metaPermalink;
+  if (post.platform === 'x' && post.metaPostId) {
+    return `https://x.com/i/web/status/${post.metaPostId}`;
+  }
+  return null;
+}
+
+function platformDisplayName(platform: string): string {
+  switch (platform) {
+    case 'instagram':
+      return 'Instagram';
+    case 'facebook':
+      return 'Facebook';
+    case 'linkedin':
+      return 'LinkedIn';
+    case 'threads':
+      return 'Threads';
+    case 'x':
+      return 'X';
+    case 'reddit':
+      return 'Reddit';
+    default:
+      return platform.charAt(0).toUpperCase() + platform.slice(1);
+  }
+}
 
 interface Props {
   post: LibraryPost;
@@ -87,6 +138,119 @@ export function PostDetailModal({
   const [error, setError] = useState<string | null>(null);
 
   const isDraft = post.source === 'generated';
+  // PR #86 — Sprint 7.10 (Bug #3 / FIX 3): "Post now" now surfaces
+  // for both drafts AND status='scheduled' rows. Scheduled rows
+  // route through the same /publish-now endpoint with
+  // ?fromScheduled=1 — the endpoint detects the existing
+  // scheduled_posts row instead of creating a fresh one.
+  const canPostNow =
+    isDraft || (post.source === 'scheduled' && post.status === 'scheduled');
+
+  // PR #86 — Sprint 7.10: HeyGen video job state for reel / ugc
+  // drafts. We only fetch when the modal opens for a video-format
+  // draft to avoid an extra round-trip on every other post.
+  const isVideoFormat =
+    isDraft && VIDEO_CONTENT_TYPES.has(post.contentType);
+  const [heygenJob, setHeygenJob] = useState<HeygenJobView | null>(null);
+  const [heygenLoading, setHeygenLoading] = useState(false);
+  const [heygenError, setHeygenError] = useState<string | null>(null);
+  const [heygenStarting, setHeygenStarting] = useState(false);
+  // Polling guard — only one interval per modal mount.
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const fetchHeygenJob = useCallback(async () => {
+    if (!isVideoFormat) return;
+    try {
+      const res = await fetch(`/api/heygen/jobs?draftId=${post.id}`);
+      if (!res.ok) return;
+      const data = (await res.json()) as { job: HeygenJobView | null };
+      setHeygenJob(data.job);
+    } catch {
+      // Best-effort; UI stays in the previous state on transient
+      // errors.
+    }
+  }, [isVideoFormat, post.id]);
+
+  useEffect(() => {
+    if (!isVideoFormat) return;
+    setHeygenLoading(true);
+    void fetchHeygenJob().finally(() => setHeygenLoading(false));
+  }, [isVideoFormat, fetchHeygenJob]);
+
+  // PR #86 — Sprint 7.10: 15-second poll while processing. The
+  // webhook is the source of truth (it updates the DB row); this
+  // poll just pulls the latest status so the UI flips to
+  // "completed" or "failed" without a manual refresh.
+  useEffect(() => {
+    if (!heygenJob) return;
+    if (heygenJob.status !== 'processing' && heygenJob.status !== 'queued') {
+      return;
+    }
+    pollRef.current = setInterval(() => {
+      void fetchHeygenJob();
+    }, 15000);
+    return () => {
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+    };
+  }, [heygenJob, fetchHeygenJob]);
+
+  const handleGenerateVideo = async () => {
+    if (heygenStarting) return;
+    setHeygenStarting(true);
+    setHeygenError(null);
+    try {
+      // Step 1 — create (or reuse) the job row.
+      const createRes = await fetch('/api/heygen/jobs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ draftId: post.id }),
+      });
+      const createData = (await createRes.json().catch(() => ({}))) as {
+        job?: HeygenJobView;
+        error?: string;
+      };
+      if (!createRes.ok || !createData.job) {
+        setHeygenError(createData.error ?? 'Could not create job');
+        return;
+      }
+      // If the job is already completed (idempotent reuse), no
+      // need to fire HeyGen again.
+      if (createData.job.status === 'completed') {
+        setHeygenJob(createData.job);
+        return;
+      }
+      // Step 2 — fire HeyGen.
+      const fireRes = await fetch('/api/heygen/generate-video', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId: createData.job.id }),
+      });
+      const fireData = (await fireRes.json().catch(() => ({}))) as {
+        success?: boolean;
+        error?: string;
+        hint?: string;
+        errorKind?: string;
+      };
+      if (!fireRes.ok || !fireData.success) {
+        setHeygenError(
+          fireData.error ??
+            fireData.hint ??
+            'Could not start HeyGen generation',
+        );
+      }
+      // Refetch the job either way — fireData failures still
+      // leave a row in the table (status='failed') we want
+      // surfaced.
+      await fetchHeygenJob();
+    } catch (e) {
+      setHeygenError(e instanceof Error ? e.message : 'Network error');
+    } finally {
+      setHeygenStarting(false);
+    }
+  };
 
   const handlePostNow = async () => {
     if (posting) return;
@@ -101,8 +265,12 @@ export function PostDetailModal({
     setError(null);
     setPostResult(null);
     try {
+      // PR #86 — Sprint 7.10 (FIX 3): scheduled rows hit the same
+      // endpoint with a query flag so the endpoint knows not to
+      // expect a draft.
+      const qs = post.source === 'scheduled' ? '?fromScheduled=1' : '';
       const res = await fetch(
-        `/api/marketing/posts/${post.id}/publish-now`,
+        `/api/marketing/posts/${post.id}/publish-now${qs}`,
         { method: 'POST' },
       );
       const data = (await res.json().catch(() => ({}))) as {
@@ -125,8 +293,10 @@ export function PostDetailModal({
         message: 'Posted ✓',
         permalink: data.permalink,
       });
-      // Remove the draft from the Library list; on close the parent
-      // will refetch and the row will appear in Scheduled/Published.
+      // Remove the row from the Library list. For drafts this drops
+      // them from Drafts; for scheduled rows this drops them from
+      // Scheduled — on close the parent refetches and the post
+      // resurfaces under Published.
       onRemove(post.id);
     } catch (e) {
       setPostResult({
@@ -390,6 +560,127 @@ export function PostDetailModal({
           />
         )}
 
+        {/* PR #86 — Sprint 7.10: HeyGen video block for Reel / UGC
+            drafts. Renders one of five states keyed off the
+            heygen_jobs row associated with this draft:
+              - no job → "Generate video" CTA
+              - queued → badge "Video queued"
+              - processing → spinner + "Generating…" (15s poll)
+              - completed → thumbnail preview + Download link
+              - failed → error reason + Retry CTA
+            We poll every 15s while in processing/queued. The
+            webhook at /api/heygen/webhook is what actually flips
+            the row; the poll just pulls the latest snapshot so
+            the modal updates without the user refreshing. */}
+        {isVideoFormat && (
+          <div className="mb-4 p-4 bg-bg border border-border rounded-lg">
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3">
+                HeyGen video
+              </div>
+              {heygenJob && (
+                <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3">
+                  {heygenJob.status}
+                </div>
+              )}
+            </div>
+
+            {heygenLoading && !heygenJob && (
+              <div className="text-xs text-text-3">Checking job…</div>
+            )}
+
+            {!heygenLoading && !heygenJob && (
+              <div className="space-y-2">
+                <p className="text-sm text-text-2">
+                  Turn this script into a talking-head video using
+                  the avatar you configured in Settings.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleGenerateVideo}
+                  disabled={heygenStarting}
+                  className="px-3 py-1.5 bg-accent text-white rounded-lg text-xs font-medium hover:opacity-90 disabled:opacity-50"
+                >
+                  {heygenStarting ? 'Starting…' : '🎬 Generate video'}
+                </button>
+              </div>
+            )}
+
+            {heygenJob?.status === 'queued' && (
+              <div className="flex items-center gap-2 text-sm text-amber-500">
+                <span>⏱</span>
+                <span>Video queued — waiting for the worker.</span>
+              </div>
+            )}
+
+            {heygenJob?.status === 'processing' && (
+              <div className="flex items-center gap-2 text-sm text-amber-500">
+                <span className="inline-block w-3 h-3 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
+                <span>
+                  Generating… HeyGen typically takes 2 - 10 minutes.
+                </span>
+              </div>
+            )}
+
+            {heygenJob?.status === 'completed' && heygenJob.videoUrl && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 text-sm text-emerald-500">
+                  <span>✓</span>
+                  <span>Video ready</span>
+                </div>
+                {heygenJob.thumbnailUrl && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={heygenJob.thumbnailUrl}
+                    alt="HeyGen video thumbnail"
+                    className="rounded-lg w-full max-w-xs"
+                  />
+                )}
+                <a
+                  href={heygenJob.videoUrl}
+                  download
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 px-3 py-1.5 bg-accent text-white rounded-lg text-xs font-medium hover:opacity-90"
+                >
+                  ⬇ Download video
+                </a>
+                {heygenJob.durationSeconds !== null && (
+                  <div className="text-[10px] text-text-3">
+                    Duration: {heygenJob.durationSeconds}s
+                  </div>
+                )}
+              </div>
+            )}
+
+            {heygenJob?.status === 'failed' && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-sm text-danger">
+                  <span>⚠</span>
+                  <span>Generation failed</span>
+                </div>
+                {heygenJob.errorMessage && (
+                  <div className="text-xs text-text-3 bg-bg-elev p-2 rounded font-mono break-words">
+                    {heygenJob.errorMessage}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={handleGenerateVideo}
+                  disabled={heygenStarting}
+                  className="px-3 py-1.5 bg-accent text-white rounded-lg text-xs font-medium hover:opacity-90 disabled:opacity-50"
+                >
+                  {heygenStarting ? 'Retrying…' : '↻ Retry'}
+                </button>
+              </div>
+            )}
+
+            {heygenError && (
+              <div className="mt-2 text-xs text-danger">{heygenError}</div>
+            )}
+          </div>
+        )}
+
         {/* PR #32 — Reel video preview + processing state. videoUrl
             is the Supabase Storage public URL we uploaded — we can
             preview it inline without going through Meta. */}
@@ -509,19 +800,30 @@ export function PostDetailModal({
                     {new Date(post.publishedAt).toLocaleString()}
                   </div>
                 )}
-                {post.metaPermalink && (
-                  <a
-                    href={post.metaPermalink}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-xs text-accent hover:underline"
-                  >
-                    View on {post.platform === 'instagram'
-                      ? 'Instagram'
-                      : 'Facebook'}{' '}
-                    ↗
-                  </a>
-                )}
+                {/* PR #86 — Sprint 7.10 (Bug #3 / FIX 2): the
+                    "View on platform" link now works for X /
+                    LinkedIn / Threads too, and the label adapts
+                    to the actual platform. For X we synthesize
+                    the URL from metaPostId (the tweet id) since
+                    Twitter doesn't return a permalink directly.
+                    For the others we use the persisted
+                    metaPermalink. Previous version only handled
+                    Instagram / Facebook labels and rendered
+                    nothing for X (the bug). */}
+                {(() => {
+                  const url = platformPostUrl(post);
+                  if (!url) return null;
+                  return (
+                    <a
+                      href={url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-xs text-accent hover:underline"
+                    >
+                      View on {platformDisplayName(post.platform)} ↗
+                    </a>
+                  );
+                })()}
               </div>
             )}
 
@@ -721,7 +1023,13 @@ export function PostDetailModal({
                 📅 Schedule
               </button>
             )}
-            {isDraft && (
+            {/* PR #86 — Sprint 7.10 (Bug #3 / FIX 3): Post now is
+                now also available for scheduled rows (status=
+                'scheduled') so the founder can flip an agendado
+                row to immediate publish without going back to
+                Drafts first. The publish-now endpoint handles
+                both shapes via ?fromScheduled=1. */}
+            {canPostNow && (
               <button
                 type="button"
                 onClick={handlePostNow}
