@@ -7,6 +7,7 @@ import { headers } from 'next/headers';
 import { Sidebar } from '@/components/dashboard/sidebar';
 import { getActiveProject, getAllUserProjects } from '@/lib/active-project';
 import { OnboardingClientWrapper } from '@/components/onboarding/wrapper';
+import { ChatWidget } from '@/components/chat/ChatWidget';
 
 export default async function DashboardLayout({
   children,
@@ -80,6 +81,16 @@ export default async function DashboardLayout({
           hasAnyProject={allProjects.length > 0}
         />
       )}
+      {/* PR Sprint 7.15 — native Helm AI chat. Floating bottom-
+          right launcher that opens a Glass panel; renders on
+          every dashboard page. projectId comes from the active-
+          project resolver above so messages tag onto the right
+          project automatically (and gracefully fall back to
+          null when the founder has no project yet, e.g. mid-
+          onboarding). z-40 sits above page content but below
+          the onboarding wrapper's z-50 so it never blocks the
+          wizard. */}
+      <ChatWidget projectId={activeProject?.id ?? null} />
     </div>
   );
 }

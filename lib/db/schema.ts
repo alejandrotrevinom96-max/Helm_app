@@ -1587,6 +1587,34 @@ export const compassDecisions = pgTable('compass_decisions', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
+// ===== Chat Messages =====
+// PR Sprint 7.15 — native Helm AI chat widget.
+//
+// One row per message (both user prompts and assistant replies).
+// Lives in DB so analytics + support can see the conversation
+// shape per founder; UI state still lives in component memory
+// for the active session (DB is the persistent ledger, not the
+// session store).
+//
+// projectId is OPTIONAL: a founder mid-onboarding might open the
+// chat before they have an active project. We still let them ask
+// questions and store the messages with project_id=NULL.
+export const chatMessages = pgTable('chat_messages', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  projectId: uuid('project_id').references(() => projects.id, {
+    onDelete: 'set null',
+  }),
+  // 'user' | 'assistant' — mirror Anthropic's role taxonomy so a
+  // future "rehydrate from DB" feature can build a Messages.create
+  // payload directly from these rows.
+  role: text('role').notNull(),
+  content: text('content').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
 // ===== Type exports =====
 export type User = typeof users.$inferSelect;
 export type Project = typeof projects.$inferSelect;
@@ -1621,3 +1649,4 @@ export type CompassDecision = typeof compassDecisions.$inferSelect;
 export type BrandAnalysisJob = typeof brandAnalysisJobs.$inferSelect;
 export type OnboardingProgressRow = typeof onboardingProgress.$inferSelect;
 export type HeygenJob = typeof heygenJobs.$inferSelect;
+export type ChatMessage = typeof chatMessages.$inferSelect;
