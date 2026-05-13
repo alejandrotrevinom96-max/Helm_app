@@ -130,10 +130,28 @@ async function readPostFile(filename: string): Promise<BlogPost | null> {
     const { data, content } = matter(raw);
     const slug = filename.replace(/\.md$/, '');
     const { readingTimeMin, wordCount } = computeReadingTime(content);
+    // PR #86 — Sprint 7.11: accept both `title`/`description` and
+    // `meta_title`/`meta_description` in frontmatter. The two AEO
+    // pillars from Sprint 7.10 used `title:` but the SEO templates
+    // the founder is generating from this batch lead with
+    // `meta_title:`. Falling through covers both without forcing a
+    // mechanical rewrite of every new post.
+    //
+    // Strip trailing " | Helm" / " — Helm" when we fall back to
+    // `meta_title`: the SEO-style meta tag carries the brand
+    // suffix because it's literally the <title> string, but the
+    // slug page's <Metadata> template ALSO appends " — Helm" — so
+    // without this we'd get "Foo | Helm — Helm". The AEO `title:`
+    // field never has a suffix, so we only sanitize the fallback.
+    const rawTitle =
+      asString(data.title) ||
+      asString(data.meta_title).replace(/\s*[|—-]\s*Helm\s*$/i, '');
+    const rawDescription =
+      asString(data.description) || asString(data.meta_description);
     return {
       slug,
-      title: asString(data.title, slug),
-      description: asString(data.description),
+      title: rawTitle || slug,
+      description: rawDescription,
       icp: asIcp(data.icp),
       readingTimeMin,
       wordCount,
