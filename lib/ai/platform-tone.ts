@@ -49,8 +49,15 @@ GENERATION INPUTS (always provided to the model):
 ORDER OF PRECEDENCE (when rules conflict, higher wins):
   1. Hard platform constraints (character limits, format requirements, native syntax). Non-negotiable.
   2. BRAND_BIBLE.banned_phrases and BRAND_BIBLE.mandatory_voice_signals.
-  3. VOICE_FINGERPRINT patterns. Only override platform defaults when fingerprint has 5+ samples
-     and the pattern is consistent across them.
+  3. VOICE_FINGERPRINT patterns. Influence scales with the count of consistent samples:
+       - 1 to 2 samples       light influence. Treat as soft hints. Do not override platform defaults.
+       - 3 to 5 samples       medium influence. May override CONTENT_TYPE_RULES base mechanics
+                              when the pattern is consistent across all samples.
+       - 6 or more samples    strong influence. May override PLATFORM_TONE defaults when the pattern
+                              is consistent across samples (e.g., writer uses fragments where platform
+                              defaults expect sentences).
+     A pattern is "consistent" only when it appears in the majority of samples and is not contradicted
+     by any of them.
   4. PLATFORM_TONE specialization. Platform-specific overrides of content-type defaults
      (e.g., LinkedIn carousel optimal slide count vs Instagram carousel optimal slide count).
   5. CONTENT_TYPE_RULES base. Format-level mechanics that apply across platforms.
@@ -84,7 +91,17 @@ REJECTION CRITERIA (apply after generation, before returning to user):
   - Uses a CTA pattern not approved for the platform.
   - Fails any item in the platform's or content type's SCAN CHECKLIST.
 
-If rejected, regenerate up to 2 times. If still failing, surface to the operator with the failed checks listed.
+If rejected, regenerate up to 2 times. If still failing, return:
+  1. The best draft attempted (not the last one — the one closest to passing all checks).
+  2. The list of failed checks, named explicitly.
+  3. A suggested fix for each failed check, expressed as a concrete edit.
+     Examples:
+       - "Hook exceeds 10 words: cut 'Today I want to talk about' from the opening."
+       - "Em dash present in body: replace ' — ' on line 4 with a period."
+       - "CTA is statement-format: rewrite 'Try it today' as a question like 'What would you cut first?'"
+  4. A confidence score (0 to 100) on whether the draft is salvageable manually vs needs a full rewrite.
+
+This gives the operator enough context to approve manually, steer the next attempt, or kill the draft.
 `;
 
 export const CONTENT_TYPE_RULES: Record<ContentTypeTaxonomy, string> = {
@@ -167,8 +184,7 @@ SLIDE-LEVEL RULES:
     where it gets interesting").
 
 COVER SLIDE RULES:
-  - Promise a specific benefit or insight. "How I cut my marketing stack from 7 tools to 1" beats
-    "Marketing automation tips".
+  - Promise a specific benefit or insight (see CONTENT_TYPE_EXAMPLES for good vs bad cover patterns).
   - Include a swipe cue (visual arrow, "1/10" counter, or text like "Swipe →").
   - Avoid putting the punchline on the cover. Save it for the final slide.
 
@@ -266,7 +282,7 @@ THE WORDS DO ALL THE WORK:
 HOOK RULES (stricter than photo or carousel):
   - First line must stop the scroll without any visual support.
   - Bold claim, specific number, contrarian take, or micro-confession.
-  - "I cut my marketing stack from 7 tools to 1" works. "Some thoughts on marketing" does not.
+  - See CONTENT_TYPE_EXAMPLES for good vs bad hook patterns.
 
 WHITE SPACE IS THE DESIGN:
   - Paragraphs of 1 to 3 lines max. Aggressive line breaks.
@@ -300,6 +316,126 @@ SCAN CHECKLIST:
   [ ] At least one quotable standalone line
   [ ] CTA at the end
   [ ] Length matches platform optimal
+`,
+};
+
+// ============================================================
+// CONTENT_TYPE_EXAMPLES
+//
+// PR Sprint 7.13 v2 — concrete good/bad example pairs per content
+// type. Kept in a separate map so they can be toggled on/off via
+// the `includeExamples` flag in buildGenerationPrompt(). Default
+// is ON in production because examples materially improve
+// generation quality (LLMs pattern-match on them). Toggle OFF
+// only in dev/test loops where you want shorter prompts and
+// faster iteration — quality drop is measurable.
+// ============================================================
+
+export const CONTENT_TYPE_EXAMPLES: Record<ContentTypeTaxonomy, string> = {
+  ugc: `
+HOOK EXAMPLES (cross-platform UGC):
+  Good: "I used to open 7 tabs just to tweet once. Now I open 1."
+  Bad:  "Today I want to talk about productivity tools for founders."
+
+  Good: "I spent 156 hours a year switching marketing tools. I'm a solo founder."
+  Bad:  "Hey everyone, so I've been thinking about marketing tools lately."
+
+SPOKEN CADENCE EXAMPLES (spoken vs written-style):
+  Good (spoken): "I dropped Buffer. Switched to one tool. Saved 2 hours a week."
+  Bad (written): "I have decided to discontinue my Buffer subscription and migrate to a consolidated platform."
+
+  Good (spoken): "Here's the part nobody tells you."
+  Bad (written): "There is an aspect of this workflow that is often omitted from the discussion."
+
+ON-SCREEN OVERLAY EXAMPLES (reinforce, don't repeat):
+  Good: Spoken: "I dropped Buffer last month."        Overlay: "BUFFER ❌"
+  Bad:  Spoken: "I dropped Buffer last month."        Overlay: "I dropped Buffer last month"
+
+  Good: Spoken: "Saved 2 hours a week, every week."   Overlay: "2 HRS/WEEK"
+  Bad:  Spoken: "Saved 2 hours a week, every week."   Overlay: "Saved 2 hours every week"
+
+CTA EXAMPLES:
+  Good: "Comment 'stack' if you want my replacement list."
+  Bad:  "Click the link in bio to sign up for our product."
+`,
+
+  carousel: `
+COVER SLIDE EXAMPLES:
+  Good: "How I cut my marketing stack from 7 tools to 1 (and what I lost)"
+  Bad:  "Marketing tips for founders"
+
+  Good: "The $23k/year I was wasting on tool sprawl (with the math)"
+  Bad:  "Why automation matters"
+
+  Good: "I shipped content twice a week for 4 months. Here's the system."
+  Bad:  "Content creation strategies"
+
+SLIDE STRUCTURE EXAMPLE (LinkedIn carousel, 10 slides):
+  Slide 1 (cover):   "How I cut my marketing stack from 7 tools to 1 (4 months in)"
+  Slide 2:           "Tool #1: Buffer. Why I dropped it: scheduling without context is calendar Tetris."
+  Slide 3:           "Tool #2: ChatGPT for marketing. Re-briefing every session cost me 45 min/week."
+  Slide 4:           "Tool #3: Notion. Brand guide nobody updated. Voice drifted in 6 weeks."
+  Slide 5:           "Tool #4: Canva. Beautiful posts. Zero strategic insight on what to make next."
+  Slide 6:           "Tool #5: Buffer analytics. Numbers without context = guessing."
+  Slide 7:           "Tool #6: Google Docs. Drafts that died because nobody knew where they lived."
+  Slide 8:           "Tool #7: A spreadsheet. The least useful tool in the stack."
+  Slide 9 (twist):   "What I lost: nothing. What I gained: 5 hours a week and a system I can hand off."
+  Slide 10 (CTA):    "Want my replacement framework? Comment 'stack' below."
+
+CTA SLIDE EXAMPLES:
+  Good: "Want the full breakdown? Comment 'audit' and I'll send the template."
+  Bad:  "Click the link in our bio to learn more about our software solution."
+
+  Good: "Tag a founder who needs to see this."
+  Bad:  "Like and share if you found this helpful! 🚀"
+`,
+
+  photo: `
+PHOTO + CAPTION PAIR EXAMPLES:
+  Good:
+    Image: Screenshot of 7 open browser tabs, all marketing tools.
+    Caption first line: "This is what writing one tweet looks like. I time-tracked it."
+  Bad:
+    Image: Generic stock photo of a person at a laptop with a coffee.
+    Caption first line: "Marketing is hard. Here are some tips."
+
+  Good:
+    Image: Side-by-side screenshot of a founder's calendar before and after consolidating tools.
+    Caption first line: "Same week. Same workload. One screenshot is from before I dropped 6 tools."
+  Bad:
+    Image: AI-generated abstract illustration of "productivity".
+    Caption first line: "Productivity is about more than just time management."
+
+WHY THE GOOD ONES WORK:
+  The image is specific (a real screenshot, a real before/after) and the caption creates a question
+  the image partially answers. The viewer has to read more to get the full payoff.
+
+WHY THE BAD ONES FAIL:
+  Stock or AI illustration adds no information. The caption could appear on any post. The algorithm
+  penalizes this combination because dwell time stays low and shares stay near zero.
+`,
+
+  text: `
+HOOK LINE EXAMPLES:
+  Good: "I cut my marketing stack from 7 tools to 1 last month. Revenue went up 14%."
+  Bad:  "Some thoughts on marketing optimization for solo founders."
+
+  Good: "Your CRM is lying to you about pipeline health."
+  Bad:  "Have you ever wondered if your CRM data is accurate?"
+
+  Good: "I spent $11,200 on Buffer over 4 years. I deleted my account last week."
+  Bad:  "Excited to share my journey of consolidating marketing tools."
+
+QUOTABLE LINE EXAMPLES (place on their own paragraph break):
+  Good: "Your marketing stack isn't your competitive advantage. Your judgment is."
+  Good: "If your system requires you to remember which tab is which step, it's not a system."
+  Good: "$23,400 a year of founder time burned on tool overhead. That's a feature you didn't ship."
+
+CTA EXAMPLES:
+  Good (question):     "What's the worst tool you've replaced this year?"
+  Good (specific ask): "Drop your current stack in the comments and I'll tell you what I'd cut."
+  Bad (statement):     "Try our product today, it's the best on the market."
+  Bad (vague):         "Let me know your thoughts in the comments!"
 `,
 };
 
@@ -874,6 +1010,12 @@ export interface BuildGenerationPromptArgs {
   voiceFingerprint: string;
   painPoint: string;
   targetSub?: string;
+  // PR Sprint 7.13 v2 — whether to inject CONTENT_TYPE_EXAMPLES
+  // into the prompt. Default true (production). Set false in
+  // dev/test loops where you want shorter prompts and faster
+  // iteration. Toggling off will measurably reduce output
+  // quality, so only do it intentionally.
+  includeExamples?: boolean;
 }
 
 export function buildGenerationPrompt(
@@ -881,6 +1023,7 @@ export function buildGenerationPrompt(
 ): string {
   const platform = args.platform.toLowerCase() as Platform;
   const contentType = args.contentType.toLowerCase() as ContentTypeTaxonomy;
+  const includeExamples = args.includeExamples ?? true;
 
   if (!(platform in PLATFORM_TONE_INSTRUCTIONS)) {
     throw new UnknownPlatformError(platform);
@@ -899,6 +1042,20 @@ export function buildGenerationPrompt(
       ? `\nTARGET SUBREDDIT: ${args.targetSub}\n`
       : '';
 
+  // Examples block lives between CONTENT_TYPE_RULES and
+  // PLATFORM_TONE so the model sees them in the order: rules
+  // (what to do) → examples (what good/bad look like) →
+  // platform overrides (how this changes per platform). Empty
+  // string when toggled off keeps the surrounding string layout
+  // stable.
+  let examplesSection = '';
+  if (includeExamples) {
+    const contentExamples = (CONTENT_TYPE_EXAMPLES[contentType] ?? '').trim();
+    if (contentExamples.length > 0) {
+      examplesSection = `\nCONTENT_TYPE_EXAMPLES for ${contentType.toUpperCase()} (good vs bad pairs to pattern-match against):\n${contentExamples}\n`;
+    }
+  }
+
   return `${PROMPT_COMPOSITION_RULES}
 
 BRAND_BIBLE:
@@ -912,7 +1069,7 @@ ${args.painPoint}
 ${subLine}
 CONTENT_TYPE_RULES for ${contentType.toUpperCase()} (base format mechanics):
 ${contentRules}
-
+${examplesSection}
 PLATFORM_TONE for ${platform.toUpperCase()} (specialization on top of the content-type rules):
 ${platformTone}
 

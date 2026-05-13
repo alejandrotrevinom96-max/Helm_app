@@ -387,6 +387,13 @@ ${LANGUAGE_INSTRUCTION_AUDIENCE}`;
             brandBible: brand,
             voiceFingerprint: voice,
             painPoint: userPrompt,
+            // PR Sprint 7.13 v2 — production default: examples ON.
+            // The CONTENT_TYPE_EXAMPLES block adds ~400-600 tokens
+            // to the user message but measurably improves output
+            // quality (LLMs pattern-match on the good/bad pairs).
+            // Flip to false only when iterating in dev where you
+            // want faster, cheaper loops with a known quality hit.
+            includeExamples: true,
           })
         : null;
 

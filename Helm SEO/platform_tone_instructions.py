@@ -1,47 +1,94 @@
-# platform_tone_instructions.py
+"""
+platform_tone_instructions.py
+=============================
+
+Production-grade prompt engineering scaffold for multi-platform content
+generation in Helm.
+
+Combines five inputs into a single composed prompt:
+  1. BRAND_BIBLE          client voice, banned phrases, mandatory signals
+  2. VOICE_FINGERPRINT    past posts, idiosyncratic patterns
+  3. CONTENT_TYPE         format mechanics (UGC, Carousel, Photo, Text)
+  4. PLATFORM_TONE        platform culture and algorithm specialization
+  5. PAIN_POINT           the audience pain or insight to address
+
+Architecture
+------------
+  PROMPT_COMPOSITION_RULES        precedence + rejection criteria
+  CONTENT_TYPE_RULES              base mechanics per format
+  CONTENT_TYPE_EXAMPLES           toggleable good/bad pattern anchors
+  PLATFORM_TONE_INSTRUCTIONS      platform-specific specialization
+  PLATFORM_CONTENT_COMPATIBILITY  which combinations are valid
+  build_generation_prompt()       composes the final prompt to send to the model
+
+Order of precedence (higher wins)
+---------------------------------
+  1. Hard platform constraints (char limits, format requirements)
+  2. BRAND_BIBLE.banned_phrases + mandatory voice signals
+  3. VOICE_FINGERPRINT (tiered influence by sample count)
+  4. PLATFORM_TONE specialization
+  5. CONTENT_TYPE_RULES base mechanics
+  6. PAIN_POINT framing (shapes content, not voice)
+
+Version: 1.0
+Last updated: 2026-05-13 (TikTok GA, Reddit subreddit profiles, content-type matrix,
+              tiered voice fingerprint weighting, suggested fixes in rejection,
+              CONTENT_TYPE_EXAMPLES toggleable layer)
+"""
+
+
+# ============================================================================
+# PROMPT_COMPOSITION_RULES
 #
-# Inject alongside BRAND_BIBLE + VOICE_FINGERPRINT + PAIN_POINT
-# into the generation prompt for any single-platform content draft.
-#
-# Last updated: 2026-05-13 (TikTok added live)
+# The header that goes at the top of every generation prompt. Defines how the
+# model should weight each input, what triggers rejection, and what to return
+# when generation fails after retries.
+# ============================================================================
 
 PROMPT_COMPOSITION_RULES = """
-GENERATION INPUTS (always provided to the model):
-  1. BRAND_BIBLE          client's tone, banned phrases, content pillars, audience, positioning
-  2. VOICE_FINGERPRINT    examples of past posts, idiosyncratic patterns, sentence-length distribution
-  3. PLATFORM_TONE        platform-specific rules (Instagram, LinkedIn, X, Threads, Facebook, Reddit, TikTok)
-  4. CONTENT_TYPE         format-specific rules (UGC, Carousel, Photo, Text)
-  5. PAIN_POINT           the specific audience pain, insight, or research finding the post addresses
+GENERATION INPUTS (always provided):
+  1. BRAND_BIBLE          banned phrases + mandatory voice signals + audience + positioning
+  2. VOICE_FINGERPRINT    samples of the writer's actual past output
+  3. CONTENT_TYPE_RULES   base format mechanics (UGC, Carousel, Photo, Text)
+  4. PLATFORM_TONE        platform culture + algorithm + native syntax
+  5. PAIN_POINT           the specific audience pain, insight, or research finding
 
 ORDER OF PRECEDENCE (when rules conflict, higher wins):
   1. Hard platform constraints (character limits, format requirements, native syntax). Non-negotiable.
   2. BRAND_BIBLE.banned_phrases and BRAND_BIBLE.mandatory_voice_signals.
-  3. VOICE_FINGERPRINT patterns. Only override platform defaults when fingerprint has 5+ samples
-     and the pattern is consistent across them.
+  3. VOICE_FINGERPRINT patterns. Influence scales with the count of consistent samples:
+       - 1 to 2 samples       light influence. Treat as soft hints. Do not override platform defaults.
+       - 3 to 5 samples       medium influence. May override CONTENT_TYPE_RULES base mechanics
+                              when the pattern is consistent across all samples.
+       - 6 or more samples    strong influence. May override PLATFORM_TONE defaults when the pattern
+                              is consistent across samples (e.g., writer uses fragments where platform
+                              defaults expect sentences).
+     A pattern is "consistent" only when it appears in the majority of samples and is not contradicted
+     by any of them.
   4. PLATFORM_TONE specialization. Platform-specific overrides of content-type defaults
      (e.g., LinkedIn carousel optimal slide count vs Instagram carousel optimal slide count).
   5. CONTENT_TYPE_RULES base. Format-level mechanics that apply across platforms.
   6. PAIN_POINT framing. Shapes the *content*, not the *voice*.
 
 HOW THE FIVE INPUTS INTERACT:
-
   - The PAIN_POINT determines what the post is *about*.
   - The BRAND_BIBLE determines what words and angles are allowed.
   - The VOICE_FINGERPRINT determines how sentences are shaped (length, rhythm, idioms).
   - The CONTENT_TYPE determines the *shape* of the deliverable (script vs carousel vs caption vs body).
   - The PLATFORM_TONE specializes that shape for the platform's algorithm and culture.
 
-  In a single generation call, the prompt should read approximately:
+  In a single generation call, the prompt reads approximately:
     "Write a [content_type] for [platform] about [PAIN_POINT].
      Format rules for this content type: [CONTENT_TYPE_RULES[content_type]].
+     Examples: [CONTENT_TYPE_EXAMPLES[content_type]] (when include_examples=True)
      Platform-specific overrides and tone: [PLATFORM_TONE_INSTRUCTIONS[platform]].
-     The brand voice rules are: [BRAND_BIBLE].
-     The writer's sentence patterns sound like: [VOICE_FINGERPRINT samples].
-     Reject and regenerate if the output violates the SCAN CHECKLISTs."
+     Brand voice rules: [BRAND_BIBLE].
+     Writer's sentence patterns: [VOICE_FINGERPRINT samples].
+     Reject and regenerate if the output violates any SCAN CHECKLIST."
 
 COMPATIBILITY:
   Not every platform supports every content type. Validate against PLATFORM_CONTENT_COMPATIBILITY
-  before generation. The system should never attempt a content type the platform doesn't support
+  before generation. The system never attempts a content type the platform doesn't support
   (e.g., a Carousel on Reddit or a Text post on TikTok).
 
 REJECTION CRITERIA (apply after generation, before returning to user):
@@ -51,17 +98,27 @@ REJECTION CRITERIA (apply after generation, before returning to user):
   - Uses a CTA pattern not approved for the platform.
   - Fails any item in the platform's or content type's SCAN CHECKLIST.
 
-If rejected, regenerate up to 2 times. If still failing, surface to the operator with the failed checks listed.
+If rejected, regenerate up to 2 times. If still failing, return:
+  1. The best draft attempted (not the last one, the one closest to passing all checks).
+  2. The list of failed checks, named explicitly.
+  3. A suggested fix for each failed check, expressed as a concrete edit.
+     Examples:
+       - "Hook exceeds 10 words: cut 'Today I want to talk about' from the opening."
+       - "Em dash present in body: replace ' — ' on line 4 with a period."
+       - "CTA is statement-format: rewrite 'Try it today' as a question like 'What would you cut first?'"
+  4. A confidence score (0 to 100) on whether the draft is salvageable manually vs needs a full rewrite.
+
+This gives the operator enough context to approve manually, steer the next attempt, or kill the draft.
 """
 
 
-# ============================================================
+# ============================================================================
 # CONTENT_TYPE_RULES
 #
 # Base mechanics that apply across platforms for each content format.
 # PLATFORM_TONE_INSTRUCTIONS specializes these for each platform's culture
-# and algorithm.
-# ============================================================
+# and algorithm. Examples live in CONTENT_TYPE_EXAMPLES (toggleable).
+# ============================================================================
 
 CONTENT_TYPE_RULES = {
 
@@ -144,8 +201,7 @@ SLIDE-LEVEL RULES:
     where it gets interesting").
 
 COVER SLIDE RULES:
-  - Promise a specific benefit or insight. "How I cut my marketing stack from 7 tools to 1" beats
-    "Marketing automation tips".
+  - Promise a specific benefit or insight (see CONTENT_TYPE_EXAMPLES for good vs bad cover patterns).
   - Include a swipe cue (visual arrow, "1/10" counter, or text like "Swipe →").
   - Avoid putting the punchline on the cover. Save it for the final slide.
 
@@ -243,7 +299,7 @@ THE WORDS DO ALL THE WORK:
 HOOK RULES (stricter than photo or carousel):
   - First line must stop the scroll without any visual support.
   - Bold claim, specific number, contrarian take, or micro-confession.
-  - "I cut my marketing stack from 7 tools to 1" works. "Some thoughts on marketing" does not.
+  - See CONTENT_TYPE_EXAMPLES for good vs bad hook patterns.
 
 WHITE SPACE IS THE DESIGN:
   - Paragraphs of 1 to 3 lines max. Aggressive line breaks.
@@ -282,13 +338,134 @@ SCAN CHECKLIST:
 }
 
 
-# ============================================================
+# ============================================================================
+# CONTENT_TYPE_EXAMPLES
+#
+# Concrete good/bad example pairs per content type. Kept in a separate dict
+# so they can be toggled on/off via the include_examples flag in
+# build_generation_prompt(). Default behavior is examples ON in production
+# because they materially improve generation quality (LLMs pattern-match on
+# examples). Toggle OFF only in dev/test loops where you want shorter prompts
+# and faster iteration.
+# ============================================================================
+
+CONTENT_TYPE_EXAMPLES = {
+
+    "ugc": """
+HOOK EXAMPLES (cross-platform UGC):
+  Good: "I used to open 7 tabs just to tweet once. Now I open 1."
+  Bad:  "Today I want to talk about productivity tools for founders."
+
+  Good: "I spent 156 hours a year switching marketing tools. I'm a solo founder."
+  Bad:  "Hey everyone, so I've been thinking about marketing tools lately."
+
+SPOKEN CADENCE EXAMPLES (spoken vs written-style):
+  Good (spoken): "I dropped Buffer. Switched to one tool. Saved 2 hours a week."
+  Bad (written): "I have decided to discontinue my Buffer subscription and migrate to a consolidated platform."
+
+  Good (spoken): "Here's the part nobody tells you."
+  Bad (written): "There is an aspect of this workflow that is often omitted from the discussion."
+
+ON-SCREEN OVERLAY EXAMPLES (reinforce, don't repeat):
+  Good: Spoken: "I dropped Buffer last month."        Overlay: "BUFFER ❌"
+  Bad:  Spoken: "I dropped Buffer last month."        Overlay: "I dropped Buffer last month"
+
+  Good: Spoken: "Saved 2 hours a week, every week."   Overlay: "2 HRS/WEEK"
+  Bad:  Spoken: "Saved 2 hours a week, every week."   Overlay: "Saved 2 hours every week"
+
+CTA EXAMPLES:
+  Good: "Comment 'stack' if you want my replacement list."
+  Bad:  "Click the link in bio to sign up for our product."
+""",
+
+    "carousel": """
+COVER SLIDE EXAMPLES:
+  Good: "How I cut my marketing stack from 7 tools to 1 (and what I lost)"
+  Bad:  "Marketing tips for founders"
+
+  Good: "The $23k/year I was wasting on tool sprawl (with the math)"
+  Bad:  "Why automation matters"
+
+  Good: "I shipped content twice a week for 4 months. Here's the system."
+  Bad:  "Content creation strategies"
+
+SLIDE STRUCTURE EXAMPLE (LinkedIn carousel, 10 slides):
+  Slide 1 (cover):   "How I cut my marketing stack from 7 tools to 1 (4 months in)"
+  Slide 2:           "Tool #1: Buffer. Why I dropped it: scheduling without context is calendar Tetris."
+  Slide 3:           "Tool #2: ChatGPT for marketing. Re-briefing every session cost me 45 min/week."
+  Slide 4:           "Tool #3: Notion. Brand guide nobody updated. Voice drifted in 6 weeks."
+  Slide 5:           "Tool #4: Canva. Beautiful posts. Zero strategic insight on what to make next."
+  Slide 6:           "Tool #5: Buffer analytics. Numbers without context = guessing."
+  Slide 7:           "Tool #6: Google Docs. Drafts that died because nobody knew where they lived."
+  Slide 8:           "Tool #7: A spreadsheet. The least useful tool in the stack."
+  Slide 9 (twist):   "What I lost: nothing. What I gained: 5 hours a week and a system I can hand off."
+  Slide 10 (CTA):    "Want my replacement framework? Comment 'stack' below."
+
+CTA SLIDE EXAMPLES:
+  Good: "Want the full breakdown? Comment 'audit' and I'll send the template."
+  Bad:  "Click the link in our bio to learn more about our software solution."
+
+  Good: "Tag a founder who needs to see this."
+  Bad:  "Like and share if you found this helpful! 🚀"
+""",
+
+    "photo": """
+PHOTO + CAPTION PAIR EXAMPLES:
+  Good:
+    Image: Screenshot of 7 open browser tabs, all marketing tools.
+    Caption first line: "This is what writing one tweet looks like. I time-tracked it."
+  Bad:
+    Image: Generic stock photo of a person at a laptop with a coffee.
+    Caption first line: "Marketing is hard. Here are some tips."
+
+  Good:
+    Image: Side-by-side screenshot of a founder's calendar before and after consolidating tools.
+    Caption first line: "Same week. Same workload. One screenshot is from before I dropped 6 tools."
+  Bad:
+    Image: AI-generated abstract illustration of "productivity".
+    Caption first line: "Productivity is about more than just time management."
+
+WHY THE GOOD ONES WORK:
+  The image is specific (a real screenshot, a real before/after) and the caption creates a question
+  the image partially answers. The viewer has to read more to get the full payoff.
+
+WHY THE BAD ONES FAIL:
+  Stock or AI illustration adds no information. The caption could appear on any post. The algorithm
+  penalizes this combination because dwell time stays low and shares stay near zero.
+""",
+
+    "text": """
+HOOK LINE EXAMPLES:
+  Good: "I cut my marketing stack from 7 tools to 1 last month. Revenue went up 14%."
+  Bad:  "Some thoughts on marketing optimization for solo founders."
+
+  Good: "Your CRM is lying to you about pipeline health."
+  Bad:  "Have you ever wondered if your CRM data is accurate?"
+
+  Good: "I spent $11,200 on Buffer over 4 years. I deleted my account last week."
+  Bad:  "Excited to share my journey of consolidating marketing tools."
+
+QUOTABLE LINE EXAMPLES (place on their own paragraph break):
+  Good: "Your marketing stack isn't your competitive advantage. Your judgment is."
+  Good: "If your system requires you to remember which tab is which step, it's not a system."
+  Good: "$23,400 a year of founder time burned on tool overhead. That's a feature you didn't ship."
+
+CTA EXAMPLES:
+  Good (question):     "What's the worst tool you've replaced this year?"
+  Good (specific ask): "Drop your current stack in the comments and I'll tell you what I'd cut."
+  Bad (statement):     "Try our product today, it's the best on the market."
+  Bad (vague):         "Let me know your thoughts in the comments!"
+""",
+
+}
+
+
+# ============================================================================
 # PLATFORM_CONTENT_COMPATIBILITY
 #
-# Which content types each platform supports. The system rejects
-# generation requests for unsupported combinations before sending
-# to the model.
-# ============================================================
+# Which content types each platform supports. The system rejects generation
+# requests for unsupported combinations before sending to the model.
+# ============================================================================
 
 PLATFORM_CONTENT_COMPATIBILITY = {
     "instagram": ["ugc", "carousel", "photo"],            # No pure text posts on IG
@@ -301,9 +478,17 @@ PLATFORM_CONTENT_COMPATIBILITY = {
 }
 
 
+# ============================================================================
+# PLATFORM_TONE_INSTRUCTIONS
+#
+# Platform-specific specialization on top of CONTENT_TYPE_RULES. Each platform
+# section covers native context, hook rules, body, hashtags, CTA, format
+# variants, anti-patterns, and a scan checklist.
+# ============================================================================
+
 PLATFORM_TONE_INSTRUCTIONS = {
 
-    # ============================================================
+    # ----------------------------------------------------------------
     "instagram": """
 INSTAGRAM TONE & FORMAT RULES
 
@@ -360,7 +545,7 @@ SCAN CHECKLIST before output:
   [ ] No anti-patterns triggered
 """,
 
-    # ============================================================
+    # ----------------------------------------------------------------
     "linkedin": """
 LINKEDIN TONE & FORMAT RULES
 
@@ -420,7 +605,7 @@ SCAN CHECKLIST before output:
   [ ] No anti-patterns triggered
 """,
 
-    # ============================================================
+    # ----------------------------------------------------------------
     "x": """
 X (TWITTER) TONE & FORMAT RULES
 
@@ -490,7 +675,7 @@ SCAN CHECKLIST before output:
   [ ] First-person if account is solo-founder
 """,
 
-    # ============================================================
+    # ----------------------------------------------------------------
     "threads": """
 THREADS TONE & FORMAT RULES
 
@@ -548,7 +733,7 @@ SCAN CHECKLIST before output:
   [ ] First-person voice
 """,
 
-    # ============================================================
+    # ----------------------------------------------------------------
     "facebook": """
 FACEBOOK TONE & FORMAT RULES
 
@@ -602,7 +787,7 @@ SCAN CHECKLIST before output:
   [ ] CTA invites community response
 """,
 
-    # ============================================================
+    # ----------------------------------------------------------------
     "reddit": """
 REDDIT TONE & FORMAT RULES
 
@@ -675,7 +860,7 @@ SCAN CHECKLIST before output:
   [ ] No banned words
 """,
 
-    # ============================================================
+    # ----------------------------------------------------------------
     "tiktok": """
 TIKTOK TONE & FORMAT RULES  (LIVE as of v3.0)
 
@@ -773,27 +958,36 @@ SCAN CHECKLIST before output:
 }
 
 
-# ============================================================
-# Helper for the generation pipeline. Drop into prompt_builder.py
-# ============================================================
+# ============================================================================
+# build_generation_prompt()
+#
+# Composes the full prompt to send to the model. Stacks PROMPT_COMPOSITION_RULES,
+# BRAND_BIBLE, VOICE_FINGERPRINT, PAIN_POINT, CONTENT_TYPE_RULES, optional
+# CONTENT_TYPE_EXAMPLES, and PLATFORM_TONE in the precedence order defined above.
+# ============================================================================
 
 def build_generation_prompt(*, platform: str, content_type: str, brand_bible: str,
                             voice_fingerprint: str, pain_point: str,
-                            target_sub: str | None = None) -> str:
+                            target_sub: str | None = None,
+                            include_examples: bool = True) -> str:
     """
     Compose the full generation prompt by stacking PROMPT_COMPOSITION_RULES,
-    BRAND_BIBLE, VOICE_FINGERPRINT, CONTENT_TYPE_RULES, PLATFORM_TONE, and
-    PAIN_POINT in the order defined above.
+    BRAND_BIBLE, VOICE_FINGERPRINT, CONTENT_TYPE_RULES (+ optional EXAMPLES),
+    PLATFORM_TONE, and PAIN_POINT in the order defined above.
 
     Args:
-        platform:         one of PLATFORM_TONE_INSTRUCTIONS keys
-                          (instagram, linkedin, x, threads, facebook, reddit, tiktok)
-        content_type:     one of CONTENT_TYPE_RULES keys
-                          (ugc, carousel, photo, text)
-        brand_bible:      client's brand bible as a string
+        platform:          one of PLATFORM_TONE_INSTRUCTIONS keys
+                           (instagram, linkedin, x, threads, facebook, reddit, tiktok)
+        content_type:      one of CONTENT_TYPE_RULES keys
+                           (ugc, carousel, photo, text)
+        brand_bible:       client's brand bible as a string
         voice_fingerprint: examples of past posts as a string
-        pain_point:       what this post is about
-        target_sub:       for Reddit, the target subreddit (e.g., "r/SaaS")
+        pain_point:        what this post is about
+        target_sub:        for Reddit, the target subreddit (e.g., "r/SaaS")
+        include_examples:  whether to inject CONTENT_TYPE_EXAMPLES into the prompt.
+                           Default True (production). Set False in dev/test loops where
+                           you want shorter prompts and faster iteration. Toggling OFF
+                           will measurably reduce output quality, so only do it intentionally.
 
     Raises:
         ValueError if platform/content_type unknown or if the combination
@@ -820,6 +1014,15 @@ def build_generation_prompt(*, platform: str, content_type: str, brand_bible: st
     platform_tone = PLATFORM_TONE_INSTRUCTIONS[platform]
     sub_line = f"\nTARGET SUBREDDIT: {target_sub}\n" if platform == "reddit" and target_sub else ""
 
+    examples_section = ""
+    if include_examples:
+        content_examples = CONTENT_TYPE_EXAMPLES.get(content_type, "").strip()
+        if content_examples:
+            examples_section = (
+                f"\nCONTENT_TYPE_EXAMPLES for {content_type.upper()} "
+                f"(good vs bad pairs to pattern-match against):\n{content_examples}\n"
+            )
+
     return f"""{PROMPT_COMPOSITION_RULES}
 
 BRAND_BIBLE:
@@ -833,7 +1036,7 @@ PAIN_POINT (what this post is about):
 {sub_line}
 CONTENT_TYPE_RULES for {content_type.upper()} (base format mechanics):
 {content_rules}
-
+{examples_section}
 PLATFORM_TONE for {platform.upper()} (specialization on top of the content-type rules):
 {platform_tone}
 
@@ -841,3 +1044,58 @@ Now write the {content_type} for {platform}. After drafting, run BOTH scan check
 (the CONTENT_TYPE_RULES checklist and the PLATFORM_TONE checklist). If any item fails,
 regenerate. Return the final draft only.
 """
+
+
+# ============================================================================
+# Usage example
+# ============================================================================
+
+if __name__ == "__main__":
+    # Example: build a generation prompt for a LinkedIn carousel about context
+    # switching, targeting solo founders, with examples included (production mode).
+
+    example_brand_bible = """
+    Voice: peer-to-peer, founder talking to founder.
+    Always quantify (e.g., "2.4 hrs/week", not "a lot of time").
+    Banned phrases: "leverage", "seamlessly", "unlock", "empower", "synergy",
+    "excited to share", "thrilled to announce", "humbled to".
+    Audience: solo technical founders, $0 to 5k MRR, building alone.
+    Pillars: voice-aware AI, real consolidation, ship over switch.
+    """
+
+    example_voice_fingerprint = """
+    Sample 1: "I cut my marketing stack from 7 tools to 1. Saved 5 hours a week.
+    Here's the math nobody talks about."
+    Sample 2: "Your CRM is lying to you about pipeline health. I time-tracked
+    it for a month."
+    Sample 3: "Stop time-blocking. Start tool-blocking. The fix is structural."
+    """
+
+    example_pain_point = """
+    Solo founders spend 2.4 hours per week on context switching between marketing
+    tools. The cost is unbilled time and inconsistent shipping cadence.
+    """
+
+    prompt = build_generation_prompt(
+        platform="linkedin",
+        content_type="carousel",
+        brand_bible=example_brand_bible,
+        voice_fingerprint=example_voice_fingerprint,
+        pain_point=example_pain_point,
+        include_examples=True,
+    )
+
+    print(prompt)
+
+    # Validation example: this combination would raise ValueError because
+    # Reddit doesn't support carousels.
+    try:
+        build_generation_prompt(
+            platform="reddit",
+            content_type="carousel",
+            brand_bible=example_brand_bible,
+            voice_fingerprint=example_voice_fingerprint,
+            pain_point=example_pain_point,
+        )
+    except ValueError as e:
+        print(f"\nExpected validation error: {e}")
