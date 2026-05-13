@@ -38,6 +38,18 @@ import {
   type ErrorKind,
 } from '@/lib/ai/categorize-error';
 import type { BrandBible } from '@/lib/types/brand';
+// PR Sprint 7.13 — platform-native tone system. Layers
+// PLATFORM_TONE_INSTRUCTIONS + CONTENT_TYPE_RULES on top of the
+// existing Brand Bible + Voice Fingerprint logic. Brand /
+// voice / language instruction inside the cached system prompt
+// stay UNCHANGED — these rules go in the user prompt.
+import {
+  buildGenerationPrompt,
+  mapDbContentTypeToTaxonomy,
+  PLATFORM_CONTENT_COMPATIBILITY,
+  InvalidContentForPlatformError,
+  type Platform,
+} from '@/lib/ai/platform-tone';
 
 export const maxDuration = 60;
 
@@ -313,8 +325,87 @@ ${LANGUAGE_INSTRUCTION_AUDIENCE}`;
 
   const drafts: DraftPayload[] = [];
 
+  // PR Sprint 7.13 — collapse DB content_type → platform-tone
+  // taxonomy ('ugc' | 'carousel' | 'photo' | 'text') so the
+  // compatibility validator + the rule banks key off the right
+  // bucket. Done once outside the loop because the platform is
+  // fixed for the whole batch.
+  const platformLower = platform.toLowerCase();
+  const platformIsKnown =
+    platformLower in PLATFORM_CONTENT_COMPATIBILITY;
+
   for (const template of templates) {
-    const userMessage = `CONTENT TYPE: ${template.displayName} (platform: ${platform}, type: ${template.type})
+    // PR Sprint 7.13 — validate platform + content_type
+    // compatibility BEFORE the Opus call. If the combination is
+    // unsupported (e.g., carousel on Reddit), we short-circuit
+    // with a categorized error rather than burn an Opus call
+    // and have the model improvise.
+    const taxonomy = mapDbContentTypeToTaxonomy(template.type);
+    if (platformIsKnown && taxonomy) {
+      const supported =
+        PLATFORM_CONTENT_COMPATIBILITY[platformLower as Platform];
+      if (!supported.includes(taxonomy)) {
+        const err = new InvalidContentForPlatformError(
+          platformLower as Platform,
+          taxonomy,
+        );
+        drafts.push({
+          id: '',
+          contentType: template.type,
+          displayName: template.displayName,
+          structuredContent: null,
+          error: err.message,
+          errorKind: 'unknown',
+          errorHint:
+            'This content type is not allowed on this platform. Pick a different combination in the Generator.',
+          errorRetry: false,
+        });
+        continue;
+      }
+    }
+
+    // PR Sprint 7.13 — replace the per-template prompt with the
+    // stacked platform-tone + content-type-rules prompt. Brand
+    // Bible + Voice Fingerprint are passed via buildGeneration
+    // Prompt so the model sees them in the canonical order
+    // (alongside CONTENT_TYPE_RULES and PLATFORM_TONE), but the
+    // cached system prompt above still carries them — that
+    // duplication is intentional: the system prompt cache hit
+    // keeps the cost near zero on subsequent calls, and the
+    // user-prompt copy is the one the platform-tone rule set
+    // explicitly references in its ORDER OF PRECEDENCE block.
+    //
+    // We also still append the per-template structureSchema so
+    // Opus knows the exact JSON shape to emit. The
+    // structureSchema lives in content_types (DB-driven) — that
+    // hasn't moved.
+    const stackedPrompt =
+      platformIsKnown && taxonomy
+        ? buildGenerationPrompt({
+            platform: platformLower,
+            contentType: taxonomy,
+            brandBible: brand,
+            voiceFingerprint: voice,
+            painPoint: userPrompt,
+          })
+        : null;
+
+    const userMessage = stackedPrompt
+      ? `${stackedPrompt}
+
+CONTENT TYPE (DB-specific override): ${template.displayName} (platform: ${platform}, type: ${template.type})
+
+GUIDELINES (per content_type row):
+${template.guidelines ?? '(none)'}
+
+OUTPUT SCHEMA (JSON Schema — Opus must emit JSON matching this):
+${JSON.stringify(template.structureSchema, null, 2)}
+
+Return STRICT JSON matching the schema. No markdown fences, no prose outside JSON.`
+      : // Fallback for unknown platform OR unmapped content_type.
+        // Preserves the pre-Sprint-7.13 prompt shape so legacy
+        // generation paths keep working.
+        `CONTENT TYPE: ${template.displayName} (platform: ${platform}, type: ${template.type})
 
 USER REQUEST
 ${userPrompt}
