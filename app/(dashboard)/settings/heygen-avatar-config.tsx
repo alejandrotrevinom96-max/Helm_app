@@ -660,12 +660,25 @@ function AvatarPickerModal({
               No avatars match this filter.
             </div>
           ) : (
-            // Responsive column counts scale with screen real
-            // estate. At 1800-2200px wide viewport (the
-            // founder's setup) we get 6 columns of ~280px each;
-            // at 2560px+ we hit 7 columns. Tablet stays at 3-4,
-            // phone at 2.
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-3 md:gap-4">
+            // PR Sprint 7.13 hotfix v4 — auto-fit grid replaces
+            // fixed breakpoint columns. The previous version
+            // declared explicit col counts per breakpoint and at
+            // narrow modal widths the columns just squeezed
+            // (e.g. 7 cols inside a 640px modal = ~90px per
+            // thumb — useless for face comparison). Now:
+            // `repeat(auto-fill, minmax(260px, 1fr))` enforces a
+            // 260px FLOOR per card; the browser fits as many as
+            // the modal width allows and stretches them to share
+            // remaining space. Cards never shrink below 260×347
+            // (3:4 aspect) so faces stay readable on every
+            // viewport.
+            <div
+              className="grid gap-5"
+              style={{
+                gridTemplateColumns:
+                  'repeat(auto-fill, minmax(260px, 1fr))',
+              }}
+            >
               {filtered.map((a) => {
                 const selected = a.avatarId === selectedId;
                 const genderLabel = a.gender
@@ -697,23 +710,26 @@ function AvatarPickerModal({
                       </div>
                     )}
 
-                    {/* Gender badge (top-right) */}
+                    {/* Gender badge (top-right) — bigger pill
+                        now that each card has 260px+ of room. */}
                     {genderLabel && (
-                      <span className="absolute top-2 right-2 text-[11px] font-mono font-bold px-2 py-0.5 rounded bg-bg/90 text-text-1 backdrop-blur-sm">
+                      <span className="absolute top-2.5 right-2.5 text-xs font-mono font-bold px-2 py-1 rounded-md bg-bg/90 text-text-1 backdrop-blur-sm">
                         {genderLabel}
                       </span>
                     )}
 
                     {/* Premium badge (top-left) */}
                     {a.premium && (
-                      <span className="absolute top-2 left-2 text-[10px] font-mono uppercase tracking-[0.08em] font-bold px-2 py-0.5 rounded bg-accent text-white">
+                      <span className="absolute top-2.5 left-2.5 text-[11px] font-mono uppercase tracking-[0.08em] font-bold px-2 py-1 rounded-md bg-accent text-white">
                         Premium
                       </span>
                     )}
 
-                    {/* Name (bottom gradient) */}
-                    <div className="absolute bottom-0 inset-x-0 p-3 bg-gradient-to-t from-black/85 via-black/40 to-transparent">
-                      <div className="text-sm font-medium text-white truncate">
+                    {/* Name (bottom gradient) — bumped to base
+                        font size; cards are big enough now that
+                        the smaller name was an unforced loss. */}
+                    <div className="absolute bottom-0 inset-x-0 p-3 bg-gradient-to-t from-black/85 via-black/50 to-transparent">
+                      <div className="text-base font-medium text-white truncate leading-tight">
                         {a.name}
                       </div>
                     </div>
@@ -721,7 +737,7 @@ function AvatarPickerModal({
                     {/* Selected overlay */}
                     {selected && (
                       <div className="absolute inset-0 flex items-center justify-center bg-accent/20 pointer-events-none">
-                        <div className="w-12 h-12 rounded-full bg-accent text-white flex items-center justify-center text-xl">
+                        <div className="w-14 h-14 rounded-full bg-accent text-white flex items-center justify-center text-2xl">
                           ✓
                         </div>
                       </div>
