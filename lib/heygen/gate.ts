@@ -9,6 +9,16 @@
 // Two gates, deliberately separate:
 //   1. Deployment-level — env vars set.
 //   2. Project-level — the project has a usable avatar config.
+//
+// PR Sprint 7.13 hotfix — tolerant truthy parsing.
+//
+// Pre-hotfix the gate did `process.env.HEYGEN_ENABLED === 'true'`,
+// strict equality. Vercel's dashboard allows trailing whitespace
+// on env var values + accepts any capitalization, and the founder
+// reported the gate failing despite HEYGEN_ENABLED=true being set
+// (likely value was 'true ' with a trailing space, or 'TRUE').
+// We now accept the canonical truthy tokens after a trim +
+// lowercase. See /api/heygen/diag for a per-deploy diagnostic.
 
 interface AvatarConfig {
   heygenAvatarType: string | null;
@@ -16,11 +26,62 @@ interface AvatarConfig {
   heygenPhotoUrl: string | null;
 }
 
+const TRUTHY = new Set(['true', '1', 'yes', 'on', 'enabled']);
+
+function parseBoolish(raw: string | undefined): boolean {
+  if (!raw) return false;
+  return TRUTHY.has(raw.trim().toLowerCase());
+}
+
 export function isHeygenEnvConfigured(): boolean {
-  return (
-    process.env.HEYGEN_ENABLED === 'true' &&
-    Boolean(process.env.HEYGEN_API_KEY)
-  );
+  const raw = process.env.HEYGEN_ENABLED;
+  const enabled = parseBoolish(raw);
+  const hasKey = Boolean(process.env.HEYGEN_API_KEY?.trim());
+  const result = enabled && hasKey;
+  // PR Sprint 7.13 hotfix — temporary runtime log to confirm why
+  // the gate is firing false. Logs only at the first call per
+  // cold start in practice (Next.js function instances reuse the
+  // process) so it's a low-volume signal. Remove this log once
+  // production has been verified green.
+  if (!result) {
+    console.log(
+      '[heygen/gate] gate=false',
+      JSON.stringify({
+        HEYGEN_ENABLED_raw: raw ?? null,
+        HEYGEN_ENABLED_parsed: enabled,
+        HEYGEN_API_KEY_present: hasKey,
+        vercelEnv: process.env.VERCEL_ENV ?? null,
+      }),
+    );
+  }
+  return result;
+}
+
+/**
+ * Diagnostic snapshot of what the gate sees at runtime. Never
+ * returns the API key itself — only presence + length so the UI
+ * can render "key looks set (32 chars)" without leaking the
+ * secret. The /api/heygen/diag endpoint surfaces this for
+ * troubleshooting env-var scoping (Production vs Preview vs
+ * Development) on Vercel.
+ */
+export function getHeygenEnvDiagnostic() {
+  const raw = process.env.HEYGEN_ENABLED;
+  const apiKey = process.env.HEYGEN_API_KEY;
+  return {
+    enabledRaw: raw ?? null,
+    enabledLength: raw?.length ?? 0,
+    enabledTrimmedLower: raw?.trim().toLowerCase() ?? null,
+    enabledParsed: parseBoolish(raw),
+    apiKeyPresent: Boolean(apiKey?.trim()),
+    apiKeyLength: apiKey?.trim().length ?? 0,
+    webhookSecretPresent: Boolean(
+      process.env.HEYGEN_WEBHOOK_SECRET?.trim(),
+    ),
+    nodeEnv: process.env.NODE_ENV ?? null,
+    vercelEnv: process.env.VERCEL_ENV ?? null,
+    finalResult: isHeygenEnvConfigured(),
+  };
 }
 
 /**
