@@ -571,6 +571,171 @@ Output as an array of strings, one per tweet.`,
     defaultEnabled: true,
     displayOrder: 2,
   },
+
+  // ═══ TIKTOK ═══ (PR #88 — Sprint 7.12)
+  //
+  // Three formats matching how creators actually use TikTok. The
+  // UGC script is the bridge to the HeyGen integration shipped in
+  // PR #86 — Sprint 7.10: 'ugc' is already in the TYPES_NEED_VIDEO
+  // set inside /api/ai/generate-structured so a HeyGen job gets
+  // queued automatically when the founder generates one.
+  //
+  // Single Photo + Carousel both produce Flux images on-demand
+  // from Library (same generate-slides / visuals/generate flow
+  // that Instagram/LinkedIn use, with 'tiktok' whitelisted in
+  // both routes).
+  {
+    platform: 'tiktok',
+    type: 'photo',
+    displayName: 'Single Photo',
+    description:
+      'One image post with caption and hashtags. Max 2,200 chars.',
+    promptTemplate: `Generate a TikTok single photo post in the creator's voice.
+
+CAPTION:
+- Max 2,200 characters
+- Conversational tone, never corporate
+- Optional: one question to drive comments
+- 3-5 hashtags at the end, mix of broad and niche
+
+IMAGE DIRECTION (1-2 sentences):
+- What to shoot/show
+- 9:16 vertical composition (TikTok's native aspect)
+- Mood + lighting hint
+
+Flux generates the image on-demand from Library.`,
+    structureSchema: {
+      type: 'object',
+      required: ['imageDirection', 'caption', 'hashtags'],
+      properties: {
+        imageDirection: { type: 'string' },
+        caption: { type: 'string', maxLength: 2200 },
+        hashtags: {
+          type: 'array',
+          minItems: 3,
+          maxItems: 5,
+          items: { type: 'string' },
+        },
+        question: { type: 'string' },
+      },
+    },
+    guidelines:
+      'TikTok is conversational. Avoid Instagram-style polished captions. 9:16 vertical is the native aspect.',
+    maxLength: 2200,
+    defaultEnabled: true,
+    displayOrder: 1,
+  },
+  {
+    platform: 'tiktok',
+    type: 'ugc',
+    displayName: 'UGC-style Script',
+    description:
+      'Hook + body + CTA script. Ready to record or send to HeyGen.',
+    promptTemplate: `Generate a TikTok UGC-style video script in the creator's voice.
+
+STRUCTURE:
+- [HOOK] (first 3 seconds): one punchy line that stops the scroll
+- [BODY] (15-45 seconds): 3-5 short punchy sentences, one idea each,
+  written as SPOKEN WORDS not captions
+- [CTA] (last 3 seconds): one clear action
+  ("Follow for more", "Link in bio", "Comment X if you agree")
+
+FORMAT RULES:
+- Max 150 words total for the SCRIPT
+- No emojis in the script itself
+- Write as spoken words (read it out loud — does it sound natural?)
+
+ALSO GENERATE:
+- Caption (max 2,200 chars) with 3-5 relevant hashtags
+- 3 suggested on-screen text overlays (max 5 words each)
+
+HeyGen converts this to video on-demand from Library.`,
+    structureSchema: {
+      type: 'object',
+      required: ['hook', 'body', 'cta', 'caption', 'hashtags', 'overlays'],
+      properties: {
+        hook: { type: 'string' },
+        body: {
+          type: 'array',
+          minItems: 3,
+          maxItems: 5,
+          items: { type: 'string' },
+        },
+        cta: { type: 'string' },
+        caption: { type: 'string', maxLength: 2200 },
+        hashtags: {
+          type: 'array',
+          minItems: 3,
+          maxItems: 5,
+          items: { type: 'string' },
+        },
+        overlays: {
+          type: 'array',
+          minItems: 3,
+          maxItems: 3,
+          items: { type: 'string', maxLength: 60 },
+        },
+      },
+    },
+    guidelines:
+      'UGC = real person talking. Avoid corporate or polished marketing tone. Read the script out loud to check natural cadence.',
+    maxLength: 2200,
+    defaultEnabled: true,
+    displayOrder: 2,
+  },
+  {
+    platform: 'tiktok',
+    type: 'carousel',
+    displayName: 'Carousel (3-10 slides)',
+    description:
+      'Multi-slide post with cover, value slides, and CTA.',
+    promptTemplate: `Generate a TikTok carousel in the creator's voice.
+
+STRUCTURE (3-10 slides):
+- SLIDE 1 (COVER): bold hook headline (max 8 words). role: 'cover'
+- SLIDES 2-9 (VALUE): each with a short title (max 8 words)
+  and body text (max 30 words). role: 'value'
+- LAST SLIDE (CTA): one clear action. role: 'cta'
+
+CAPTION:
+- Max 2,200 chars
+- Hook + 2-3 value points + CTA
+- 3-5 hashtags
+
+Flux generates images on-demand from Library.`,
+    structureSchema: {
+      type: 'object',
+      required: ['slides', 'caption', 'hashtags'],
+      properties: {
+        slides: {
+          type: 'array',
+          minItems: 3,
+          maxItems: 10,
+          items: {
+            type: 'object',
+            required: ['title', 'body', 'role'],
+            properties: {
+              title: { type: 'string' },
+              body: { type: 'string' },
+              role: { type: 'string', enum: ['cover', 'value', 'cta'] },
+            },
+          },
+        },
+        caption: { type: 'string', maxLength: 2200 },
+        hashtags: {
+          type: 'array',
+          minItems: 3,
+          maxItems: 5,
+          items: { type: 'string' },
+        },
+      },
+    },
+    guidelines:
+      '9:16 vertical slides. Cover slide drives tap-through. TikTok carousels are scrollable like IG but reward shorter cover hooks (8 words max).',
+    maxLength: 2200,
+    defaultEnabled: true,
+    displayOrder: 3,
+  },
 ];
 
 async function main() {

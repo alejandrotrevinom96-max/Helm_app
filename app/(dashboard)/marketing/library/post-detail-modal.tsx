@@ -63,10 +63,25 @@ function platformDisplayName(platform: string): string {
       return 'X';
     case 'reddit':
       return 'Reddit';
+    case 'tiktok':
+      return 'TikTok';
     default:
       return platform.charAt(0).toUpperCase() + platform.slice(1);
   }
 }
+
+// PR #88 — Sprint 7.12: image-format content types eligible for
+// Flux generation from the Library modal. Mirrors FLUX_TYPES in
+// the Generator panel — kept duplicated here (rather than a
+// shared constant) because the two surfaces have slightly
+// different lifecycle assumptions about when a button should
+// show (Library = drafts that haven't generated yet; Generator
+// = freshly-produced drafts).
+const FLUX_CONTENT_TYPES = new Set<string | null>([
+  'photo',
+  'single_image',
+  'carousel',
+]);
 
 interface Props {
   post: LibraryPost;
@@ -336,6 +351,92 @@ export function PostDetailModal({
       setTiktokError(e instanceof Error ? e.message : 'Network error');
     } finally {
       setTiktokSending(false);
+    }
+  };
+
+  // PR #88 — Sprint 7.12: Flux image generation for photo /
+  // carousel drafts. Single-image content types go through
+  // /api/visuals/generate (single Flux call), carousel slides
+  // go through /api/marketing/posts/[id]/generate-slides
+  // (one call per slide). Both endpoints persist the resulting
+  // URL(s) onto generatedPosts so a reload re-hydrates the
+  // images.
+  const isImageFormat =
+    isDraft && FLUX_CONTENT_TYPES.has(post.contentType);
+  const isCarouselFormat = post.contentType === 'carousel';
+  const [imageGenerating, setImageGenerating] = useState(false);
+  const [imageError, setImageError] = useState<string | null>(null);
+  const [generatedSingleUrl, setGeneratedSingleUrl] = useState<string | null>(
+    null,
+  );
+  const [generatedSlideUrls, setGeneratedSlideUrls] = useState<string[]>([]);
+
+  const handleGenerateImage = async () => {
+    if (imageGenerating) return;
+    setImageGenerating(true);
+    setImageError(null);
+    try {
+      if (isCarouselFormat) {
+        const res = await fetch(
+          `/api/marketing/posts/${post.id}/generate-slides`,
+          { method: 'POST' },
+        );
+        const data = (await res.json().catch(() => ({}))) as {
+          success?: boolean;
+          visualUrls?: (string | null)[];
+          error?: string;
+          hint?: string;
+        };
+        if (!res.ok || !data.success) {
+          setImageError(data.error ?? data.hint ?? 'Slide generation failed');
+          return;
+        }
+        const urls = (data.visualUrls ?? []).filter(
+          (u): u is string => typeof u === 'string' && u.length > 0,
+        );
+        setGeneratedSlideUrls(urls);
+      } else {
+        // Single-photo path. The visuals endpoint needs the post
+        // caption to scaffold the image prompt — pull from the
+        // structured content where available (TikTok photos have
+        // a dedicated `imageDirection` field), fall back to the
+        // plain caption / content.
+        const sc = post.structuredContent as
+          | Record<string, unknown>
+          | null;
+        const postContent =
+          (typeof sc?.imageDirection === 'string' && sc.imageDirection) ||
+          (typeof sc?.caption === 'string' && sc.caption) ||
+          post.content ||
+          'Generate a brand-aligned image for this post.';
+        const res = await fetch('/api/visuals/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectId: post.projectId,
+            platform: post.platform,
+            postContent,
+            draftId: post.id,
+          }),
+        });
+        const data = (await res.json().catch(() => ({}))) as {
+          success?: boolean;
+          imageUrl?: string;
+          url?: string;
+          error?: string;
+          hint?: string;
+        };
+        if (!res.ok || data.error) {
+          setImageError(data.error ?? data.hint ?? 'Image generation failed');
+          return;
+        }
+        const url = data.imageUrl ?? data.url ?? null;
+        if (url) setGeneratedSingleUrl(url);
+      }
+    } catch (e) {
+      setImageError(e instanceof Error ? e.message : 'Network error');
+    } finally {
+      setImageGenerating(false);
     }
   };
 
@@ -700,6 +801,71 @@ export function PostDetailModal({
             alt=""
             className="w-full rounded-lg mb-4 bg-bg"
           />
+        )}
+
+        {/* PR #88 — Sprint 7.12: Flux image generation block for
+            photo / carousel drafts that don't have visuals yet.
+            Single-image hits /api/visuals/generate; carousel hits
+            /api/marketing/posts/[id]/generate-slides. Both persist
+            the URLs onto the draft so a refresh re-hydrates the
+            preview without re-calling Flux. */}
+        {isImageFormat &&
+          !post.visualUrl &&
+          (!post.visualUrls || post.visualUrls.length === 0) &&
+          generatedSingleUrl === null &&
+          generatedSlideUrls.length === 0 && (
+            <div className="mb-4 p-4 bg-bg border border-border rounded-lg space-y-3">
+              <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3">
+                Flux image
+              </div>
+              <p className="text-sm text-text-2">
+                {isCarouselFormat
+                  ? 'Generate one Flux Pro image per slide. ~$0.05 per slide.'
+                  : 'Generate a Flux Pro image for this post. ~$0.05.'}
+              </p>
+              <button
+                type="button"
+                onClick={handleGenerateImage}
+                disabled={imageGenerating}
+                className="px-3 py-1.5 bg-accent text-white rounded-lg text-xs font-medium hover:opacity-90 disabled:opacity-50"
+              >
+                {imageGenerating
+                  ? '🎨 Generating…'
+                  : isCarouselFormat
+                    ? '🎨 Generate slides →'
+                    : '🎨 Generate image →'}
+              </button>
+              {imageError && (
+                <div className="text-xs text-danger">{imageError}</div>
+              )}
+            </div>
+          )}
+
+        {/* Just-generated single-image preview (session-only;
+            refresh re-hydrates from post.visualUrl after the
+            endpoint persisted it server-side). */}
+        {generatedSingleUrl && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={generatedSingleUrl}
+            alt="Generated"
+            className="w-full rounded-lg mb-4 bg-bg"
+          />
+        )}
+
+        {/* Just-generated slide previews. */}
+        {generatedSlideUrls.length > 0 && (
+          <div className="mb-4 grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {generatedSlideUrls.map((url, i) => (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                key={`${url}-${i}`}
+                src={url}
+                alt={`Slide ${i + 1}`}
+                className="w-full rounded-lg bg-bg border border-border"
+              />
+            ))}
+          </div>
         )}
 
         {/* PR #86 — Sprint 7.10: HeyGen video block for Reel / UGC

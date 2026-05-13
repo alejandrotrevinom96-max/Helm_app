@@ -11,7 +11,16 @@ if (process.env.FAL_API_KEY) {
 export type AspectRatio = 'square' | 'portrait' | 'landscape';
 
 export interface VisualPrompt {
-  platform: 'instagram' | 'facebook' | 'linkedin' | 'threads' | 'reddit';
+  // PR #88 — Sprint 7.12: 'tiktok' joined for Single Photo and
+  // Carousel content types. The platform name flows into prompt
+  // scaffolding + default aspect ratio (TikTok → portrait 9:16).
+  platform:
+    | 'instagram'
+    | 'facebook'
+    | 'linkedin'
+    | 'threads'
+    | 'reddit'
+    | 'tiktok';
   postContent: string;
   brandBible: BrandBible | null;
   style?: ImageStyle;
@@ -58,6 +67,12 @@ const PLATFORM_DEFAULT_ASPECT: Record<
   // Reddit posts most often render in feed at landscape; old.reddit
   // and image-heavy subreddits both handle 1.91:1 well.
   reddit: 'landscape',
+  // PR #88 — Sprint 7.12: TikTok's native canvas is 9:16 vertical.
+  // Even photo posts render full-bleed portrait, so default to
+  // 'portrait' (832×1216) rather than the Instagram 'square'
+  // default. Carousel slides inherit per-slide via the
+  // generate-slides endpoint.
+  tiktok: 'portrait',
 };
 
 export async function generateVisual(

@@ -22,6 +22,11 @@ const VALID_PLATFORMS = new Set([
   'linkedin',
   'threads',
   'reddit',
+  // PR #88 — Sprint 7.12: TikTok image generation for Single
+  // Photo + Carousel content types. The visuals lib defaults
+  // tiktok to 'portrait' aspect (9:16) because that's TikTok's
+  // native vertical format.
+  'tiktok',
 ]);
 const VALID_ASPECT: Set<AspectRatio> = new Set<AspectRatio>([
   'square',
@@ -132,7 +137,8 @@ export async function POST(request: Request) {
         | 'facebook'
         | 'linkedin'
         | 'threads'
-        | 'reddit',
+        | 'reddit'
+        | 'tiktok',
       postContent: sanitizePromptInput(postContent),
       brandBible: (project.brandContext as BrandBible | null) ?? null,
       style,

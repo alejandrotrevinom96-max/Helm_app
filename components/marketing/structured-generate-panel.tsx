@@ -44,7 +44,10 @@ type Platform =
   | 'linkedin'
   | 'reddit'
   | 'threads'
-  | 'x';
+  | 'x'
+  // PR #88 — Sprint 7.12: TikTok joins as a first-class platform
+  // with 3 content types seeded (photo, ugc, carousel).
+  | 'tiktok';
 
 const PLATFORMS: Platform[] = [
   'instagram',
@@ -53,14 +56,21 @@ const PLATFORMS: Platform[] = [
   'reddit',
   'threads',
   'x',
+  'tiktok',
 ];
 
 // Capability map — keys match the seeded content-type rows
 // (Instagram: reel/carousel/photo/ugc; Facebook: reel/photo/
 // community_post; LinkedIn: text_post/carousel/single_image;
 // Reddit: self_post/link_post; Threads: text_post/photo; X:
-// single_tweet/thread). Anything not in here renders without
-// badges, which is correct for plain text formats.
+// single_tweet/thread; TikTok: photo/ugc/carousel). Anything not
+// in here renders without badges, which is correct for plain
+// text formats.
+//
+// Type keys are SHARED across platforms (e.g. 'photo' on
+// Instagram, Threads, AND TikTok all flow through Flux; 'ugc' on
+// Instagram + TikTok both queue HeyGen). Adding TikTok was a
+// pure data change — no UI fork needed.
 const FLUX_TYPES = new Set([
   'carousel',
   'photo',

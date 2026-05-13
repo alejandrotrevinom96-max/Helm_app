@@ -150,7 +150,11 @@ export async function POST(
     | 'facebook'
     | 'linkedin'
     | 'threads'
-    | 'reddit';
+    | 'reddit'
+    // PR #88 — Sprint 7.12: TikTok carousels route through the
+    // same slide-generation flow with the lib defaulting to
+    // portrait (9:16) when platform === 'tiktok'.
+    | 'tiktok';
   const style: ImageStyle =
     bible?.visual?.imageStyle ?? 'editorial';
 

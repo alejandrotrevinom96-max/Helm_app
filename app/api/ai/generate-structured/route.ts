@@ -51,6 +51,11 @@ const VALID_PLATFORMS = new Set([
   'reddit',
   'threads',
   'x',
+  // PR #88 — Sprint 7.12: TikTok joins the structured-draft
+  // pipeline. content_types is seeded with photo + ugc + carousel
+  // for tiktok; TYPES_NEED_VIDEO already includes 'ugc' so the
+  // HeyGen job auto-queues for UGC scripts.
+  'tiktok',
 ]);
 
 // PR #76 — Sprint 7.3: types that should produce a queued HeyGen
