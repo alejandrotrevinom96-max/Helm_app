@@ -27,7 +27,7 @@ const PERSONAS: Persona[] = [
   },
   {
     title: 'Agencies & Operators',
-    body: 'Managing marketing for multiple clients or brands? Helm isolates each project completely. One workspace, infinite brands, zero confusion.',
+    body: 'Managing marketing for multiple clients or products? Helm isolates each project completely — one workspace, multiple brands, zero confusion.',
   },
   {
     title: 'Bootstrap SaaS',

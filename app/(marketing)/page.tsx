@@ -31,7 +31,7 @@ export const metadata = {
   openGraph: {
     title: 'Helm — Your Marketing OS, built for builders',
     description:
-      'Stop juggling 7 marketing tabs. One workspace for voice-aware drafts, multi-platform publishing, and strategic clarity. Free for the first 20 founders.',
+      'Stop juggling 7 marketing tabs. One workspace for voice-aware drafts, multi-platform publishing, and strategic clarity. Free while in beta — first 50 founders lock in lifetime pricing.',
     url: 'https://trythelm.com',
     siteName: 'Helm',
     type: 'website',

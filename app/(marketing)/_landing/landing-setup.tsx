@@ -19,18 +19,19 @@ function LandingCTA() {
         <div className="text-[10px] font-mono uppercase tracking-[0.2em] text-text-3 mb-3">
           Pricing
         </div>
-        {/* PR #82 — Sprint 7.7: pricing copy refresh for v3.0
-            positioning. Same "free for first 20" scarcity anchor;
-            the disclaimer now names what the founder is paying
-            with (feedback) instead of waving at a pricing TBD. CTA
-            label kept as "Claim your spot →" per the v3.0 plan. */}
+        {/* PR #82 — Sprint 7.7: pricing copy for v3.0 positioning.
+            PR #84 — Sprint 7.9: scarcity bumped from "first 20" to
+            "first 50 lock in lifetime pricing" — the lifetime anchor
+            converts better than "we'll figure pricing out" because
+            it names the actual deal (vs. waving at a TBD). Micro-
+            copy under the CTA refreshed to match the hero's tonal
+            shift. */}
         <h2 className="font-display text-4xl md:text-5xl tracking-tight font-light mb-4">
-          Free for the first 20 founders.
+          Free while in beta.
         </h2>
         <p className="text-base md:text-lg text-text-2 max-w-xl mx-auto mb-10 leading-relaxed">
-          Helm is currently free during open beta for the first 20
-          founders. We&apos;re shipping in public — your feedback shapes
-          the roadmap.
+          The first 50 founders lock in lifetime pricing. We&apos;re
+          shipping in public — your feedback shapes the roadmap.
         </p>
 
         <Link
@@ -42,7 +43,7 @@ function LandingCTA() {
         </Link>
 
         <p className="text-xs text-text-3 mt-5">
-          No credit card. Sign up takes 30 seconds.
+          No credit card. No bullshit. 30 seconds to start.
         </p>
       </div>
     </section>

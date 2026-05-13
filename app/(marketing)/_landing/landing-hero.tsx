@@ -192,7 +192,7 @@ export function LandingHero() {
         <div className="inline-flex items-center gap-2 px-3 py-1 mb-6 bg-bg-elev/60 border border-border rounded-full">
           <span className="w-1.5 h-1.5 rounded-full bg-success animate-[pulse-dot_2s_ease-in-out_infinite]" />
           <span className="text-xs font-mono uppercase tracking-[0.15em] text-text-3">
-            Free for first 20 founders
+            Free while in beta — first 50 founders lock in lifetime pricing
           </span>
         </div>
 
@@ -207,7 +207,8 @@ export function LandingHero() {
           Your Marketing OS.
         </h1>
         <h2 className="font-display text-2xl md:text-3xl lg:text-4xl font-light tracking-tight leading-tight text-text-3 mb-8">
-          Built for the people who&apos;d rather ship.
+          Built for founders and small teams who&apos;d rather ship than
+          context-switch.
         </h2>
 
         <p className="text-base md:text-lg text-text-2 max-w-2xl mx-auto mb-10 leading-relaxed">
