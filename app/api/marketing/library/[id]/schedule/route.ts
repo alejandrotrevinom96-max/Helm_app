@@ -81,6 +81,14 @@ export async function POST(
       // forward so the publisher cron can post the multi-image
       // carousel without a roundtrip back to generated_posts.
       visualUrls: generatedPosts.visualUrls,
+      // PR Sprint 7.13 (BUG 3) — singular image URL for non-
+      // carousel posts (single photo, IG photo, etc.). Was
+      // never copied to scheduledPosts.visualUrl pre-fix, so
+      // scheduled single-image posts lost their image
+      // immediately — Library + Calendar both rendered the
+      // post without a visual.
+      imageUrl: generatedPosts.imageUrl,
+      imagePrompt: generatedPosts.imagePrompt,
     })
     .from(generatedPosts)
     .innerJoin(projects, eq(projects.id, generatedPosts.projectId))
@@ -183,6 +191,12 @@ export async function POST(
       structuredContent: draft.structuredContent ?? null,
       // PR #65 — Sprint 7.0.8: carry slide image URLs for carousels.
       visualUrls: (draft.visualUrls as string[] | null) ?? null,
+      // PR Sprint 7.13 (BUG 3) — carry the singular image URL too.
+      // For non-carousel posts the image lives on generatedPosts.
+      // imageUrl; this is the column scheduledPosts uses for the
+      // same purpose (visualUrl).
+      visualUrl: draft.imageUrl ?? null,
+      visualPrompt: draft.imagePrompt ?? null,
     })
     .returning();
 

@@ -50,6 +50,10 @@ import {
   InvalidContentForPlatformError,
   type Platform,
 } from '@/lib/ai/platform-tone';
+// PR Sprint 7.13 (BUG 2) — Brand fit score on drafts. Restored
+// after structured-draft path skipped it during the Sprint 7.0.4
+// pipeline migration.
+import { computeConsistencyScore } from '@/lib/ai/consistency-score';
 
 export const maxDuration = 60;
 
@@ -506,6 +510,24 @@ Return STRICT JSON matching the schema. No markdown fences, no prose outside JSO
     // none, JSON-stringify a short version.
     const contentPreview = buildContentPreview(parsed);
 
+    // PR Sprint 7.13 (BUG 2) — compute the brand-fit score on
+    // the preview text. Best-effort: a failure (Opus overload,
+    // missing bible, etc.) leaves the score null instead of
+    // failing the whole draft. The post-card.tsx UI handles
+    // null gracefully (no badge rendered).
+    let consistencyScore: number | null = null;
+    let scoreBreakdown: Record<string, unknown> | null = null;
+    try {
+      const score = await computeConsistencyScore(contentPreview, bible);
+      consistencyScore = score.total;
+      scoreBreakdown = score as unknown as Record<string, unknown>;
+    } catch (scoreErr) {
+      console.warn(
+        `[generate-structured] consistency score failed for ${platform}/${template.type}:`,
+        scoreErr instanceof Error ? scoreErr.message : scoreErr,
+      );
+    }
+
     const [inserted] = await db
       .insert(generatedPosts)
       .values({
@@ -515,6 +537,8 @@ Return STRICT JSON matching the schema. No markdown fences, no prose outside JSO
         prompt: userPrompt,
         contentType: template.type,
         structuredContent: parsed as object,
+        consistencyScore,
+        scoreBreakdown,
       })
       .returning({ id: generatedPosts.id });
 

@@ -257,6 +257,23 @@ export const generatedPosts = pgTable('generated_posts', {
   // `imageUrl` column stays the single-image source of truth for
   // non-carousel posts.
   visualUrls: jsonb('visual_urls').$type<string[]>(),
+  // PR Sprint 7.13 (BUG 2) — Brand fit score on drafts.
+  //
+  // Pre-fix only scheduledPosts carried consistencyScore (Sprint
+  // 6.9). The Library card rendered the "Brand fit XX/100" badge
+  // conditionally on `consistencyScore`, but for drafts the
+  // Library API hardcoded null because the column didn't exist.
+  // Result: founders saw the badge on published rows but never on
+  // freshly-generated drafts — they reported it as "the badge
+  // disappeared".
+  //
+  // We now mirror the scheduledPosts shape on drafts so:
+  //   - /api/ai/generate-structured can compute + persist the
+  //     score immediately after each Opus call.
+  //   - The Library API can surface the same value uniformly for
+  //     drafts AND scheduled rows.
+  consistencyScore: integer('consistency_score'),
+  scoreBreakdown: jsonb('score_breakdown'),
 });
 
 // ===== Research Findings =====

@@ -125,6 +125,36 @@ export async function publishPost(postId: string): Promise<PublishResult> {
     return await publishToThreads(post);
   }
 
+  // PR Sprint 7.13 (BUG 1) — TikTok + Reddit dispatch.
+  // Pre-fix this function fell through to the Meta integration
+  // check for every platform that wasn't x/linkedin/threads, so a
+  // TikTok carousel surfaced "no hay integración de Meta" — the
+  // founder's bug report. The publisher now routes by platform
+  // FIRST and refuses cleanly with platform-specific copy.
+  //
+  // TikTok auto-publish for scheduled posts isn't wired yet — the
+  // Sprint 7.11 inbox flow is user-driven from Library (Send to
+  // TikTok button) because it needs a HeyGen-rendered video URL
+  // that the cron path can't auto-produce. So we surface the
+  // right next step instead of letting Meta validation fail with
+  // a misleading error.
+  if (post.platform === 'tiktok') {
+    return {
+      success: false,
+      error:
+        'TikTok auto-publish from the scheduler isn\'t wired yet. Open this post in Library and use "Send to TikTok →" once a HeyGen video is ready, or publish manually from the TikTok app.',
+      isTransient: false,
+    };
+  }
+  if (post.platform === 'reddit') {
+    return {
+      success: false,
+      error:
+        'Reddit auto-publish needs app review approval (pending). Copy the title + body and post manually for now.',
+      isTransient: false,
+    };
+  }
+
   const [integration] = await db
     .select()
     .from(metaIntegrations)

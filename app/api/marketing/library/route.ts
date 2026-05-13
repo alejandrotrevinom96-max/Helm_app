@@ -262,7 +262,11 @@ export async function GET(request: Request) {
       metricsLikes: null,
       metricsComments: null,
       metricsShares: null,
-      consistencyScore: null,
+      // PR Sprint 7.13 (BUG 2) — drafts now carry consistencyScore
+      // because /api/ai/generate-structured persists it on insert.
+      // Pre-fix this was hardcoded null and the "Brand fit XX/100"
+      // badge never rendered on freshly-generated drafts.
+      consistencyScore: r.consistencyScore ?? null,
       createdAt: r.createdAt.toISOString(),
       publishStatus: null,
       publishFailureReason: null,

@@ -128,6 +128,13 @@ export async function POST(
       contentType: generatedPosts.contentType,
       structuredContent: generatedPosts.structuredContent,
       visualUrls: generatedPosts.visualUrls,
+      // PR Sprint 7.13 (BUG 3) — copy singular image URL through.
+      // Pre-fix the post-now path matched the schedule endpoint's
+      // gap: imageUrl on the draft was dropped on the way to
+      // scheduledPosts.visualUrl, so single-image post-nows lost
+      // their visual immediately.
+      imageUrl: generatedPosts.imageUrl,
+      imagePrompt: generatedPosts.imagePrompt,
     })
     .from(generatedPosts)
     .innerJoin(projects, eq(projects.id, generatedPosts.projectId))
@@ -190,6 +197,9 @@ export async function POST(
       contentType: draft.contentType,
       structuredContent: draft.structuredContent ?? null,
       visualUrls: (draft.visualUrls as string[] | null) ?? null,
+      // PR Sprint 7.13 (BUG 3) — carry singular image URL.
+      visualUrl: draft.imageUrl ?? null,
+      visualPrompt: draft.imagePrompt ?? null,
     })
     .returning();
 

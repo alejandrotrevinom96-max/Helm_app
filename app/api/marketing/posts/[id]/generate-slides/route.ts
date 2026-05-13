@@ -22,6 +22,7 @@ import { eq, and } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 import { checkRateLimit } from '@/lib/rate-limit';
 import { generateVisual } from '@/lib/visuals/generate';
+import { uploadVisualFromUrl } from '@/lib/visuals/storage';
 import type { BrandBible, ImageStyle } from '@/lib/types/brand';
 
 export const maxDuration = 120; // 6-8 sequential Flux calls
@@ -182,9 +183,30 @@ export async function POST(
       });
       continue;
     }
+    // PR Sprint 7.13 (BUG 3) — rehost each slide image to
+    // Supabase Storage immediately. fal.ai's CDN URLs are
+    // signed with a ~1-hour TTL; persisting the raw URL meant
+    // every carousel scheduled more than an hour ahead lost
+    // its images by the time the publisher cron picked it up.
+    // We persist the Supabase URL when rehost succeeds and
+    // fall back to the fal.ai URL on failure (still fresh
+    // during the current session, surfaced in failures[] for
+    // diagnostics).
+    const uploaded = await uploadVisualFromUrl(
+      result.url,
+      user.id,
+      `${id}-slide-${i}`,
+    );
+    const permanentUrl = uploaded?.publicUrl ?? result.url;
+    if (!uploaded) {
+      failures.push({
+        slideIndex: i,
+        reason: 'rehost to Supabase failed; using transient fal.ai URL (will expire ~1h)',
+      });
+    }
     successes.push({
       slideIndex: i,
-      url: result.url,
+      url: permanentUrl,
       prompt: result.prompt,
     });
   }
