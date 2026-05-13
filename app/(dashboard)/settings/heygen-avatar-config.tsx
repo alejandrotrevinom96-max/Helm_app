@@ -26,8 +26,15 @@ import type { AvatarOption } from '@/app/api/heygen/avatars/route';
 
 type AvatarType = 'stock' | 'photo' | 'twin';
 
+// PR Sprint 7.13 hotfix v2 — local state widens avatarType to
+// `AvatarType | null` so the UI can express the "no option
+// chosen yet" state. The API still persists one of the three
+// concrete strings (DB column defaults to 'stock'); we just
+// don't pre-check any radio at first render unless the saved
+// row has actual selection data (avatarId or photoUrl) backing
+// it.
 interface AvatarSettings {
-  avatarType: AvatarType;
+  avatarType: AvatarType | null;
   avatarId: string | null;
   photoUrl: string | null;
   voiceId: string | null;
@@ -40,11 +47,17 @@ interface Props {
 
 export function HeygenAvatarConfig({ projectId, userId }: Props) {
   const [settings, setSettings] = useState<AvatarSettings>({
-    avatarType: 'stock',
+    avatarType: null,
     avatarId: null,
     photoUrl: null,
     voiceId: null,
   });
+  // PR Sprint 7.13 hotfix v2 — the larger picker lives in a
+  // modal overlay, not inline. Opens via a "Choose avatar" /
+  // "Change avatar" button under the stock option. Keeps the
+  // Settings card compact while giving the founder enough
+  // canvas to actually compare faces at a useful size.
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [avatars, setAvatars] = useState<AvatarOption[]>([]);
   const [avatarsLoading, setAvatarsLoading] = useState(false);
@@ -66,6 +79,13 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
   const [envDisabled, setEnvDisabled] = useState(false);
 
   // Initial load — fetch the saved selection for this project.
+  // PR Sprint 7.13 hotfix v2: derive avatarType from whether
+  // the saved row has an actual avatarId / photoUrl. Pre-fix
+  // the API would default avatarType='stock' for every founder
+  // (because the DB column defaults to 'stock') even though no
+  // stock avatar had ever been picked — making the radio pre-
+  // check feel like an arbitrary opinion. Now: no selection
+  // signal in the row → no radio pre-checked.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -75,9 +95,32 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
           if (!cancelled) setLoading(false);
           return;
         }
-        const data = (await res.json()) as AvatarSettings;
+        const data = (await res.json()) as {
+          avatarType: AvatarType;
+          avatarId: string | null;
+          photoUrl: string | null;
+          voiceId: string | null;
+        };
         if (!cancelled) {
-          setSettings(data);
+          let derived: AvatarType | null = null;
+          if (data.avatarType === 'photo' && data.photoUrl) {
+            derived = 'photo';
+          } else if (data.avatarType === 'twin') {
+            // Twin is locked but we honor a saved selection so
+            // the founder sees their intent persisted.
+            derived = 'twin';
+          } else if (data.avatarType === 'stock' && data.avatarId) {
+            // Only pre-check 'stock' when an avatarId is
+            // ACTUALLY saved — distinguishes "default fired" from
+            // "user picked stock".
+            derived = 'stock';
+          }
+          setSettings({
+            avatarType: derived,
+            avatarId: data.avatarId,
+            photoUrl: data.photoUrl,
+            voiceId: data.voiceId,
+          });
           setLoading(false);
         }
       } catch {
@@ -138,10 +181,25 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
   };
 
   const handleSave = async () => {
+    // PR Sprint 7.13 hotfix v2: refuse to save when no option
+    // is selected. The previous default-to-stock behavior meant
+    // the founder could click Save without picking anything and
+    // the DB would land with avatarType='stock' + avatarId=null
+    // (which the gate then treats as "not ready" anyway). Now
+    // we surface a clear message instead of a confusing save.
+    if (!settings.avatarType) {
+      setSaveMessage('Pick an option first.');
+      return;
+    }
     setSaving(true);
     setSaveMessage(null);
     try {
-      const body: Partial<AvatarSettings> = {
+      const body: Partial<{
+        avatarType: AvatarType;
+        avatarId: string | null;
+        photoUrl: string | null;
+        voiceId: string | null;
+      }> = {
         avatarType: settings.avatarType,
       };
       if (settings.avatarType === 'stock') {
@@ -164,8 +222,16 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
       if (!res.ok) {
         setSaveMessage(data.error ?? 'Save failed');
       } else {
+        // Mirror the same derive-from-saved-data rule as the
+        // initial load so a save → reload → save round-trip is
+        // idempotent.
+        const savedType = data.avatarType as AvatarType | undefined;
+        let derived: AvatarType | null = null;
+        if (savedType === 'photo' && data.photoUrl) derived = 'photo';
+        else if (savedType === 'twin') derived = 'twin';
+        else if (savedType === 'stock' && data.avatarId) derived = 'stock';
         setSettings({
-          avatarType: (data.avatarType ?? 'stock') as AvatarType,
+          avatarType: derived,
           avatarId: data.avatarId ?? null,
           photoUrl: data.photoUrl ?? null,
           voiceId: data.voiceId ?? null,
@@ -233,30 +299,22 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
               </div>
 
               {settings.avatarType === 'stock' && (
-                <>
-                  {/* PR Sprint 7.13 hotfix — visual grid replaces
-                      the previous text-only <select>. Each card
-                      shows the HeyGen preview image at 1:1,
-                      gender badge top-right, PREMIUM ribbon when
-                      applicable, and the selected card lights up
-                      with the accent border. Persistence is
-                      unchanged: clicking a card mutates
-                      settings.avatarId via setSettings; the "Save
-                      avatar settings" button still PATCHes the
-                      project (so the chosen avatar survives
-                      between sessions exactly like before). */}
+                <div className="space-y-3">
+                  {/* PR Sprint 7.13 hotfix v2 — picker moved to a
+                      full-width modal. The inline section is now
+                      compact: shows the SELECTED avatar (or a
+                      single "Choose avatar →" CTA when none is
+                      picked yet) plus a "Change" button that
+                      opens the picker. Bigger thumbnails inside
+                      the modal let the founder actually see
+                      faces at a useful resolution. */}
                   {avatarsLoading && (
-                    // Skeleton: 8 placeholder squares while the
-                    // upstream /avatars list resolves. Cheaper
-                    // than spinning a spinner — the founder sees
-                    // the grid shape immediately.
-                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
-                      {Array.from({ length: 8 }).map((_, i) => (
-                        <div
-                          key={i}
-                          className="aspect-square rounded-lg bg-bg-elev animate-pulse"
-                        />
-                      ))}
+                    <div className="flex items-center gap-3">
+                      <div className="w-24 h-24 rounded-lg bg-bg-elev animate-pulse" />
+                      <div className="space-y-2 flex-1">
+                        <div className="h-3 w-32 rounded bg-bg-elev animate-pulse" />
+                        <div className="h-2 w-20 rounded bg-bg-elev animate-pulse" />
+                      </div>
                     </div>
                   )}
                   {avatarsError && (
@@ -264,151 +322,74 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
                       {avatarsError}
                     </div>
                   )}
-                  {!avatarsLoading &&
-                    !avatarsError &&
-                    avatars.length > 0 &&
-                    (() => {
-                      // Client-side filter. We don't refetch when
-                      // the gender toggle changes — the upstream
-                      // call is cached for 10 min anyway and the
-                      // founder usually flips between filters a
-                      // few times before settling.
-                      const filtered = avatars.filter((a) => {
-                        if (genderFilter === 'all') return true;
-                        const g = (a.gender ?? '').toLowerCase();
-                        return g.startsWith(genderFilter[0]);
-                      });
-                      return (
-                        <>
-                          <div className="flex flex-wrap gap-1 mb-3">
-                            {(
-                              [
-                                ['all', 'All'],
-                                ['male', 'Male'],
-                                ['female', 'Female'],
-                              ] as const
-                            ).map(([key, label]) => (
-                              <button
-                                key={key}
-                                type="button"
-                                onClick={() => setGenderFilter(key)}
-                                className={`px-2.5 py-1 rounded text-[10px] font-mono uppercase tracking-[0.1em] transition-colors ${
-                                  genderFilter === key
-                                    ? 'bg-accent text-white'
-                                    : 'bg-bg border border-border text-text-2 hover:border-border-bright'
-                                }`}
-                              >
-                                {label}
-                              </button>
-                            ))}
-                            <span className="ml-auto self-center text-[10px] font-mono text-text-3">
-                              {filtered.length} of {avatars.length}
-                            </span>
-                          </div>
-                          {/* Scrollable grid — HeyGen's catalog
-                              can run 30-60+ avatars; cap visible
-                              height so the Settings page stays
-                              navigable. */}
-                          <div
-                            className="grid grid-cols-3 sm:grid-cols-4 gap-3 max-h-[420px] overflow-y-auto pr-1"
-                            // The scroll container's pr-1 leaves
-                            // room for the scrollbar so the right
-                            // edge of selected cards' borders
-                            // doesn't get clipped on Win/Linux
-                            // (where scrollbars take physical
-                            // width).
-                          >
-                            {filtered.map((a) => {
-                              const selected =
-                                a.avatarId === settings.avatarId;
-                              const genderLabel = a.gender
-                                ? a.gender
-                                    .charAt(0)
-                                    .toUpperCase()
-                                : null;
-                              return (
-                                <button
-                                  key={a.avatarId}
-                                  type="button"
-                                  onClick={() =>
-                                    setSettings((prev) => ({
-                                      ...prev,
-                                      avatarId: a.avatarId,
-                                    }))
-                                  }
-                                  className={`group relative aspect-square rounded-lg overflow-hidden border-2 transition-all text-left ${
-                                    selected
-                                      ? 'border-accent ring-2 ring-accent/30'
-                                      : 'border-border hover:border-border-bright'
-                                  }`}
-                                  aria-pressed={selected}
-                                >
-                                  {a.previewImageUrl ? (
-                                    // eslint-disable-next-line @next/next/no-img-element
-                                    <img
-                                      src={a.previewImageUrl}
-                                      alt={a.name}
-                                      className="w-full h-full object-cover bg-bg-elev"
-                                      loading="lazy"
-                                    />
-                                  ) : (
-                                    <div className="w-full h-full flex items-center justify-center bg-bg-elev text-text-3 text-2xl">
-                                      ◯
-                                    </div>
-                                  )}
 
-                                  {/* Gender badge (top-right) */}
-                                  {genderLabel && (
-                                    <span className="absolute top-1.5 right-1.5 text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-bg/90 text-text-1 backdrop-blur-sm">
-                                      {genderLabel}
-                                    </span>
-                                  )}
-
-                                  {/* Premium badge (top-left) */}
-                                  {a.premium && (
-                                    <span className="absolute top-1.5 left-1.5 text-[9px] font-mono uppercase tracking-[0.08em] font-bold px-1.5 py-0.5 rounded bg-accent text-white">
-                                      Premium
-                                    </span>
-                                  )}
-
-                                  {/* Name (bottom gradient) */}
-                                  <div className="absolute bottom-0 inset-x-0 p-2 bg-gradient-to-t from-black/80 via-black/40 to-transparent">
-                                    <div className="text-[11px] font-medium text-white truncate">
-                                      {a.name}
-                                    </div>
+                  {!avatarsLoading && !avatarsError && (
+                    <>
+                      {(() => {
+                        const selected = settings.avatarId
+                          ? avatars.find(
+                              (a) => a.avatarId === settings.avatarId,
+                            )
+                          : null;
+                        if (selected) {
+                          return (
+                            <div className="flex items-center gap-4">
+                              <div className="relative shrink-0 w-24 h-24 rounded-lg overflow-hidden border-2 border-accent">
+                                {selected.previewImageUrl ? (
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  <img
+                                    src={selected.previewImageUrl}
+                                    alt={selected.name}
+                                    className="w-full h-full object-cover bg-bg-elev"
+                                  />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center bg-bg-elev text-text-3">
+                                    ◯
                                   </div>
-
-                                  {/* Selected checkmark */}
-                                  {selected && (
-                                    <div className="absolute inset-0 flex items-center justify-center bg-accent/15 pointer-events-none">
-                                      <div className="w-8 h-8 rounded-full bg-accent text-white flex items-center justify-center text-base">
-                                        ✓
-                                      </div>
-                                    </div>
-                                  )}
+                                )}
+                                {selected.premium && (
+                                  <span className="absolute top-1 left-1 text-[8px] font-mono uppercase tracking-[0.08em] font-bold px-1 py-0.5 rounded bg-accent text-white">
+                                    Premium
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="text-sm font-medium text-text-1 truncate">
+                                  {selected.name}
+                                </div>
+                                {selected.gender && (
+                                  <div className="text-[11px] font-mono uppercase tracking-[0.1em] text-text-3 mt-0.5">
+                                    {selected.gender}
+                                  </div>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => setPickerOpen(true)}
+                                  className="mt-2 text-xs text-accent hover:underline"
+                                >
+                                  Change avatar →
                                 </button>
-                              );
-                            })}
-                          </div>
-                          {filtered.length === 0 && (
-                            <div className="text-xs text-text-3 mt-2">
-                              No avatars match this filter.
+                              </div>
                             </div>
-                          )}
-                          {settings.avatarId && (
-                            <div className="mt-3 text-[11px] font-mono text-text-3">
-                              Selected:{' '}
-                              <span className="text-text-1">
-                                {avatars.find(
-                                  (a) => a.avatarId === settings.avatarId,
-                                )?.name ?? settings.avatarId}
-                              </span>
-                            </div>
-                          )}
-                        </>
-                      );
-                    })()}
-                </>
+                          );
+                        }
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => setPickerOpen(true)}
+                            className="w-full p-4 rounded-lg border border-dashed border-border-bright hover:border-accent hover:bg-accent-soft transition-colors text-sm text-text-2 hover:text-text-1"
+                          >
+                            🎬 Choose avatar →
+                            <span className="block text-[11px] text-text-3 mt-1">
+                              Browse HeyGen&apos;s stock avatar catalog
+                              ({avatars.length} available)
+                            </span>
+                          </button>
+                        );
+                      })()}
+                    </>
+                  )}
+                </div>
               )}
             </div>
           </div>
@@ -535,6 +516,219 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
           {saving ? 'Saving…' : 'Save avatar settings'}
         </button>
       </div>
+
+      {/* PR Sprint 7.13 hotfix v2 — avatar picker modal. Renders
+          a full-screen overlay with the HeyGen catalog at a much
+          larger thumbnail size than the compact Settings card
+          allowed. Click a card → selects + closes (in-memory;
+          the founder still hits "Save avatar settings" to
+          persist). Backdrop click + Esc both dismiss without
+          changing the selection. */}
+      {pickerOpen && (
+        <AvatarPickerModal
+          avatars={avatars}
+          selectedId={settings.avatarId}
+          genderFilter={genderFilter}
+          onGenderFilterChange={setGenderFilter}
+          onSelect={(id) => {
+            setSettings((prev) => ({ ...prev, avatarId: id }));
+            setPickerOpen(false);
+          }}
+          onClose={() => setPickerOpen(false)}
+        />
+      )}
     </GlassCard>
+  );
+}
+
+// PR Sprint 7.13 hotfix v2 — picker modal extracted into its
+// own component to keep the main HeyGenAvatarConfig render tree
+// readable. Listens for Esc to close + locks body scroll while
+// open. Cards are deliberately larger than the inline grid
+// (aspect-[3/4] portrait, 2 cols mobile / 3 tablet / 4-5
+// desktop) so the founder can compare faces at a useful
+// resolution.
+function AvatarPickerModal({
+  avatars,
+  selectedId,
+  genderFilter,
+  onGenderFilterChange,
+  onSelect,
+  onClose,
+}: {
+  avatars: AvatarOption[];
+  selectedId: string | null;
+  genderFilter: 'all' | 'male' | 'female';
+  onGenderFilterChange: (v: 'all' | 'male' | 'female') => void;
+  onSelect: (id: string) => void;
+  onClose: () => void;
+}) {
+  // Esc to close.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  // Lock body scroll while the modal is open so the
+  // background page doesn't bounce when the user scrolls
+  // through 50+ avatars.
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
+
+  const filtered = avatars.filter((a) => {
+    if (genderFilter === 'all') return true;
+    const g = (a.gender ?? '').toLowerCase();
+    return g.startsWith(genderFilter[0]);
+  });
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 md:p-8"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      aria-modal="true"
+      role="dialog"
+    >
+      <div className="bg-bg-elev border border-border rounded-2xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden shadow-2xl">
+        {/* Header */}
+        <div className="px-5 md:px-7 py-4 border-b border-border flex items-start justify-between gap-4 shrink-0">
+          <div>
+            <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-1">
+              HeyGen stock catalog
+            </div>
+            <h3 className="font-display text-xl md:text-2xl font-light">
+              Choose an avatar
+            </h3>
+            <p className="text-xs text-text-3 mt-1">
+              {filtered.length} of {avatars.length} avatars · click
+              one to select
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-text-3 hover:text-text-1 text-2xl leading-none p-1"
+            aria-label="Close"
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Filter row */}
+        <div className="px-5 md:px-7 py-3 border-b border-border flex flex-wrap gap-2 shrink-0">
+          {(
+            [
+              ['all', 'All'],
+              ['male', 'Male'],
+              ['female', 'Female'],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => onGenderFilterChange(key)}
+              className={`px-3 py-1.5 rounded text-[11px] font-mono uppercase tracking-[0.1em] transition-colors ${
+                genderFilter === key
+                  ? 'bg-accent text-white'
+                  : 'bg-bg border border-border text-text-2 hover:border-border-bright'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* Grid */}
+        <div className="flex-1 overflow-y-auto px-5 md:px-7 py-5">
+          {filtered.length === 0 ? (
+            <div className="text-sm text-text-3 text-center py-12">
+              No avatars match this filter.
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+              {filtered.map((a) => {
+                const selected = a.avatarId === selectedId;
+                const genderLabel = a.gender
+                  ? a.gender.charAt(0).toUpperCase()
+                  : null;
+                return (
+                  <button
+                    key={a.avatarId}
+                    type="button"
+                    onClick={() => onSelect(a.avatarId)}
+                    className={`group relative aspect-[3/4] rounded-xl overflow-hidden border-2 transition-all text-left ${
+                      selected
+                        ? 'border-accent ring-2 ring-accent/40 scale-[0.98]'
+                        : 'border-border hover:border-border-bright hover:scale-[1.02]'
+                    }`}
+                    aria-pressed={selected}
+                  >
+                    {a.previewImageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={a.previewImageUrl}
+                        alt={a.name}
+                        className="w-full h-full object-cover bg-bg-elev"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center bg-bg-elev text-text-3 text-4xl">
+                        ◯
+                      </div>
+                    )}
+
+                    {/* Gender badge (top-right) */}
+                    {genderLabel && (
+                      <span className="absolute top-2 right-2 text-[11px] font-mono font-bold px-2 py-0.5 rounded bg-bg/90 text-text-1 backdrop-blur-sm">
+                        {genderLabel}
+                      </span>
+                    )}
+
+                    {/* Premium badge (top-left) */}
+                    {a.premium && (
+                      <span className="absolute top-2 left-2 text-[10px] font-mono uppercase tracking-[0.08em] font-bold px-2 py-0.5 rounded bg-accent text-white">
+                        Premium
+                      </span>
+                    )}
+
+                    {/* Name (bottom gradient) */}
+                    <div className="absolute bottom-0 inset-x-0 p-3 bg-gradient-to-t from-black/85 via-black/40 to-transparent">
+                      <div className="text-sm font-medium text-white truncate">
+                        {a.name}
+                      </div>
+                    </div>
+
+                    {/* Selected overlay */}
+                    {selected && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-accent/20 pointer-events-none">
+                        <div className="w-12 h-12 rounded-full bg-accent text-white flex items-center justify-center text-xl">
+                          ✓
+                        </div>
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Footer hint */}
+        <div className="px-5 md:px-7 py-3 border-t border-border text-[11px] text-text-3 shrink-0">
+          Selecting an avatar updates the form. Remember to click{' '}
+          <span className="text-text-1">Save avatar settings</span>{' '}
+          to persist between sessions.
+        </div>
+      </div>
+    </div>
   );
 }
