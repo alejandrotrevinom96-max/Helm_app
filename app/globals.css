@@ -182,3 +182,154 @@ body {
   writing-mode: vertical-rl;
   text-orientation: mixed;
 }
+
+/* PR #85 — Sprint 7.10: long-form prose styles for /blog/[slug].
+   Scoped to .prose-helm so they don't bleed into other markdown
+   surfaces (e.g. brand-bible auto-generate output). The renderer
+   in lib/blog/render.ts produces HTML that targets these
+   selectors directly — no per-element wrappers in React. */
+.prose-helm {
+  color: var(--text-1);
+  font-size: 1.0625rem;
+  line-height: 1.75;
+}
+.prose-helm > * + * {
+  margin-top: 1.25em;
+}
+.prose-helm h1 {
+  font-family: 'Fraunces', Georgia, serif;
+  font-weight: 300;
+  font-size: 2.25rem;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  margin-top: 2.25em;
+  margin-bottom: 0.5em;
+}
+.prose-helm h2 {
+  font-family: 'Fraunces', Georgia, serif;
+  font-weight: 300;
+  font-size: 1.625rem;
+  line-height: 1.2;
+  letter-spacing: -0.005em;
+  /* Scroll-margin so anchor jumps from the sticky TOC don't tuck
+     the heading under the page's top chrome. 96px = nav offset. */
+  scroll-margin-top: 6rem;
+  margin-top: 2em;
+  margin-bottom: 0.5em;
+}
+.prose-helm h3 {
+  font-family: 'Fraunces', Georgia, serif;
+  font-weight: 400;
+  font-size: 1.25rem;
+  line-height: 1.3;
+  scroll-margin-top: 6rem;
+  margin-top: 1.75em;
+  margin-bottom: 0.4em;
+}
+.prose-helm p {
+  color: var(--text-2);
+}
+.prose-helm strong {
+  color: var(--text-1);
+  font-weight: 600;
+}
+.prose-helm em {
+  color: var(--text-1);
+  font-style: italic;
+}
+.prose-helm a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
+}
+.prose-helm a:hover {
+  text-decoration-thickness: 2px;
+}
+.prose-helm ul,
+.prose-helm ol {
+  padding-left: 1.5em;
+  color: var(--text-2);
+}
+.prose-helm ul {
+  list-style: none;
+}
+.prose-helm ul > li {
+  position: relative;
+  padding-left: 1.25em;
+}
+.prose-helm ul > li::before {
+  content: '·';
+  position: absolute;
+  left: 0;
+  top: 0;
+  color: var(--accent);
+  font-weight: bold;
+}
+.prose-helm ol {
+  list-style: decimal;
+}
+.prose-helm li + li {
+  margin-top: 0.5em;
+}
+.prose-helm blockquote {
+  border-left: 2px solid var(--accent);
+  padding-left: 1.25em;
+  font-family: 'Fraunces', Georgia, serif;
+  font-style: italic;
+  font-size: 1.1875rem;
+  line-height: 1.55;
+  color: var(--text-1);
+}
+.prose-helm code {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  padding: 0.125em 0.375em;
+  border-radius: 0.25rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.875em;
+  color: var(--text-1);
+}
+.prose-helm pre.blog-code {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  padding: 1em 1.25em;
+  overflow-x: auto;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+.prose-helm pre.blog-code code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  border-radius: 0;
+  font-size: 1em;
+}
+.prose-helm table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9375rem;
+}
+.prose-helm th,
+.prose-helm td {
+  text-align: left;
+  padding: 0.625em 0.875em;
+  border-bottom: 1px solid var(--border);
+}
+.prose-helm th {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--text-3);
+  font-weight: 500;
+}
+.prose-helm .blog-hr {
+  text-align: center;
+  color: var(--text-3);
+  letter-spacing: 0.5em;
+  margin: 2.5em 0;
+  font-size: 0.875rem;
+}

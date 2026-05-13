@@ -51,13 +51,13 @@ export function LandingFooter() {
           <FooterColumn
             label="Company"
             items={[
-              // About / Blog pages don't exist yet. We anchor them
-              // to the relevant landing sections for now so clicks
-              // don't 404. When the dedicated pages ship, swap the
-              // hrefs without touching the component.
+              // About page still anchors to the landing's `#who`
+              // section for now. PR #85 — Sprint 7.10: Blog ships
+              // for real at /blog (was a `#` placeholder until the
+              // markdown renderer landed).
               { label: 'About', href: '#who' },
               { label: 'Roadmap', href: '#roadmap' },
-              { label: 'Blog', href: '#' },
+              { label: 'Blog', href: '/blog' },
               {
                 label: 'Built in public',
                 href: 'https://x.com/alex_trev2',
