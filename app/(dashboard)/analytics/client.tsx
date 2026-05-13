@@ -1,19 +1,73 @@
 'use client';
 
+// PR #83 — Sprint 7.8: regrouped analytics surface.
+//
+// Pre-PR-83 the page had two flat sections ("YOUR BUSINESS" with 4
+// integration-driven KPIs + "HELM ACTIVITY" with 4 internal counters
+// behind a collapsible). The new shape organizes 8+ widgets into 4
+// semantic groups so the founder finds what they're looking for
+// without reading every label:
+//
+//   GROWTH              — Users (Supabase) | Visitors (Vercel) | Waitlist Signups
+//   CONTENT PERFORMANCE — Posts Published | Research Findings
+//   ENGAGEMENT          — Post Engagement (was "Avg responses per page")
+//   MONETIZATION        — CAC (Computed) | Ad Spend (Meta)
+//
+// Each widget uses the unified KpiCard (components/analytics/kpi-
+// card.tsx) which knows how to render: value + delta + sparkline,
+// OR the empty-state body when data is 0/—. Empty-state copy is
+// driven by the per-widget config below.
+//
+// What this file does NOT touch:
+//   - URL scope query param (`?scope=project|global`) — owned by
+//     the parent page.tsx Link toggle (PR #18). We just respect
+//     the `scope` prop.
+//   - getDashboardData() aggregation math — that's in
+//     lib/analytics/dashboard.ts.
+//   - The SyncButton component below — same behavior as before.
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import type { Project, MetricSnapshot } from '@/lib/db/schema';
 import { formatNumber, formatCurrency, timeAgo } from '@/lib/utils';
 import { cn } from '@/lib/utils';
-import { GlassCard } from '@/components/ui/glass-card';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { SetupIllustration } from '@/components/illustrations/setup';
+import { KpiCard } from '@/components/analytics/kpi-card';
+import { ConnectSourceBanner } from '@/components/analytics/connect-source-banner';
 
 type SyncResultData = {
   synced: Array<Record<string, unknown>>;
   errors: string[];
 };
+
+interface KpiBlock {
+  value: number;
+  sparkline: number[];
+  previous: number | null;
+  period: '7d';
+}
+
+interface ResponseRate {
+  value: number;
+  total: number;
+  activePages: number;
+}
+
+interface Props {
+  project: Project | { id: string; name: string };
+  snapshots: MetricSnapshot[];
+  hasVercel: boolean;
+  hasSupabase: boolean;
+  hasMeta: boolean;
+  hasReddit: boolean;
+  lastSyncAt: Date | null;
+  hasMappings: boolean;
+  scope?: 'project' | 'global';
+  // Internal Helm-activity KPIs (computed in
+  // lib/analytics/dashboard.ts) — folded into the new groups.
+  totalSignups: KpiBlock;
+  postsPublished: KpiBlock;
+  researchInsights: KpiBlock;
+  validateResponseRate: ResponseRate;
+}
 
 export function AnalyticsClient({
   project,
@@ -21,70 +75,40 @@ export function AnalyticsClient({
   hasVercel,
   hasSupabase,
   hasMeta,
+  hasReddit,
   lastSyncAt,
   hasMappings,
-  embedded = false,
   scope = 'project',
-}: {
-  project: Project | { id: string; name: string };
-  snapshots: MetricSnapshot[];
-  hasVercel: boolean;
-  hasSupabase: boolean;
-  hasMeta: boolean;
-  lastSyncAt: Date | null;
-  hasMappings: boolean;
-  // When rendered inside the new dashboard, suppress the page-level h1 and
-  // outer padding (the parent already supplies them) so we don't end up with
-  // two "Analytics" headings stacked.
-  embedded?: boolean;
-  // 'project' = single project filter (snapshots are pre-filtered server-side).
-  // 'global'  = snapshots span every project; we sum the latest value of each
-  // (project, source, metric) tuple to get the cross-project total.
-  scope?: 'project' | 'global';
-}) {
-  const router = useRouter();
-
-  // Each metric snapshot stores the ABSOLUTE value at sync time
-  // (e.g. "auth users count = 7"), not a delta. Pre-PR-18 the dashboard
-  // summed every snapshot in the 30-day window, so a project with 7 real
-  // users that had been synced 5 times displayed 35 and grew on every
-  // sync.
-  //
-  // Project scope: snapshots arrive pre-ordered by date desc, so the first
-  // row per metric is the most recent.
-  // Global scope: snapshots include every project. We need the latest per
-  // (projectId, source, metric) and then sum across projects so a metric
-  // like "Visitors" totals up correctly without double-counting older
-  // dailies of the same project.
+  totalSignups,
+  postsPublished,
+  researchInsights,
+  validateResponseRate,
+}: Props) {
+  // --- snapshot aggregation (same math as pre-PR-83) ---
+  // Each metric snapshot stores the ABSOLUTE value at sync time;
+  // we dedupe by (projectId, source) in global scope and take the
+  // single row in project scope. See PR #18 for why.
   const aggregate = (metric: string): number => {
     if (scope === 'project') {
       const row = snapshots.find((s) => s.metric === metric);
       return row ? Number(row.value) : 0;
     }
-    // Global: dedup by (projectId, source) within metric. snapshots are
-    // already sorted by date desc, so the first hit per key is latest.
     const latestPerKey = new Map<string, number>();
     for (const s of snapshots) {
       if (s.metric !== metric) continue;
       const key = `${s.projectId}:${s.source}`;
-      if (!latestPerKey.has(key)) {
-        latestPerKey.set(key, Number(s.value));
-      }
+      if (!latestPerKey.has(key)) latestPerKey.set(key, Number(s.value));
     }
     let total = 0;
     for (const v of latestPerKey.values()) total += v;
     return total;
   };
+
   const visitors = aggregate('visitors');
   const spend = aggregate('spend');
 
-  // PR #19: each Supabase metric is now a separate snapshot per tracked
-  // table (e.g. auth.users / profiles / waitlist). The mini-PR after
-  // hides the legacy `signups` metric — those rows remain in BD from
-  // pre-PR-19 syncs but they're meaningless now (the table they came
-  // from isn't tracked). Filter them out at the UI layer so users don't
-  // see a phantom "Signups (legacy)" widget. Persistent cleanup is
-  // available via scripts/cleanup-old-supabase-snapshots.ts.
+  // Supabase metrics — one widget per tracked table (PR #19).
+  // Filter the legacy `signups` metric (PR #19 cleanup).
   const LEGACY_SUPABASE_METRICS = new Set(['signups']);
   const supabaseMetricsSet = new Set<string>();
   for (const s of snapshots) {
@@ -93,13 +117,12 @@ export function AnalyticsClient({
     supabaseMetricsSet.add(s.metric);
   }
   const supabaseMetrics = Array.from(supabaseMetricsSet).sort();
-  // For CAC we want total Supabase rows. If the user picked multiple
-  // tables we sum them, which gives a fuzzy-but-useful "total tracked"
-  // denominator. This is a best-effort number — CAC against a custom
-  // table count isn't formally correct but it's better than 0.
+
+  // Sum across Supabase tables to get a total "users" number for
+  // the CAC denominator. Best-effort — see PR #19 comment.
   const signups = supabaseMetrics.reduce(
     (sum, m) => sum + aggregate(m),
-    0
+    0,
   );
   const cac = signups > 0 ? spend / signups : 0;
 
@@ -107,13 +130,6 @@ export function AnalyticsClient({
     if (metric === 'auth.users') return 'Auth users';
     return metric.charAt(0).toUpperCase() + metric.slice(1);
   };
-
-  const noData = snapshots.length === 0;
-  const missingIntegrations = [
-    !hasVercel && 'Vercel',
-    !hasSupabase && 'Supabase',
-    !hasMeta && 'Meta Ads',
-  ].filter(Boolean) as string[];
 
   const sources = [
     hasVercel && 'Vercel',
@@ -124,135 +140,232 @@ export function AnalyticsClient({
     .join(', ');
 
   return (
-    <div className={embedded ? '' : 'p-4 md:p-8'}>
-      {!embedded && (
-        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end gap-4 mb-6 md:mb-8">
-          <div>
-            <h1 className="font-display text-display-md font-light tracking-tight">
-              Analytics
-            </h1>
-            <p className="text-text-2 mt-2 max-w-2xl text-sm">
-              Cross-referenced metrics from {sources || 'no integrations yet'}
-            </p>
-          </div>
-          <div className="flex items-center gap-3 flex-wrap">
-            <SyncButton lastSyncAt={lastSyncAt} />
-            <a href="/integrations" className="text-sm text-accent hover:underline">
-              Manage →
-            </a>
-          </div>
-        </div>
-      )}
-      {embedded && (
-        <div className="flex items-center justify-end gap-3 mb-4 flex-wrap">
-          <span className="text-xs text-text-3">
-            Sources: {sources || 'none connected'}
-          </span>
-          <SyncButton lastSyncAt={lastSyncAt} />
-          <a href="/integrations" className="text-xs text-accent hover:underline">
-            Manage →
-          </a>
-        </div>
-      )}
-
-      {missingIntegrations.length > 0 && hasMappings && (
-        <GlassCard className="mb-6 p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div>
-            <p className="text-sm font-medium">Connect more sources for richer insights</p>
-            <p className="text-xs text-text-3 mt-1">
-              Missing: {missingIntegrations.join(', ')}
-            </p>
-          </div>
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={() => router.push('/integrations')}
-            className="self-start sm:self-auto"
-          >
-            Connect
-          </Button>
-        </GlassCard>
-      )}
-
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-6">
-        <KPI label="Visitors" value={formatNumber(visitors)} source="vercel" />
-        {/* One card per tracked Supabase table. Most projects pick a
-            single table so this typically renders 1 KPI; users with both
-            profiles + waitlist will see 2. Falls back to a neutral
-            "Signups: 0" placeholder when no Supabase metrics exist yet. */}
-        {supabaseMetrics.length === 0 ? (
-          <KPI label="Signups" value="0" source="supabase" />
-        ) : (
-          supabaseMetrics.map((metric) => (
-            <KPI
-              key={metric}
-              label={labelForMetric(metric)}
-              value={formatNumber(aggregate(metric))}
-              source="supabase"
-            />
-          ))
-        )}
-        <KPI label="CAC" value={cac > 0 ? formatCurrency(cac) : '—'} source="computed" />
-        <KPI label="Ad Spend" value={spend > 0 ? formatCurrency(spend) : '—'} source="meta" />
+    <div>
+      <div className="flex items-center justify-end gap-3 mb-4 flex-wrap">
+        <span className="text-xs text-text-3">
+          Sources: {sources || 'none connected'}
+        </span>
+        <SyncButton lastSyncAt={lastSyncAt} />
+        <a
+          href="/integrations"
+          className="text-xs text-accent hover:underline"
+        >
+          Manage →
+        </a>
       </div>
 
-      {noData && !hasMappings && scope === 'project' && (
-        <GlassCard className="p-8 md:p-12 text-center">
-          <SetupIllustration className="w-32 mx-auto mb-6 opacity-80" />
-          <h2 className="font-display text-2xl md:text-3xl font-light mb-3">
-            Set up integrations for{' '}
-            <em className="editorial-italic">{project.name}</em>
-          </h2>
-          <p className="text-text-2 max-w-md mx-auto mb-8 text-sm">
-            Helm needs to know which Vercel + Supabase project corresponds to “{project.name}”.
-            Map them once and metrics will flow.
-          </p>
-          <div className="flex gap-3 justify-center">
-            <Button onClick={() => router.push('/integrations')}>
-              Map projects →
-            </Button>
-          </div>
-        </GlassCard>
-      )}
-      {noData && scope === 'global' && (
-        <GlassCard className="p-8 md:p-12 text-center">
-          <p className="font-display text-2xl mb-2">No data across projects</p>
-          <p className="text-text-2 text-sm mb-6 max-w-md mx-auto">
-            None of your projects have synced metrics yet. Switch to a single
-            project view to map integrations, or visit Integrations.
-          </p>
-          <Button onClick={() => router.push('/integrations')}>
-            Open Integrations →
-          </Button>
-        </GlassCard>
-      )}
+      <ConnectSourceBanner hasMeta={hasMeta} hasReddit={hasReddit} />
 
-      {noData && hasMappings && (
-        <GlassCard className="p-8 md:p-12 text-center">
-          <p className="font-display text-2xl mb-2">No data yet</p>
-          <p className="text-text-2 text-sm mb-6 max-w-md mx-auto">
-            Mappings are configured but no snapshots have synced yet. The cron runs once a
-            day; tap “Sync now” to pull data immediately.
-          </p>
-        </GlassCard>
+      {/* ──────────────── GROWTH ──────────────── */}
+      <GroupSection label="Growth">
+        {/* Each Supabase-tracked table renders as its own card.
+            Falls back to a single empty card when no Supabase
+            metric exists yet. */}
+        {supabaseMetrics.length === 0 ? (
+          <KpiCard
+            label="Users"
+            source="supabase"
+            empty={{
+              title: 'No users tracked yet',
+              subtext: 'Map a Supabase table in Integrations to surface signups.',
+              ctaLabel: 'Connect Supabase →',
+              ctaHref: '/integrations',
+            }}
+          />
+        ) : (
+          supabaseMetrics.map((metric) => {
+            const v = aggregate(metric);
+            return (
+              <KpiCard
+                key={metric}
+                label={labelForMetric(metric)}
+                source="supabase"
+                value={formatNumber(v)}
+              />
+            );
+          })
+        )}
+
+        {/* Visitors: when Vercel snapshot is 0, distinguish
+            "connected but no traffic yet" (24h lag) from "not
+            connected" (no Vercel integration). */}
+        {visitors === 0 ? (
+          <KpiCard
+            label="Visitors"
+            source="vercel"
+            empty={
+              hasVercel
+                ? {
+                    title: 'No visitors tracked yet',
+                    subtext:
+                      'Vercel Analytics may take 24h after first deploy.',
+                  }
+                : {
+                    title: 'Vercel not connected',
+                    subtext:
+                      'Connect Vercel to track visitors, deployments, and traffic.',
+                    ctaLabel: 'Connect Vercel →',
+                    ctaHref: '/integrations',
+                  }
+            }
+          />
+        ) : (
+          <KpiCard
+            label="Visitors"
+            source="vercel"
+            value={formatNumber(visitors)}
+          />
+        )}
+
+        {/* Waitlist signups — internal counter from
+            getDashboardData(). Empty state when zero. */}
+        {totalSignups.value === 0 ? (
+          <KpiCard
+            label="Waitlist signups"
+            source="helm"
+            empty={{
+              title: 'No waitlist signups yet',
+              subtext:
+                'Share your waitlist page or add a CTA to your next post.',
+              ctaLabel: 'Create waitlist page →',
+              ctaHref: '/marketing',
+            }}
+          />
+        ) : (
+          <KpiCard
+            label="Waitlist signups"
+            source="helm"
+            value={formatNumber(totalSignups.value)}
+            delta={{
+              current: totalSignups.value,
+              previous: totalSignups.previous,
+              period: totalSignups.period,
+            }}
+            sparkline={totalSignups.sparkline}
+            footer="all-time · sparkline 14d"
+          />
+        )}
+      </GroupSection>
+
+      {/* ─────────── CONTENT PERFORMANCE ─────────── */}
+      <GroupSection label="Content performance">
+        <KpiCard
+          label="Posts published"
+          source="helm"
+          value={formatNumber(postsPublished.value)}
+          delta={{
+            current: postsPublished.value,
+            previous: postsPublished.previous,
+            period: postsPublished.period,
+          }}
+          sparkline={postsPublished.sparkline}
+          footer="last 30 days"
+        />
+        <KpiCard
+          label="Research findings"
+          source="helm"
+          value={formatNumber(researchInsights.value)}
+          delta={{
+            current: researchInsights.value,
+            previous: researchInsights.previous,
+            period: researchInsights.period,
+          }}
+          sparkline={researchInsights.sparkline}
+          footer="all-time · sparkline 14d"
+        />
+      </GroupSection>
+
+      {/* ──────────────── ENGAGEMENT ──────────────── */}
+      <GroupSection label="Engagement">
+        {validateResponseRate.value === 0 ? (
+          <KpiCard
+            label="Post engagement"
+            source="helm"
+            empty={{
+              title: 'No engagement tracked yet',
+              subtext: 'Publish a post with a clear CTA to start collecting.',
+              ctaLabel: 'Generate a post →',
+              ctaHref: '/marketing/generate',
+            }}
+          />
+        ) : (
+          <KpiCard
+            label="Post engagement"
+            source="helm"
+            value={validateResponseRate.value}
+            footer={`${validateResponseRate.total} total · ${validateResponseRate.activePages} pages`}
+          />
+        )}
+      </GroupSection>
+
+      {/* ──────────────── MONETIZATION ──────────────── */}
+      <GroupSection label="Monetization">
+        {cac === 0 ? (
+          <KpiCard
+            label="CAC"
+            source="computed"
+            empty={{
+              title: 'CAC unavailable',
+              subtext:
+                'Connect Meta Ads to calculate your acquisition cost.',
+              ctaLabel: 'Connect Meta Ads →',
+              ctaHref: '/integrations',
+            }}
+          />
+        ) : (
+          <KpiCard
+            label="CAC"
+            source="computed"
+            value={formatCurrency(cac)}
+          />
+        )}
+
+        {spend === 0 ? (
+          <KpiCard
+            label="Ad spend"
+            source="meta"
+            empty={{
+              title: 'No ad spend data',
+              subtext: 'Connect Meta Ads to track campaign spend.',
+              ctaLabel: 'Connect Meta Ads →',
+              ctaHref: '/integrations',
+            }}
+          />
+        ) : (
+          <KpiCard
+            label="Ad spend"
+            source="meta"
+            value={formatCurrency(spend)}
+          />
+        )}
+      </GroupSection>
+
+      {!hasMappings && scope === 'project' && (
+        <p className="text-xs text-text-3 mt-6">
+          No project mapped to Vercel/Supabase/Meta yet. Open Integrations
+          to map this project so live metrics flow in.
+        </p>
       )}
     </div>
   );
 }
 
-function KPI({ label, value, source }: { label: string; value: string; source: string }) {
+function GroupSection({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
-    <GlassCard hover className="p-4 md:p-6">
-      <div className="flex justify-between items-start mb-4 md:mb-6 gap-2">
-        <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 truncate">
-          {label}
-        </span>
-        <Badge>{source}</Badge>
+    <section className="mb-8">
+      <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-accent mb-3">
+        {label}
       </div>
-      <div className="font-display text-metric font-light tracking-tight truncate">
-        {value}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
+        {children}
       </div>
-    </GlassCard>
+    </section>
   );
 }
 
@@ -277,13 +390,17 @@ function SyncButton({ lastSyncAt }: { lastSyncAt: Date | null }) {
       if (r.ok) {
         const count = Array.isArray(data.synced) ? data.synced.length : 0;
         setResult(data);
-        setResultMessage(`✓ Synced ${count} source${count === 1 ? '' : 's'}`);
+        setResultMessage(
+          `✓ Synced ${count} source${count === 1 ? '' : 's'}`,
+        );
         setTimeout(() => location.reload(), 1500);
       } else {
         setResultMessage(`Error: ${data.error ?? 'unknown'}`);
       }
     } catch (e) {
-      setResultMessage(`Error: ${e instanceof Error ? e.message : String(e)}`);
+      setResultMessage(
+        `Error: ${e instanceof Error ? e.message : String(e)}`,
+      );
     } finally {
       setLoading(false);
     }
@@ -321,7 +438,7 @@ function SyncButton({ lastSyncAt }: { lastSyncAt: Date | null }) {
         <ul
           className={cn(
             'mt-2 text-[11px] text-text-2 space-y-1 max-w-xs text-left',
-            'glass rounded-lg p-3'
+            'glass rounded-lg p-3',
           )}
         >
           {result.errors.map((e, i) => (
