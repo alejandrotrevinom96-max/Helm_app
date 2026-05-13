@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { headers } from 'next/headers';
 import { Analytics } from '@vercel/analytics/next';
+import { SpeedInsights } from '@vercel/speed-insights/next';
 import { getServerTheme } from '@/lib/theme';
 import { ToastContainer } from '@/components/toast/toast';
 import { DarkReaderDetector } from '@/components/dark-reader-detector';
@@ -123,6 +124,15 @@ export default async function RootLayout({
             render double-inverted either. */}
         <DarkReaderDetector />
         <Analytics />
+        {/* PR #86 — Sprint 7.11: Vercel Speed Insights. Captures
+            Core Web Vitals (LCP / CLS / INP / FCP / TTFB) per real
+            visit and ships them to the Vercel dashboard. No setup
+            beyond mounting this component — the script source
+            (va.vercel-scripts.com) is already in the CSP allowlist
+            from PR #40, so it ships under the nonce-based policy
+            without changes. Sits next to <Analytics /> so both
+            Vercel telemetry surfaces mount in the same place. */}
+        <SpeedInsights />
       </body>
     </html>
   );
