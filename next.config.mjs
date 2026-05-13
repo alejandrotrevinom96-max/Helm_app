@@ -93,6 +93,18 @@ const nextConfig = {
   // fingerprinting and jump straight to known-CVE checks). Free
   // win — toggling this off costs nothing.
   poweredByHeader: false,
+  // PR #85 hotfix — Sprint 7.10: force blog markdown into the
+  // Vercel deployment bundle. Next.js's static analysis can miss
+  // dynamic fs.readdir/readFile calls (see lib/blog/loader.ts),
+  // which means the .md files don't make it into the serverless
+  // function's file tree and the slug page 500s in production.
+  // Listing them here is belt-and-braces alongside the SSG path —
+  // even if a future change accidentally turns the slug page
+  // dynamic, the files will still be reachable.
+  outputFileTracingIncludes: {
+    '/blog': ['./content/blog/**/*.md'],
+    '/blog/[slug]': ['./content/blog/**/*.md'],
+  },
   experimental: {
     serverActions: {
       bodySizeLimit: '2mb',

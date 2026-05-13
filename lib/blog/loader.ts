@@ -1,6 +1,6 @@
 // PR #85 — Sprint 7.10: filesystem-backed blog loader.
 //
-// Posts live as Markdown files under `Helm SEO/` at the repo
+// Posts live as Markdown files under `content/blog/` at the repo
 // root (NOT under `app/` — that folder is not a Next.js route
 // group, it's a content workspace). We scan the directory at
 // build/request time, parse YAML frontmatter, and expose a
@@ -13,17 +13,27 @@
 // downstream only see `BlogPostMeta` + `BlogPost`, so the
 // migration stays contained.
 //
-// All filesystem reads happen at build time when `output: 'static'`
-// is used, or at request time for dynamic mode. Either way they're
-// server-only — never bundled into the client.
+// PR #85 hotfix — moved from `Helm SEO/` to `content/blog/`. The
+// previous path had a literal space which interacted badly with
+// Vercel's file tracing in the App Router: build-time prerender
+// claimed success, but `.next/prerender-manifest.json` ended up
+// empty and the slug pages fell back to dynamic rendering, where
+// `process.cwd()` resolution + the space made the runtime fs read
+// fail with a 500. A clean lowercase path sidesteps both issues
+// and matches what Next.js's `outputFileTracingIncludes` examples
+// in the docs assume.
+//
+// All filesystem reads happen at build time (SSG via
+// `generateStaticParams` + `dynamicParams: false` on /blog/[slug]).
+// Either way they're server-only — never bundled into the client.
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import matter from 'gray-matter';
 
 // The directory containing the markdown sources. Lives at the
-// repo root and has a space in the name — keep the literal here
-// so anyone refactoring sees the exact source-of-truth path.
-const POSTS_DIR = path.join(process.cwd(), 'Helm SEO');
+// repo root under a clean, lowercase path so file tracing in
+// Vercel deployments resolves predictably (see header note).
+const POSTS_DIR = path.join(process.cwd(), 'content', 'blog');
 
 export type BlogIcp =
   | 'founders'
@@ -105,10 +115,10 @@ async function listMarkdownFiles(): Promise<string[]> {
       .filter((e) => e.isFile() && e.name.endsWith('.md'))
       .map((e) => e.name);
   } catch (err) {
-    // If `Helm SEO/` is missing (e.g. shallow checkout, content
+    // If `content/blog/` is missing (e.g. shallow checkout, content
     // moved later), return empty rather than crashing the build.
     // The index page will render an empty state instead of 500.
-    console.warn('[blog/loader] could not read Helm SEO directory:', err);
+    console.warn('[blog/loader] could not read content/blog directory:', err);
     return [];
   }
 }
