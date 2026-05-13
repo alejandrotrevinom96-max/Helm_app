@@ -21,6 +21,7 @@ import {
   generatedPosts,
   heygenJobs,
   projects,
+  scheduledPosts,
 } from '@/lib/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
 
@@ -182,29 +183,86 @@ export async function GET(request: Request) {
 
   const url = new URL(request.url);
   const draftId = url.searchParams.get('draftId');
-  if (!draftId || !UUID_RE.test(draftId)) {
-    return NextResponse.json({ error: 'Invalid draftId' }, { status: 400 });
+  const scheduledPostId = url.searchParams.get('scheduledPostId');
+
+  // ----- Draft lookup (direct FK) -----
+  if (draftId) {
+    if (!UUID_RE.test(draftId)) {
+      return NextResponse.json(
+        { error: 'Invalid draftId' },
+        { status: 400 },
+      );
+    }
+    const [joined] = await db
+      .select({ draftId: generatedPosts.id })
+      .from(generatedPosts)
+      .innerJoin(projects, eq(projects.id, generatedPosts.projectId))
+      .where(
+        and(eq(generatedPosts.id, draftId), eq(projects.userId, user.id)),
+      )
+      .limit(1);
+    if (!joined) {
+      return NextResponse.json({ job: null }, { status: 200 });
+    }
+    const [latest] = await db
+      .select()
+      .from(heygenJobs)
+      .where(eq(heygenJobs.draftId, draftId))
+      .orderBy(desc(heygenJobs.requestedAt))
+      .limit(1);
+    return NextResponse.json({ job: latest ? serializeJob(latest) : null });
   }
 
-  // Ownership-join again — same shape as POST.
-  const [joined] = await db
-    .select({ draftId: generatedPosts.id })
-    .from(generatedPosts)
-    .innerJoin(projects, eq(projects.id, generatedPosts.projectId))
-    .where(
-      and(eq(generatedPosts.id, draftId), eq(projects.userId, user.id)),
-    )
-    .limit(1);
-  if (!joined) {
-    return NextResponse.json({ job: null }, { status: 200 });
+  // ----- Scheduled-post lookup (heuristic) -----
+  // PR #87 — Sprint 7.11: heygenJobs.draftId points to a deleted
+  // row after the draft was scheduled or post-now'd, so we can't
+  // FK-join directly. The closest stable signal we have is "the
+  // most-recent completed heygen_job for this user+project before
+  // the scheduled_post was created". Good enough when the founder
+  // only has one video in flight at a time; ambiguous for power
+  // users (follow-up: add scheduledPostId to heygen_jobs at
+  // schedule time).
+  if (scheduledPostId) {
+    if (!UUID_RE.test(scheduledPostId)) {
+      return NextResponse.json(
+        { error: 'Invalid scheduledPostId' },
+        { status: 400 },
+      );
+    }
+    const [scheduled] = await db
+      .select({
+        id: scheduledPosts.id,
+        projectId: scheduledPosts.projectId,
+        createdAt: scheduledPosts.createdAt,
+      })
+      .from(scheduledPosts)
+      .where(
+        and(
+          eq(scheduledPosts.id, scheduledPostId),
+          eq(scheduledPosts.userId, user.id),
+        ),
+      )
+      .limit(1);
+    if (!scheduled) {
+      return NextResponse.json({ job: null }, { status: 200 });
+    }
+    const [latest] = await db
+      .select()
+      .from(heygenJobs)
+      .where(
+        and(
+          eq(heygenJobs.userId, user.id),
+          eq(heygenJobs.projectId, scheduled.projectId),
+          eq(heygenJobs.status, 'completed'),
+        ),
+      )
+      .orderBy(desc(heygenJobs.completedAt))
+      .limit(1);
+    return NextResponse.json({ job: latest ? serializeJob(latest) : null });
   }
 
-  const [latest] = await db
-    .select()
-    .from(heygenJobs)
-    .where(eq(heygenJobs.draftId, draftId))
-    .orderBy(desc(heygenJobs.requestedAt))
-    .limit(1);
-
-  return NextResponse.json({ job: latest ? serializeJob(latest) : null });
+  return NextResponse.json(
+    { error: 'Provide draftId or scheduledPostId' },
+    { status: 400 },
+  );
 }

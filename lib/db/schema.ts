@@ -1140,6 +1140,91 @@ export const linkedinIntegrations = pgTable(
   }),
 );
 
+// ===== TikTok Integrations =====
+// PR #87 — Sprint 7.11: TikTok "Upload to Inbox" flow.
+//
+// USER-scoped (not project-scoped) because TikTok accounts are
+// personal and a single founder typically has one TikTok handle
+// they reuse across all their projects. LinkedIn is the opposite
+// pattern (project-scoped) because brands often have a dedicated
+// company LinkedIn page per project. If/when we ship TikTok
+// Business accounts (multi-brand), this would shift to project-
+// scoped — but Upload to Inbox lives on the personal API surface.
+//
+// We deliberately store BOTH access_token_expires_at and
+// refresh_token_expires_at:
+//   - access tokens expire in 24h (TikTok rotates aggressively)
+//   - refresh tokens expire in 365d
+//   - lib/tiktok/client.ts checks both before every call so we
+//     never burn an upload trying to use an expired access token
+//     OR a dead refresh token (which would require a re-auth).
+//
+// scope is stored as the canonical comma-separated string
+// TikTok returns (same shape as the request) — we don't
+// normalize because TikTok's scope membership check is exact.
+export const tiktokIntegrations = pgTable(
+  'tiktok_integrations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').notNull(),
+    // TikTok's stable user identifier — survives display-name
+    // changes and is what publish-status endpoints key off.
+    openId: text('open_id').notNull(),
+    displayName: text('display_name'),
+    avatarUrl: text('avatar_url'),
+    // Both tokens stored AES-256-GCM encrypted via
+    // lib/crypto/token-encryption.ts. Never returned to the
+    // client.
+    accessTokenEncrypted: text('access_token_encrypted').notNull(),
+    refreshTokenEncrypted: text('refresh_token_encrypted').notNull(),
+    accessTokenExpiresAt: timestamp('access_token_expires_at').notNull(),
+    refreshTokenExpiresAt: timestamp('refresh_token_expires_at').notNull(),
+    scope: text('scope'),
+    status: text('status').default('connected').notNull(), // 'connected' | 'expired' | 'disconnected' | 'failed'
+    lastError: text('last_error'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    uniqueUser: unique('tiktok_integrations_user_uk').on(t.userId),
+  }),
+);
+
+// ===== TikTok Publish Jobs =====
+// PR #87 — Sprint 7.11: one row per "Send to TikTok inbox" attempt.
+//
+// scheduled_posts.id → publish_id mapping. We persist publish_id
+// because TikTok's status endpoint needs it to report progress,
+// and a single scheduled_post could be retried (the latest job
+// row wins for status display).
+//
+// status mirrors TikTok's lifecycle states:
+//   PROCESSING_UPLOAD      → in-flight on TikTok side
+//   SEND_TO_USER_INBOX     → terminal success, ready in user's
+//                            drafts inbox
+//   PUBLISH_COMPLETE       → user has published from TikTok
+//                            (we don't poll for this — terminal)
+//   FAILED                 → TikTok refused or errored
+//
+// We don't FK scheduled_post_id because some flows (manual
+// retry, debugging) may want to upload a video without a
+// scheduled_posts row backing it. Soft ref via nullable column.
+export const tiktokPublishJobs = pgTable('tiktok_publish_jobs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').notNull(),
+  scheduledPostId: uuid('scheduled_post_id'),
+  heygenJobId: uuid('heygen_job_id'),
+  // TikTok's publish identifier — what we POST to /status/fetch/
+  publishId: text('publish_id').notNull(),
+  status: text('status').notNull().default('PROCESSING_UPLOAD'),
+  // Snapshot of the video URL we asked TikTok to PULL_FROM_URL.
+  // Useful for debugging when a job fails 12 hours later.
+  sourceVideoUrl: text('source_video_url'),
+  errorMessage: text('error_message'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
 // ===== Brand Analysis (PR #62 — Sprint 7.0.5) =====
 // Cached Opus-4.7 deep analysis of a brand's niche, audience layers,
 // competitor gap, and recommended specificity. Drives Smart Auto-

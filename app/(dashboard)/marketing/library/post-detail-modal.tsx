@@ -147,10 +147,11 @@ export function PostDetailModal({
     isDraft || (post.source === 'scheduled' && post.status === 'scheduled');
 
   // PR #86 — Sprint 7.10: HeyGen video job state for reel / ugc
-  // drafts. We only fetch when the modal opens for a video-format
-  // draft to avoid an extra round-trip on every other post.
-  const isVideoFormat =
-    isDraft && VIDEO_CONTENT_TYPES.has(post.contentType);
+  // posts. PR #87 — Sprint 7.11: extended to scheduled rows too —
+  // the GET /api/heygen/jobs endpoint now accepts scheduledPostId
+  // and finds the matching job via project+user+completed
+  // heuristic.
+  const isVideoFormat = VIDEO_CONTENT_TYPES.has(post.contentType);
   const [heygenJob, setHeygenJob] = useState<HeygenJobView | null>(null);
   const [heygenLoading, setHeygenLoading] = useState(false);
   const [heygenError, setHeygenError] = useState<string | null>(null);
@@ -158,10 +159,29 @@ export function PostDetailModal({
   // Polling guard — only one interval per modal mount.
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // PR #87 — Sprint 7.11: TikTok publish job state. Only relevant
+  // on scheduled rows with a completed heygen video.
+  const [tiktokStatus, setTiktokStatus] = useState<{
+    publishId: string | null;
+    status: string | null;
+    failReason: string | null;
+  }>({ publishId: null, status: null, failReason: null });
+  const [tiktokSending, setTiktokSending] = useState(false);
+  const [tiktokError, setTiktokError] = useState<string | null>(null);
+  const [tiktokConnected, setTiktokConnected] = useState<boolean | null>(
+    null,
+  );
+  const tiktokPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   const fetchHeygenJob = useCallback(async () => {
     if (!isVideoFormat) return;
     try {
-      const res = await fetch(`/api/heygen/jobs?draftId=${post.id}`);
+      // For drafts we lookup by draftId (direct FK); for scheduled
+      // rows we lookup by scheduledPostId (heuristic).
+      const qs = isDraft
+        ? `draftId=${post.id}`
+        : `scheduledPostId=${post.id}`;
+      const res = await fetch(`/api/heygen/jobs?${qs}`);
       if (!res.ok) return;
       const data = (await res.json()) as { job: HeygenJobView | null };
       setHeygenJob(data.job);
@@ -169,7 +189,7 @@ export function PostDetailModal({
       // Best-effort; UI stays in the previous state on transient
       // errors.
     }
-  }, [isVideoFormat, post.id]);
+  }, [isVideoFormat, isDraft, post.id]);
 
   useEffect(() => {
     if (!isVideoFormat) return;
@@ -196,6 +216,128 @@ export function PostDetailModal({
       }
     };
   }, [heygenJob, fetchHeygenJob]);
+
+  // PR #87 — Sprint 7.11: TikTok integration check + existing job
+  // fetch. Only fires for scheduled rows because the upload endpoint
+  // requires scheduledPostId.
+  useEffect(() => {
+    if (post.source !== 'scheduled' || !isVideoFormat) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [testRes, uploadRes] = await Promise.all([
+          fetch('/api/integrations/tiktok/test', { cache: 'no-store' }),
+          fetch(`/api/integrations/tiktok/upload?scheduledPostId=${post.id}`),
+        ]);
+        const testData = (await testRes.json().catch(() => ({}))) as {
+          connected?: boolean;
+          hasUploadScope?: boolean;
+        };
+        if (!cancelled) {
+          setTiktokConnected(
+            Boolean(testData.connected && testData.hasUploadScope),
+          );
+        }
+        if (uploadRes.ok) {
+          const uploadData = (await uploadRes.json()) as {
+            job: {
+              publishId: string;
+              status: string;
+              errorMessage: string | null;
+            } | null;
+          };
+          if (uploadData.job && !cancelled) {
+            setTiktokStatus({
+              publishId: uploadData.job.publishId,
+              status: uploadData.job.status,
+              failReason: uploadData.job.errorMessage,
+            });
+          }
+        }
+      } catch {
+        // Best-effort; the UI degrades to "not connected" if /test
+        // fails, which is the safe fallback.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [post.source, post.id, isVideoFormat]);
+
+  // PR #87 — Sprint 7.11: TikTok 5-second poll while in
+  // PROCESSING_UPLOAD. Terminal statuses
+  // (SEND_TO_USER_INBOX / PUBLISH_COMPLETE / FAILED) stop the poll.
+  useEffect(() => {
+    if (
+      !tiktokStatus.publishId ||
+      tiktokStatus.status === 'SEND_TO_USER_INBOX' ||
+      tiktokStatus.status === 'PUBLISH_COMPLETE' ||
+      tiktokStatus.status === 'FAILED'
+    ) {
+      if (tiktokPollRef.current) {
+        clearInterval(tiktokPollRef.current);
+        tiktokPollRef.current = null;
+      }
+      return;
+    }
+    tiktokPollRef.current = setInterval(async () => {
+      try {
+        const res = await fetch(
+          `/api/integrations/tiktok/status?publishId=${tiktokStatus.publishId}`,
+        );
+        const data = (await res.json()) as {
+          status: string;
+          failReason: string | null;
+        };
+        setTiktokStatus((prev) => ({
+          ...prev,
+          status: data.status,
+          failReason: data.failReason ?? null,
+        }));
+      } catch {
+        // ignore — next tick retries
+      }
+    }, 5000);
+    return () => {
+      if (tiktokPollRef.current) {
+        clearInterval(tiktokPollRef.current);
+        tiktokPollRef.current = null;
+      }
+    };
+  }, [tiktokStatus.publishId, tiktokStatus.status]);
+
+  const handleSendToTikTok = async () => {
+    if (tiktokSending) return;
+    setTiktokSending(true);
+    setTiktokError(null);
+    try {
+      const res = await fetch('/api/integrations/tiktok/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scheduledPostId: post.id }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        success?: boolean;
+        publishId?: string;
+        status?: string;
+        error?: string;
+        hint?: string;
+      };
+      if (!res.ok || !data.success) {
+        setTiktokError(data.error ?? data.hint ?? 'TikTok upload failed');
+        return;
+      }
+      setTiktokStatus({
+        publishId: data.publishId ?? null,
+        status: data.status ?? 'PROCESSING_UPLOAD',
+        failReason: null,
+      });
+    } catch (e) {
+      setTiktokError(e instanceof Error ? e.message : 'Network error');
+    } finally {
+      setTiktokSending(false);
+    }
+  };
 
   const handleGenerateVideo = async () => {
     if (heygenStarting) return;
@@ -636,19 +778,99 @@ export function PostDetailModal({
                     className="rounded-lg w-full max-w-xs"
                   />
                 )}
-                <a
-                  href={heygenJob.videoUrl}
-                  download
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 px-3 py-1.5 bg-accent text-white rounded-lg text-xs font-medium hover:opacity-90"
-                >
-                  ⬇ Download video
-                </a>
+                <div className="flex flex-wrap items-center gap-2">
+                  <a
+                    href={heygenJob.videoUrl}
+                    download
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 px-3 py-1.5 bg-accent text-white rounded-lg text-xs font-medium hover:opacity-90"
+                  >
+                    ⬇ Download video
+                  </a>
+                  {/* PR #87 — Sprint 7.11: Send to TikTok inbox.
+                      Surfaces only on scheduled rows because the
+                      upload endpoint requires a scheduledPostId.
+                      Disabled when TikTok isn't connected; click
+                      surfaces a hint instead of failing silently. */}
+                  {post.source === 'scheduled' &&
+                    tiktokStatus.status !== 'SEND_TO_USER_INBOX' &&
+                    tiktokStatus.status !== 'PUBLISH_COMPLETE' &&
+                    (tiktokConnected ? (
+                      <button
+                        type="button"
+                        onClick={handleSendToTikTok}
+                        disabled={
+                          tiktokSending ||
+                          tiktokStatus.status === 'PROCESSING_UPLOAD'
+                        }
+                        className="inline-flex items-center gap-2 px-3 py-1.5 bg-bg border border-border rounded-lg text-xs font-medium hover:bg-bg-elev hover:border-border-bright disabled:opacity-50"
+                      >
+                        {tiktokSending ||
+                        tiktokStatus.status === 'PROCESSING_UPLOAD'
+                          ? '🎵 Sending to TikTok…'
+                          : tiktokStatus.status === 'FAILED'
+                            ? '🎵 Retry TikTok'
+                            : '🎵 Send to TikTok →'}
+                      </button>
+                    ) : (
+                      <a
+                        href="/integrations"
+                        className="inline-flex items-center gap-2 px-3 py-1.5 bg-bg border border-border rounded-lg text-xs font-medium hover:bg-bg-elev hover:border-border-bright text-text-3"
+                        title="Connect TikTok in /integrations first"
+                      >
+                        🎵 Connect TikTok to send →
+                      </a>
+                    ))}
+                </div>
                 {heygenJob.durationSeconds !== null && (
                   <div className="text-[10px] text-text-3">
                     Duration: {heygenJob.durationSeconds}s
                   </div>
+                )}
+
+                {/* PR #87 — Sprint 7.11: TikTok status row. Renders
+                    once a publish job exists for this post. */}
+                {tiktokStatus.publishId &&
+                  tiktokStatus.status === 'PROCESSING_UPLOAD' && (
+                    <div className="flex items-center gap-2 text-xs text-amber-500">
+                      <span className="inline-block w-3 h-3 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
+                      <span>Sending to TikTok inbox…</span>
+                    </div>
+                  )}
+                {tiktokStatus.status === 'SEND_TO_USER_INBOX' && (
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 text-xs text-emerald-500">
+                      <span>✓</span>
+                      <span>In your TikTok inbox</span>
+                    </div>
+                    <div className="text-[10px] text-text-3">
+                      Open TikTok to publish — Helm doesn&apos;t push
+                      Direct Posts (avoids TikTok app audit).
+                    </div>
+                  </div>
+                )}
+                {tiktokStatus.status === 'PUBLISH_COMPLETE' && (
+                  <div className="flex items-center gap-2 text-xs text-emerald-500">
+                    <span>✓</span>
+                    <span>Published on TikTok</span>
+                  </div>
+                )}
+                {tiktokStatus.status === 'FAILED' && (
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 text-xs text-danger">
+                      <span>⚠</span>
+                      <span>TikTok rejected the upload</span>
+                    </div>
+                    {tiktokStatus.failReason && (
+                      <div className="text-[10px] text-text-3 font-mono">
+                        {tiktokStatus.failReason}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {tiktokError && (
+                  <div className="text-xs text-danger">{tiktokError}</div>
                 )}
               </div>
             )}

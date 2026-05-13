@@ -10,6 +10,7 @@ import { RedditCard } from './reddit-card';
 import { XCard } from './x-card';
 import { LinkedInCard } from './linkedin-card';
 import { ThreadsCard } from './threads-card';
+import { TikTokCard } from './tiktok-card';
 
 export default async function IntegrationsPage() {
   const supabase = await createClient();
@@ -95,6 +96,11 @@ export default async function IntegrationsPage() {
           <XCard />
           <LinkedInCard projectId={activeProject.id} />
           <ThreadsCard projectId={activeProject.id} />
+          {/* PR #87 — Sprint 7.11: TikTok Upload to Inbox.
+              User-scoped (not project-scoped) — see the schema
+              comment on tiktok_integrations for the rationale.
+              No projectId prop needed. */}
+          <TikTokCard />
         </div>
       )}
     </>
