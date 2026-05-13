@@ -419,19 +419,25 @@ export function PostDetailModal({
             draftId: post.id,
           }),
         });
+        // PR Sprint 7.13 hotfix v2 (BUG 3A) — /api/visuals/generate
+        // wraps the result under `visual: { url, ... }`. Sprint
+        // 7.12's first wiring read `data.imageUrl ?? data.url` which
+        // never matched, so the founder generated an image but the
+        // preview in the modal stayed empty (and they thought the
+        // button was broken).
         const data = (await res.json().catch(() => ({}))) as {
-          success?: boolean;
-          imageUrl?: string;
-          url?: string;
+          ok?: boolean;
+          visual?: { url?: string };
           error?: string;
           hint?: string;
         };
-        if (!res.ok || data.error) {
-          setImageError(data.error ?? data.hint ?? 'Image generation failed');
+        if (!res.ok || !data.ok || !data.visual?.url) {
+          setImageError(
+            data.error ?? data.hint ?? 'Image generation failed',
+          );
           return;
         }
-        const url = data.imageUrl ?? data.url ?? null;
-        if (url) setGeneratedSingleUrl(url);
+        setGeneratedSingleUrl(data.visual.url);
       }
     } catch (e) {
       setImageError(e instanceof Error ? e.message : 'Network error');
@@ -1132,10 +1138,23 @@ export function PostDetailModal({
               {formatDateTime(post.createdAt)}
             </span>
           </div>
+          {/* PR Sprint 7.13 (BUG 2) — Brand fit as a prominent pill,
+              matches the post-card badge style so the founder
+              recognizes the same signal across surfaces. */}
           {post.consistencyScore !== null && (
-            <div>
-              <span className="text-text-3 block">Consistency score</span>
-              <span className="text-text-1">{post.consistencyScore}/100</span>
+            <div className="col-span-2">
+              <span className="text-text-3 block mb-1">Brand fit</span>
+              <span
+                className={`text-xs font-mono uppercase tracking-[0.15em] font-bold px-2.5 py-1 rounded inline-flex items-center gap-2 ${
+                  post.consistencyScore >= 80
+                    ? 'bg-emerald-500/15 text-emerald-500 border border-emerald-500/30'
+                    : post.consistencyScore >= 50
+                      ? 'bg-accent/15 text-accent border border-accent/30'
+                      : 'bg-danger/15 text-danger border border-danger/30'
+                }`}
+              >
+                {post.consistencyScore}/100
+              </span>
             </div>
           )}
         </div>

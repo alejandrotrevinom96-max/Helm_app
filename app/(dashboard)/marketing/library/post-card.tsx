@@ -175,22 +175,26 @@ export function LibraryPostCard({ post, onClick }: Props) {
       </p>
 
       {/* PR #55 — Sprint 6.9: surface consistencyScore when set.
-          Field was carried in LibraryPost from PR #29 but never
-          rendered on cards. Color-coded so the founder can scan
-          the grid for off-brand drafts (red) at a glance. */}
+          Sprint 7.13 (BUG 2) — pre-fix this rendered as subtle
+          mono text that founders missed when scanning the grid.
+          Now a prominent accent pill matching the other badges
+          (content type chip, platform chip). Same gate (renders
+          for ANY status when score is a number) — the visibility
+          fix is purely visual weight, not logic. */}
       {typeof post.consistencyScore === 'number' && (
-        <div className="mb-2 text-[10px] font-mono uppercase tracking-[0.1em] inline-flex items-center gap-1.5 text-text-3">
-          <span>Brand fit</span>
+        <div className="mb-3">
           <span
-            className={
+            className={`text-[10px] font-mono uppercase tracking-[0.15em] font-bold px-2 py-1 rounded inline-flex items-center gap-1.5 ${
               post.consistencyScore >= 80
-                ? 'text-emerald-500 font-medium'
+                ? 'bg-emerald-500/15 text-emerald-500 border border-emerald-500/30'
                 : post.consistencyScore >= 50
-                  ? 'text-amber-500 font-medium'
-                  : 'text-danger font-medium'
-            }
+                  ? 'bg-accent/15 text-accent border border-accent/30'
+                  : 'bg-danger/15 text-danger border border-danger/30'
+            }`}
+            title="How well this draft matches your brand bible (voice, pillars, vocabulary). 80+ green, 50-79 on-brand, <50 off-brand."
           >
-            {post.consistencyScore}/100
+            <span>Brand fit</span>
+            <span>{post.consistencyScore}/100</span>
           </span>
         </div>
       )}

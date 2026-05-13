@@ -137,6 +137,13 @@ interface DraftPayload {
   contentType: string;
   displayName: string;
   structuredContent: unknown;
+  // PR Sprint 7.13 hotfix v2 (BUG 2) — surface the brand-fit
+  // score on the generation response so the Generator page's
+  // StructuredDraftCard can render the badge immediately,
+  // without a separate Library fetch. Null when the
+  // computeConsistencyScore() call failed (best-effort, see
+  // route body).
+  consistencyScore?: number | null;
   // When the per-type Opus call failed: kind + raw message + hint.
   error?: string;
   errorKind?: ErrorKind;
@@ -635,6 +642,7 @@ Return STRICT JSON matching the schema. No markdown fences, no prose outside JSO
       contentType: template.type,
       displayName: template.displayName,
       structuredContent: outputContent,
+      consistencyScore,
     });
   }
 

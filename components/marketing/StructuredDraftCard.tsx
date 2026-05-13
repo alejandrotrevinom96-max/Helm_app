@@ -25,6 +25,11 @@ interface Props {
   structuredContent: unknown;
   error?: string;
   draftId?: string;
+  // PR Sprint 7.13 hotfix v2 (BUG 2) — surface the brand-fit
+  // score badge right on the Generator card so the founder sees
+  // it the moment generation finishes, not just when they
+  // navigate to Library.
+  consistencyScore?: number | null;
   // PR #80 — Sprint 7.5.2: restore the like/dislike affordance
   // that lived on the legacy DraftCard. Optional because:
   //   - Freshly-generated drafts don't have a vote yet (undefined
@@ -36,6 +41,11 @@ interface Props {
   // `userReaction` — Sprint 7.5.2 audit caught the plan using
   // the wrong field name.
   initialVote?: 'liked' | 'disliked' | null;
+  // PR Sprint 7.13 hotfix v2 (BUG 3A) — needed for the single-
+  // image generation handler: /api/visuals/generate requires
+  // projectId in the body. The parent (StructuredGeneratePanel)
+  // already knows it.
+  projectId?: string;
 }
 
 type VoteValue = 'liked' | 'disliked' | null;
@@ -61,6 +71,8 @@ export function StructuredDraftCard({
   error,
   draftId,
   initialVote = null,
+  consistencyScore = null,
+  projectId,
 }: Props) {
   const [copied, setCopied] = useState(false);
   // PR #80 — Sprint 7.5.2: vote state. Optimistic toggle on click;
@@ -169,6 +181,66 @@ export function StructuredDraftCard({
     window.location.href = `/marketing/calendar?draftId=${encodeURIComponent(draftId)}`;
   };
 
+  // PR Sprint 7.13 hotfix v2 (BUG 3A) — single-image Flux state +
+  // handler. Parallel to slides but hits /api/visuals/generate
+  // instead of /api/marketing/posts/[id]/generate-slides. The
+  // endpoint response shape is `{ ok, visual: { url, ... } }`
+  // (not `{ url }`) — Sprint 7.12's Library modal misread it,
+  // which is why generated singles "vanished". We unwrap
+  // visual.url correctly here.
+  const [singleImage, setSingleImage] = useState<{
+    kind: 'idle' | 'generating' | 'ready' | 'error';
+    url?: string;
+    message?: string;
+  }>({ kind: 'idle' });
+
+  const handleGenerateSingleImage = async () => {
+    if (!draftId || singleImage.kind === 'generating') return;
+    setSingleImage({ kind: 'generating' });
+    try {
+      // Pull a content hint from the structured payload. Most
+      // single-image types have `imageDirection` or `caption`;
+      // fall back to a generic prompt when neither exists so
+      // Flux still gets something brand-aware to work with.
+      const sc = payload ?? {};
+      const postContent =
+        (typeof sc.imageDirection === 'string' && sc.imageDirection) ||
+        (typeof sc.caption === 'string' && sc.caption) ||
+        (typeof sc.content === 'string' && sc.content) ||
+        'Generate a brand-aligned image for this post.';
+
+      const res = await fetch('/api/visuals/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId,
+          platform,
+          postContent,
+          draftId,
+        }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        visual?: { url?: string };
+        error?: string;
+        hint?: string;
+      };
+      if (!res.ok || !data.ok || !data.visual?.url) {
+        setSingleImage({
+          kind: 'error',
+          message: data.error ?? data.hint ?? 'Image generation failed',
+        });
+        return;
+      }
+      setSingleImage({ kind: 'ready', url: data.visual.url });
+    } catch (e) {
+      setSingleImage({
+        kind: 'error',
+        message: e instanceof Error ? e.message : 'Network error',
+      });
+    }
+  };
+
   // PR #65 — Sprint 7.0.8: kick off slide image generation. Each
   // slide costs ~$0.05; we surface the total upfront so the
   // founder consents to spend before the call fires.
@@ -254,6 +326,25 @@ export function StructuredDraftCard({
             <span className="text-[10px] font-mono uppercase tracking-[0.1em] text-text-3">
               {contentType.replace(/_/g, ' ')}
             </span>
+            {/* PR Sprint 7.13 hotfix v2 (BUG 2) — Brand fit badge.
+                Same pill style as the post-card so the founder
+                sees a consistent signal across Generator and
+                Library. Color buckets: ≥80 green, 50-79 accent
+                (on-brand), <50 danger (off-brand). */}
+            {typeof consistencyScore === 'number' && (
+              <span
+                className={`text-[10px] font-mono uppercase tracking-[0.15em] font-bold px-2 py-0.5 rounded ${
+                  consistencyScore >= 80
+                    ? 'bg-emerald-500/15 text-emerald-500 border border-emerald-500/30'
+                    : consistencyScore >= 50
+                      ? 'bg-accent/15 text-accent border border-accent/30'
+                      : 'bg-danger/15 text-danger border border-danger/30'
+                }`}
+                title="How well this draft matches your brand bible."
+              >
+                Brand fit {consistencyScore}/100
+              </span>
+            )}
             {heygenStatus === 'queued' && (
               <span
                 className="text-[9px] font-mono uppercase tracking-[0.1em] px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-500 border border-purple-500/30"
@@ -394,6 +485,23 @@ export function StructuredDraftCard({
         />
       )}
 
+      {/* PR Sprint 7.13 hotfix v2 (BUG 3A) — Single-photo Flux
+          surface. Parallel to the carousel block above but for
+          single-image content types. Pre-fix Single Photo drafts
+          had no image-generation UI on the Generator page; the
+          founder had to navigate to Library and find the button
+          inside the modal. Now they can fire Flux from the card
+          immediately. */}
+      {(contentType === 'photo' ||
+        contentType === 'single_image') &&
+        payload != null && (
+          <SinglePhotoImageBlock
+            state={singleImage}
+            onGenerate={handleGenerateSingleImage}
+            canGenerate={Boolean(draftId && projectId)}
+          />
+        )}
+
       {error ? (
         <div className="p-3 border border-danger/30 bg-danger/10 rounded text-sm text-danger">
           Generation failed: {error}
@@ -481,6 +589,66 @@ function CarouselSlideImagesBlock({
             />
           ))}
         </div>
+      )}
+    </div>
+  );
+}
+
+// PR Sprint 7.13 hotfix v2 (BUG 3A) — single-image surface.
+// Mirrors CarouselSlideImagesBlock for non-carousel image
+// content types (Instagram photo, LinkedIn single_image, TikTok
+// photo, etc.). One Flux call per draft (~$0.05).
+function SinglePhotoImageBlock({
+  state,
+  onGenerate,
+  canGenerate,
+}: {
+  state: {
+    kind: 'idle' | 'generating' | 'ready' | 'error';
+    url?: string;
+    message?: string;
+  };
+  onGenerate: () => void;
+  canGenerate: boolean;
+}) {
+  const ready = state.kind === 'ready' && state.url;
+  return (
+    <div className="mb-4 p-3 border border-border rounded-lg bg-bg-elev/40">
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-[10px] font-mono uppercase tracking-[0.1em] text-text-3">
+          Image
+          {ready && <span className="ml-2 text-emerald-500">✓ ready</span>}
+        </div>
+        <button
+          type="button"
+          onClick={onGenerate}
+          disabled={!canGenerate || state.kind === 'generating'}
+          className="text-xs font-mono px-2 py-1 rounded bg-accent text-white hover:opacity-90 disabled:opacity-50"
+          title="Flux Pro v1.1, ~$0.05"
+        >
+          {state.kind === 'generating'
+            ? 'Generating…'
+            : ready
+              ? '↻ Regenerate'
+              : '🎨 Generate image'}
+        </button>
+      </div>
+      {state.message && (
+        <div
+          className={`text-xs mb-2 ${
+            state.kind === 'error' ? 'text-danger' : 'text-text-2'
+          }`}
+        >
+          {state.message}
+        </div>
+      )}
+      {ready && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={state.url}
+          alt="Generated"
+          className="w-full max-w-sm aspect-square object-cover rounded bg-bg"
+        />
       )}
     </div>
   );

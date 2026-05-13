@@ -98,6 +98,10 @@ interface Draft {
   contentType: string;
   displayName: string;
   structuredContent: unknown;
+  // PR Sprint 7.13 hotfix v2 (BUG 2) — endpoint now returns the
+  // brand-fit score per draft so the card can render the badge
+  // immediately without a Library refetch.
+  consistencyScore?: number | null;
   error?: string;
   errorKind?: string;
   errorHint?: string;
@@ -536,6 +540,8 @@ export function StructuredGeneratePanel({ projectId }: Props) {
                     structuredContent={d.structuredContent}
                     error={d.error}
                     draftId={d.id || undefined}
+                    consistencyScore={d.consistencyScore ?? null}
+                    projectId={projectId}
                   />
                 </StructuredDraftErrorBoundary>
               );

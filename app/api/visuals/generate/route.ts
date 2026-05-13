@@ -159,12 +159,32 @@ export async function POST(request: Request) {
     // isn't configured yet, we fall back to fal's URL — at least the user
     // sees the image during this session. Storage failures don't block the
     // response — we still return the fal URL.
+    //
+    // PR Sprint 7.13 hotfix v2 (BUG 3B) — the silent .catch(() => null)
+    // hid the real cause every time the bucket wasn't configured or
+    // the service role couldn't write. Now we log the actual error
+    // message so the founder (and ops) can see WHY persistence
+    // failed in Vercel logs. We also log when uploadVisualFromUrl
+    // returns null (bucket missing / RLS denied — the lib logs
+    // internally too but this gives us a single grep point).
     const tempPostId = `temp-${Date.now()}`;
     const uploaded = await uploadVisualFromUrl(
       result.url,
       user.id,
-      tempPostId
-    ).catch(() => null);
+      tempPostId,
+    ).catch((err: unknown) => {
+      console.error(
+        '[visuals/generate] Storage upload threw:',
+        err instanceof Error ? err.message : String(err),
+      );
+      return null;
+    });
+
+    if (!uploaded) {
+      console.warn(
+        '[visuals/generate] Falling back to transient fal.ai URL — image will 404 after ~1 hour. Check the helm-visuals bucket exists in Supabase and the service role has insert permissions.',
+      );
+    }
 
     const finalUrl = uploaded?.publicUrl ?? result.url;
 
