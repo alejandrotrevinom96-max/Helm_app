@@ -168,12 +168,20 @@ export async function middleware(request: NextRequest) {
   // PR #39 — /security is the public disclosure policy and
   // /.well-known/* (security.txt + future robots/well-known) MUST
   // be reachable anonymously per RFC 9116.
+  // PR #85 — Sprint 7.10: /blog and /blog/* are the public AEO
+  // content pages. They were 307'ing to /login on first ship because
+  // this list never included them — the blog renderer assumed the
+  // (marketing) route group auto-bypassed auth, but the middleware
+  // runs BEFORE route groups resolve and treats unknown paths as
+  // protected.
   const isPublicRoute =
     pathname === '/' ||
     pathname.startsWith('/w/') ||
     pathname === '/privacy' ||
     pathname === '/terms' ||
     pathname === '/security' ||
+    pathname === '/blog' ||
+    pathname.startsWith('/blog/') ||
     pathname.startsWith('/.well-known/');
   const isApiRoute = pathname.startsWith('/api');
   // PR #34 — Sprint 6.2: /api/public/* is the explicitly anonymous
