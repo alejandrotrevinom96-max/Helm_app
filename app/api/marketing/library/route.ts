@@ -96,6 +96,15 @@ export interface LibraryPost {
   // legacy plain-text pillar-variant drafts.
   contentType: string | null;
   structuredContent: unknown;
+  // PR #80 — Sprint 7.5.2 (Bug #5): surface visualUrls so the
+  // post-detail-modal can render carousel slide previews after
+  // schedule. The data was already being COPIED correctly into
+  // scheduled_posts.visualUrls by /api/marketing/library/[id]/
+  // schedule (PR #65), but this endpoint never read the column
+  // back — the founder saw the schedule succeed and then a
+  // "naked" post-detail card with the images apparently lost.
+  // The bug was perceptual, not data loss.
+  visualUrls: string[] | null;
 }
 
 const VALID_STATUSES: LibraryStatus[] = [
@@ -275,6 +284,8 @@ export async function GET(request: Request) {
       // PR #62 — Sprint 7.0.5: structured drafts.
       contentType: r.contentType ?? null,
       structuredContent: r.structuredContent ?? null,
+      // PR #80 — Sprint 7.5.2 (Bug #5): carousel slide URLs.
+      visualUrls: (r.visualUrls as string[] | null) ?? null,
     }));
   }
 
@@ -384,6 +395,11 @@ export async function GET(request: Request) {
         // scheduled rows that never carried these columns.
         contentType: r.contentType ?? null,
         structuredContent: r.structuredContent ?? null,
+        // PR #80 — Sprint 7.5.2 (Bug #5): visualUrls flows via
+        // scheduledPosts.visualUrls (copied by the schedule
+        // endpoint, PR #65). Null on pre-7.0.8 rows and on
+        // non-carousel posts.
+        visualUrls: (r.visualUrls as string[] | null) ?? null,
       };
     });
   }

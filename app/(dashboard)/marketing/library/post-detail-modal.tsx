@@ -15,6 +15,7 @@
 import { useState } from 'react';
 import type { LibraryPost } from '@/app/api/marketing/library/route';
 import { ShareButton } from '@/components/share/share-button';
+import { ScheduleModal } from './schedule-modal';
 
 interface Props {
   post: LibraryPost;
@@ -73,7 +74,84 @@ export function PostDetailModal({
   const [retryingPublish, setRetryingPublish] = useState(false);
   // PR #55 — Sprint 6.9: restore-from-hidden flow.
   const [restoring, setRestoring] = useState(false);
+  // PR #80 — Sprint 7.5.2: Schedule + Post Now flows. Both only
+  // surface for drafts (source==='generated'); scheduled rows
+  // already live in the publisher's lane.
+  const [showSchedule, setShowSchedule] = useState(false);
+  const [posting, setPosting] = useState(false);
+  const [postResult, setPostResult] = useState<{
+    success: boolean;
+    message: string;
+    permalink?: string;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const isDraft = post.source === 'generated';
+
+  const handlePostNow = async () => {
+    if (posting) return;
+    if (
+      !window.confirm(
+        '¿Publicar este post AHORA? Va directo a la integración conectada.',
+      )
+    ) {
+      return;
+    }
+    setPosting(true);
+    setError(null);
+    setPostResult(null);
+    try {
+      const res = await fetch(
+        `/api/marketing/posts/${post.id}/publish-now`,
+        { method: 'POST' },
+      );
+      const data = (await res.json().catch(() => ({}))) as {
+        success?: boolean;
+        error?: string;
+        hint?: string;
+        permalink?: string;
+        scheduledPostId?: string;
+      };
+      if (!res.ok || !data.success) {
+        setPostResult({
+          success: false,
+          message:
+            data.error ?? data.hint ?? 'Publish failed',
+        });
+        return;
+      }
+      setPostResult({
+        success: true,
+        message: 'Posted ✓',
+        permalink: data.permalink,
+      });
+      // Remove the draft from the Library list; on close the parent
+      // will refetch and the row will appear in Scheduled/Published.
+      onRemove(post.id);
+    } catch (e) {
+      setPostResult({
+        success: false,
+        message: e instanceof Error ? e.message : 'Network error',
+      });
+    } finally {
+      setPosting(false);
+    }
+  };
+
+  const handleScheduled = (when: string) => {
+    setShowSchedule(false);
+    // Schedule endpoint deletes the draft + inserts a
+    // scheduled_posts row. Drop the row from the in-memory list
+    // here; parent will refetch on next mount.
+    onRemove(post.id);
+    setPostResult({
+      success: true,
+      message: `Scheduled for ${new Date(when).toLocaleString(undefined, {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+      })}`,
+    });
+  };
 
   // PR #55 — Sprint 6.9: draft was Hidden via the Generate/Library
   // voting UI (visibleInLibrary=false + userVote='disliked').
@@ -626,6 +704,34 @@ export function PostDetailModal({
               {cloning ? 'Cloning…' : '🔄 Clone & remix'}
             </button>
 
+            {/* PR #80 — Sprint 7.5.2: Schedule + Post now CTAs.
+                Only surface for drafts (scheduled rows already
+                live in the publisher's lane and would create
+                duplicates if re-scheduled from here). Disabled
+                until any in-flight action settles to avoid
+                double-clicks racing the schedule/publish
+                endpoints. */}
+            {isDraft && (
+              <button
+                type="button"
+                onClick={() => setShowSchedule(true)}
+                disabled={posting || deleting || cloning}
+                className="px-4 py-2 bg-bg border border-border rounded-lg text-sm hover:bg-bg-elev hover:border-border-bright transition-colors disabled:opacity-50"
+              >
+                📅 Schedule
+              </button>
+            )}
+            {isDraft && (
+              <button
+                type="button"
+                onClick={handlePostNow}
+                disabled={posting || deleting || cloning}
+                className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+              >
+                {posting ? '🚀 Publishing…' : '🚀 Post now'}
+              </button>
+            )}
+
             {showFeedback && (
               <button
                 type="button"
@@ -638,7 +744,45 @@ export function PostDetailModal({
             )}
           </div>
         </div>
+
+        {/* PR #80 — Sprint 7.5.2: action result banner. Posted /
+            scheduled / failed surfaces here so the founder sees
+            outcome without the modal closing on them. Permalink
+            link for successful publish where the platform
+            returned one (Meta). */}
+        {postResult && (
+          <div
+            className={`mt-4 p-3 rounded-lg text-sm ${
+              postResult.success
+                ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-600'
+                : 'bg-danger/10 border border-danger/30 text-danger'
+            }`}
+          >
+            <div className="font-medium">{postResult.message}</div>
+            {postResult.permalink && (
+              <a
+                href={postResult.permalink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs underline hover:no-underline mt-1 inline-block"
+              >
+                View on platform →
+              </a>
+            )}
+          </div>
+        )}
       </div>
+
+      {/* Schedule picker modal — opened from the 📅 Schedule
+          button above. Renders outside the main modal card so
+          it can use its own backdrop + dismiss handling. */}
+      {showSchedule && (
+        <ScheduleModal
+          postId={post.id}
+          onScheduled={handleScheduled}
+          onClose={() => setShowSchedule(false)}
+        />
+      )}
     </div>
   );
 }

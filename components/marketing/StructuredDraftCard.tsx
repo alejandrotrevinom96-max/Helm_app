@@ -25,7 +25,20 @@ interface Props {
   structuredContent: unknown;
   error?: string;
   draftId?: string;
+  // PR #80 — Sprint 7.5.2: restore the like/dislike affordance
+  // that lived on the legacy DraftCard. Optional because:
+  //   - Freshly-generated drafts don't have a vote yet (undefined
+  //     resolves to neither button pressed).
+  //   - The Library and other Card consumers can omit this prop
+  //     if they're rendering historical drafts that already have
+  //     a vote stored on the row.
+  // Field name matches the DB column (PR #42 `userVote`), NOT
+  // `userReaction` — Sprint 7.5.2 audit caught the plan using
+  // the wrong field name.
+  initialVote?: 'liked' | 'disliked' | null;
 }
+
+type VoteValue = 'liked' | 'disliked' | null;
 
 interface ScheduleState {
   kind: 'idle' | 'scheduling' | 'scheduled' | 'error';
@@ -47,8 +60,43 @@ export function StructuredDraftCard({
   structuredContent,
   error,
   draftId,
+  initialVote = null,
 }: Props) {
   const [copied, setCopied] = useState(false);
+  // PR #80 — Sprint 7.5.2: vote state. Optimistic toggle on click;
+  // a network failure resets to the prior value and surfaces the
+  // error via the existing toast pattern that the rest of this
+  // card uses inline. Voting `liked` again unsets to null
+  // (Twitter-style toggle), matching how the legacy DraftCard
+  // worked.
+  const [vote, setVote] = useState<VoteValue>(initialVote);
+  const [voteBusy, setVoteBusy] = useState(false);
+
+  const handleVote = async (next: 'liked' | 'disliked') => {
+    if (!draftId || voteBusy) return;
+    const target: VoteValue = vote === next ? null : next;
+    const prev = vote;
+    setVote(target); // optimistic
+    setVoteBusy(true);
+    try {
+      const res = await fetch(`/api/marketing/posts/${draftId}/vote`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vote: target }),
+      });
+      if (!res.ok) {
+        // Revert on server reject. We don't surface the error
+        // chrome (it would steal focus from the generate flow) —
+        // the visual unmount of the highlight tells the founder
+        // it didn't stick.
+        setVote(prev);
+      }
+    } catch {
+      setVote(prev);
+    } finally {
+      setVoteBusy(false);
+    }
+  };
   // PR #64 — Sprint 7.0.7: inline schedule. Tomorrow 9am is the
   // default cadence (one-click); the founder can still drag to a
   // specific slot in Calendar after.
@@ -238,6 +286,49 @@ export function StructuredDraftCard({
           <h3 className="font-display text-lg font-light">{displayName}</h3>
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          {/* PR #80 — Sprint 7.5.2: vote (👍/👎) restored. The
+              legacy DraftCard had these inline; Sprint 7.3
+              promoted StructuredDraftCard without them. The
+              vote feeds Voice Memory (lib/voice/fingerprint.ts
+              extracts patterns from liked drafts; the Hidden
+              filter in Library uses disliked). Each press
+              toggles — clicking the active button clears.
+              Disabled until the draftId is present (no DB row =
+              nothing to vote on). */}
+          {draftId && (
+            <>
+              <button
+                type="button"
+                onClick={() => handleVote('liked')}
+                disabled={voteBusy}
+                aria-pressed={vote === 'liked'}
+                aria-label={vote === 'liked' ? 'Unlike' : 'Like'}
+                className={`text-base leading-none px-1.5 py-0.5 rounded transition-colors disabled:opacity-50 ${
+                  vote === 'liked'
+                    ? 'bg-emerald-500/20 text-emerald-500'
+                    : 'text-text-3 hover:text-text-1 hover:bg-bg-elev'
+                }`}
+                title="Like — feeds voice memory"
+              >
+                👍
+              </button>
+              <button
+                type="button"
+                onClick={() => handleVote('disliked')}
+                disabled={voteBusy}
+                aria-pressed={vote === 'disliked'}
+                aria-label={vote === 'disliked' ? 'Restore' : 'Hide'}
+                className={`text-base leading-none px-1.5 py-0.5 rounded transition-colors disabled:opacity-50 ${
+                  vote === 'disliked'
+                    ? 'bg-danger/20 text-danger'
+                    : 'text-text-3 hover:text-text-1 hover:bg-bg-elev'
+                }`}
+                title="Hide — removes from default library view"
+              >
+                👎
+              </button>
+            </>
+          )}
           <button
             type="button"
             onClick={handleCopy}
@@ -352,13 +443,20 @@ function CarouselSlideImagesBlock({
             onClick={onGenerate}
             disabled={!canGenerate || state.kind === 'generating'}
             className="text-xs font-mono px-2 py-1 rounded bg-accent text-white hover:opacity-90 disabled:opacity-50"
+            // PR #80 — Sprint 7.5.2 (Bug #4): tooltip keeps the
+            // per-image cost visible for power users on hover so
+            // the founder can still audit spend. The button text
+            // itself drops the dollar amount — consumer products
+            // don't show infra costs in primary CTAs because they
+            // generate friction and confusion. Backend tracking
+            // (visual_generations.generationCostUsd) is unchanged.
             title={`Flux Pro v1.1, 1:1, ~${slideCount} × $0.05 ≈ $${estCost}`}
           >
             {state.kind === 'generating'
               ? `Generating ${slideCount} slides…`
               : hasUrls
                 ? '↻ Regenerate'
-                : `🎨 Generate ${slideCount} slides ($${estCost})`}
+                : `🎨 Generate ${slideCount} slides`}
           </button>
         ) : null}
       </div>
