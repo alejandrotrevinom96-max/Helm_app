@@ -146,6 +146,8 @@ def _check_hook_quality(bundle: UGCBundle) -> list[str]:
         "today i", "hey everyone", "what's up", "let me tell you",
         "i want to talk about", "i'm going to", "here's a thing",
         "so basically", "in this video", "guys", "you guys",
+        "today we're going to", "let's talk about", "quick tip",
+        "pro tip", "fun fact", "did you know", "the truth is",
     )
     hook_lower = bundle.hook.text.lower().strip()
     for weak in weak_openers:

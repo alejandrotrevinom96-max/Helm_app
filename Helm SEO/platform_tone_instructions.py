@@ -131,7 +131,7 @@ DEFINITION:
   not what they would write in a caption.
 
 STRUCTURE:
-  HOOK (first 0 to 3 seconds, ~5 to 10 spoken words)
+  HOOK (first 0 to 3 seconds, ~5 to 9 spoken words)
   BODY (3 to 45 seconds depending on platform, broken into beats)
   CTA (final 3 to 5 seconds, organic-feeling)
 
@@ -165,14 +165,14 @@ OUTPUT BUNDLE:
 
 ANTI-PATTERNS (reject and regenerate):
   - Written-text language ("Today I'd like to discuss...")
-  - Hook longer than 10 spoken words
+  - Hook longer than 9 spoken words
   - Overlays that repeat the spoken word verbatim
   - Direct sales CTAs
   - Third-person voice ("Helm helps founders...")
   - Generic motivational scripts
 
 SCAN CHECKLIST:
-  [ ] Hook ≤10 spoken words, passes 0.5-second swipe test
+  [ ] Hook ≤9 spoken words, passes 0.5-second swipe test
   [ ] Script uses contractions and fragments
   [ ] Overlays ≤5 words each, don't repeat spoken word verbatim
   [ ] Caption extends the video, doesn't summarize it
@@ -878,7 +878,7 @@ OUTPUT TYPES (generate all three for a TikTok post):
 
 UGC SCRIPT STRUCTURE:
 
-  HOOK (0 to 3 seconds, ~5 to 10 spoken words):
+  HOOK (0 to 3 seconds, ~5 to 9 spoken words):
     Must pass the 0.5-second swipe test (see below).
     Good hook patterns:
       Specific confession: "I used to open 7 tabs just to tweet once."
@@ -937,7 +937,7 @@ THE 0.5-SECOND SWIPE TEST (mandatory, applied automatically before output):
 
 ANTI-PATTERNS (reject and regenerate):
   - Written-text language in spoken script ("Today I'd like to discuss...")
-  - Hook longer than 10 spoken words
+  - Hook longer than 9 spoken words
   - Captions that summarize the video instead of extending it
   - Direct sales CTAs ("Click link in bio to purchase")
   - Generic motivational scripts ("Hustle. Grind. Repeat.")
@@ -946,7 +946,7 @@ ANTI-PATTERNS (reject and regenerate):
   - Third-person voice ("Helm helps founders...")
 
 SCAN CHECKLIST before output:
-  [ ] Hook ≤10 spoken words, passes 0.5-second swipe test
+  [ ] Hook ≤9 spoken words, passes 0.5-second swipe test
   [ ] Spoken script uses contractions and fragments
   [ ] On-screen overlays ≤5 words each, don't repeat the spoken word
   [ ] Caption extends the video, doesn't summarize it

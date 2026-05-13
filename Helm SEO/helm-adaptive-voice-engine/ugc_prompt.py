@@ -19,7 +19,7 @@ Integration:
       if content_type == ContentType.UGC:
           base_prompt = append_ugc_schema_to_prompt(base_prompt, platform.value)
 
-Version: 1.0
+Version: 1.1 (hook 5-9 words, expanded cadence rules, reminder line)
 """
 
 from __future__ import annotations
@@ -29,12 +29,12 @@ UGC_OUTPUT_SCHEMA_INSTRUCTION = """
 OUTPUT FORMAT (mandatory)
 =========================
 
-Return a single JSON object matching this exact schema. No commentary, no
-markdown fences, no preamble. Just the raw JSON.
+Return ONLY this JSON. No commentary, no markdown fences, no preamble, no
+thinking tags. One JSON object, nothing else.
 
 {
   "hook": {
-    "text": "<5 to 10 spoken words, the attention grab>",
+    "text": "<5 to 9 spoken words, the attention grab>",
     "duration_seconds": <1.0 to 4.0>,
     "delivery": "<one of: punchy, confessional, emphatic>"
   },
@@ -69,6 +69,30 @@ markdown fences, no preamble. Just the raw JSON.
   }
 }
 
+CRITICAL SPOKEN CADENCE RULES (apply to hook, body, and cta)
+============================================================
+
+  - Heavy contractions: I'm, you're, doesn't, can't, gonna, wanna, that's,
+    here's, what's, it's. Written-out forms sound robotic on camera.
+  - Sentence fragments are encouraged. People talk in fragments.
+  - One clear idea per sentence. No compound clauses stitched with "and".
+  - Talk like you're explaining it to another founder over coffee, not like
+    you're presenting in a conference room.
+  - Never use written-text language ("Today I want to discuss...",
+    "In this video...", "Let's talk about...").
+  - Use "I" and "you" heavily. Never "we" (company voice) or "one" (impersonal).
+
+HOOK RULES (most important part of the entire video)
+====================================================
+
+  - 5 to 9 spoken words maximum. No exceptions.
+  - Must pass the 0.5-second swipe test: would a stranger scrolling at 2am
+    keep watching past the first half-second of this video? Set
+    metadata.passes_swipe_test honestly based on this check.
+  - Best patterns: specific confession ("I used to..."), surprising number
+    ("I spent 156 hours..."), pattern interrupt ("Stop using X"), contrarian
+    setup ("Everyone's wrong about Y").
+
 DELIVERY STYLE OPTIONS
 ======================
 
@@ -85,7 +109,7 @@ OVERLAY RULES
 =============
 
   - Reinforce the spoken word, never repeat it verbatim. If the speaker says
-    "I dropped Buffer last month", a good overlay is "BUFFER ❌" or "DROPPED".
+    "I dropped Buffer last month", a good overlay is "BUFFER" or "DROPPED".
     A bad overlay is "I dropped Buffer last month" (verbatim repeat).
   - 3 to 5 words max per overlay. Numbers, key phrases, callouts only.
   - Place overlays at moments of emphasis (numbers, key phrases, transitions).
@@ -114,8 +138,8 @@ HASHTAG RULES
 VALIDATION CHECKLIST (run before returning)
 ============================================
 
-  [ ] hook.text is 5 to 10 spoken words
-  [ ] hook passes the 0.5-second swipe test (would a stranger keep watching?)
+  [ ] hook.text is 5 to 9 spoken words
+  [ ] hook passes the 0.5-second swipe test (set passes_swipe_test honestly)
   [ ] body has 1 to 5 beats, each delivering one idea
   [ ] body beats numbered sequentially starting at 1
   [ ] cta is conversational, not a sales pitch
@@ -125,16 +149,15 @@ VALIDATION CHECKLIST (run before returning)
   [ ] caption extends the video instead of summarizing it
   [ ] caption length 20 to 500 chars
   [ ] 3 to 5 hashtags, mix of broad and niche, no # prefix
-  [ ] script uses contractions and sentence fragments (spoken cadence)
+  [ ] script uses heavy contractions and sentence fragments
   [ ] first-person voice throughout (I/you, never we/one)
   [ ] no anti-patterns from PLATFORM_TONE triggered
-  [ ] metadata.passes_swipe_test set honestly
   [ ] total duration (hook + body + cta) lands between 15 and 60 seconds
 
-If any validation check fails, regenerate before returning. The bundle will
-be rejected automatically by the schema validator if any field violates the
-JSON schema (e.g., overlay text > 5 words, body has 6+ beats, hook > 10 words).
-You will get the failure reason and be asked to retry.
+If any check fails, regenerate the entire bundle before returning. The bundle
+will be rejected automatically by the schema validator if any field violates
+the JSON schema (e.g., overlay text > 5 words, body has 6+ beats, hook > 9
+words). You will get the failure reason and be asked to retry.
 """
 
 
@@ -152,11 +175,20 @@ def append_ugc_schema_to_prompt(base_prompt: str, target_platform: str) -> str:
                          else.
 
     Returns:
-        The full prompt with UGC schema instructions appended.
+        The full prompt with UGC schema instructions appended, plus a
+        reminder pointing back to the CLIENT CONTEXT block at the top of
+        the base prompt so the model doesn't lose the per-client signal
+        when reading the schema instructions at the end.
     """
     return f"""{base_prompt}
 
 {UGC_OUTPUT_SCHEMA_INSTRUCTION}
 
 The metadata.platform field MUST be set to "{target_platform}".
+
+IMPORTANT: The CLIENT CONTEXT (BRAND_BIBLE, VOICE_FINGERPRINT, LEARNED_OVERRIDES,
+WINNING_UGC_EXAMPLES and ANTI_SAMPLES) appears at the top of this prompt.
+Use them to override the defaults in this schema while staying within the hard
+limits (9-word hook, 5-word overlays, etc.).
+The final bundle must sound like THIS specific founder, not generic UGC content.
 """

@@ -1587,6 +1587,100 @@ export const compassDecisions = pgTable('compass_decisions', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
+// ===== Adaptive Voice Engine =====
+// PR Sprint 7.16 — Helm Adaptive Voice Engine MVP Phase 1.
+//
+// Faithful port of the Python data model in
+// Helm SEO/helm-adaptive-voice-engine/. Architectural decisions
+// preserved verbatim:
+//
+//   - Per-platform isolation: what works on TikTok doesn't bleed
+//     into LinkedIn. Encoded by storing `platforms` as a map<
+//     Platform, PlatformSlots> inside a single JSONB column —
+//     same shape as the Pydantic ClientContext.platforms field.
+//
+//   - One context row per project (NOT per user). The brief said
+//     "stored per client_id" — in Helm's data model the closest
+//     equivalent is the project. A founder with multiple projects
+//     gets isolated learning per project, which matches the
+//     existing Brand Bible + Voice Fingerprint scoping.
+//
+//   - JSONB-heavy schema. Everything except the audit log is a
+//     JSONB blob. The Pydantic model does `.model_dump_json()` /
+//     `.model_validate_json()` for persistence; mirroring that in
+//     Postgres keeps the port 1:1 and removes a class of migrate-
+//     when-the-model-grows problems. Audit log is normalized
+//     because operators query it (the only read pattern the
+//     brief calls out explicitly).
+//
+//   - Reserved slots present even when unused in MVP. The brief
+//     is explicit: cross_platform_voice, anti_samples,
+//     performance_proxies are stored from day one so adding
+//     Phase 1.5 features doesn't require migration.
+export const clientContexts = pgTable(
+  'client_contexts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    // One context per project, enforced by the unique constraint.
+    // If a founder ever switches a project to a different
+    // brand-bible direction, rollback_override + a manual reset
+    // is the path; a fresh project is the cleaner reset.
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    // BrandBible mirror — denormalized from projects.brandContext
+    // at first-context-creation time, then maintained alongside
+    // the platform-specific slots. This is the field the prompt
+    // builder formats into the dynamic context block.
+    brandBible: jsonb('brand_bible').notNull(),
+    // Per-platform PlatformSlots map. Shape:
+    //   { instagram: { voiceFingerprint: [...], winningPatterns: [...],
+    //                  losingPatterns: [...], learnedOverrides: {...},
+    //                  performanceProxies: [...], postCount: 0,
+    //                  lastUpdatePostIndex: {...} }, ... }
+    platforms: jsonb('platforms').default({}).notNull(),
+    // Reserved for Phase 1.5+ (cross-platform voice fingerprint).
+    crossPlatformVoice: jsonb('cross_platform_voice').default([]).notNull(),
+    // Anti-samples tagged per dimension. dim → WeightedPost[].
+    antiSamples: jsonb('anti_samples').default({}).notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    uniqueProject: unique('client_contexts_project_uk').on(t.projectId),
+  }),
+);
+
+// Audit log for the Adaptive Voice Engine. Normalized (not JSONB
+// blob) because the only read pattern the brief specifies is
+// operator debugging: filter by (action, dimension, time range).
+// That query is awful against JSONB and fine against a real
+// table with indexes.
+export const voiceEngineAuditLog = pgTable('voice_engine_audit_log', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  clientContextId: uuid('client_context_id')
+    .notNull()
+    .references(() => clientContexts.id, { onDelete: 'cascade' }),
+  // userId denormalized so an operator can grep by user without
+  // joining through client_contexts. Same defense-in-depth
+  // pattern used on most other Helm tables.
+  userId: uuid('user_id').notNull(),
+  // 'override_updated' | 'override_rolled_back' |
+  // 'tiered_feedback_recorded' | 'context_initialized'
+  action: text('action').notNull(),
+  platform: text('platform'),
+  dimension: text('dimension'),
+  previousValue: jsonb('previous_value'),
+  newValue: jsonb('new_value'),
+  triggeringSignals: jsonb('triggering_signals'),
+  operatorId: text('operator_id'),
+  notes: text('notes'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
 // ===== Chat Messages =====
 // PR Sprint 7.15 — native Helm AI chat widget.
 //
@@ -1650,3 +1744,5 @@ export type BrandAnalysisJob = typeof brandAnalysisJobs.$inferSelect;
 export type OnboardingProgressRow = typeof onboardingProgress.$inferSelect;
 export type HeygenJob = typeof heygenJobs.$inferSelect;
 export type ChatMessage = typeof chatMessages.$inferSelect;
+export type ClientContextRow = typeof clientContexts.$inferSelect;
+export type VoiceEngineAuditEntry = typeof voiceEngineAuditLog.$inferSelect;

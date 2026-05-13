@@ -13,6 +13,15 @@ In production, keep these split into separate files:
 This consolidated file is the same code, organized into sections, for
 end-to-end review without jumping between files.
 
+Changes vs v1.0:
+  - Hook word count cap: 10 → 9 (stricter, matches production UGC research)
+  - HookSection.text max_length: 200 → 180 (realistic for 9-word hook)
+  - Spoken cadence rules in prompt: explicit contraction examples
+  - "Founder over coffee" framing for voice
+  - "Return ONLY this JSON" hardened
+  - 3 new weak openers in validator
+  - Reminder line in append_ugc_schema_to_prompt pointing back to CLIENT CONTEXT
+
 Sections:
   1. Schema             enums, sections, UGCBundle aggregate
   2. Prompt             UGC_OUTPUT_SCHEMA_INSTRUCTION + helper
@@ -22,7 +31,7 @@ Sections:
 Dependencies:
   - pydantic >= 2.0
 
-Version: 1.0 (MVP Phase 1)
+Version: 1.1 (MVP Phase 1, hook tightened + cadence rules expanded)
 """
 
 from __future__ import annotations
@@ -34,14 +43,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # ============================================================================
 # SECTION 1: SCHEMA (originally ugc_schema.py)
-# ============================================================================
-#
-# JSON schema for the UGC (scripted video) output bundle.
-# The model returns a single structured object containing everything
-# downstream consumers need: hook + body + cta + overlays + caption +
-# hashtags + metadata.
-#
-# Replaces the previous flat {opening, body, closing} JSON.
 # ============================================================================
 
 
@@ -68,7 +69,7 @@ class HookSection(BaseModel):
     """
     model_config = ConfigDict(extra="forbid")
 
-    text: str = Field(..., min_length=10, max_length=200)
+    text: str = Field(..., min_length=10, max_length=180)
     duration_seconds: float = Field(..., ge=1.0, le=4.0)
     delivery: DeliveryStyle
 
@@ -76,10 +77,10 @@ class HookSection(BaseModel):
     @classmethod
     def hook_word_count(cls, v: str) -> str:
         word_count = len(v.split())
-        if word_count > 10:
+        if word_count > 9:
             raise ValueError(
-                f"Hook is {word_count} words; spec max is 10. Trim it. "
-                f"Hooks longer than 10 spoken words are an anti-pattern."
+                f"Hook has {word_count} words. Maximum is 9 spoken words. "
+                f"Current hook: '{v}'. Trim it aggressively."
             )
         return v
 
@@ -218,32 +219,18 @@ class UGCBundle(BaseModel):
 # ============================================================================
 # SECTION 2: PROMPT (originally ugc_prompt.py)
 # ============================================================================
-#
-# UGC-specific prompt instructions appended to the base generation prompt.
-# Lives separately from PLATFORM_TONE_INSTRUCTIONS because the output
-# STRUCTURE is content-type-specific (the bundle), while the platform tone
-# is platform-specific.
-#
-# Integration:
-#   In prompt_builder.py, after composing the base prompt, detect content_type
-#   and append the schema instruction if UGC:
-#
-#       base_prompt = ...
-#       if content_type == ContentType.UGC:
-#           base_prompt = append_ugc_schema_to_prompt(base_prompt, platform.value)
-# ============================================================================
 
 
 UGC_OUTPUT_SCHEMA_INSTRUCTION = """
 OUTPUT FORMAT (mandatory)
 =========================
 
-Return a single JSON object matching this exact schema. No commentary, no
-markdown fences, no preamble. Just the raw JSON.
+Return ONLY this JSON. No commentary, no markdown fences, no preamble, no
+thinking tags. One JSON object, nothing else.
 
 {
   "hook": {
-    "text": "<5 to 10 spoken words, the attention grab>",
+    "text": "<5 to 9 spoken words, the attention grab>",
     "duration_seconds": <1.0 to 4.0>,
     "delivery": "<one of: punchy, confessional, emphatic>"
   },
@@ -277,6 +264,30 @@ markdown fences, no preamble. Just the raw JSON.
     "passes_swipe_test": true
   }
 }
+
+CRITICAL SPOKEN CADENCE RULES (apply to hook, body, and cta)
+============================================================
+
+  - Heavy contractions: I'm, you're, doesn't, can't, gonna, wanna, that's,
+    here's, what's, it's. Written-out forms sound robotic on camera.
+  - Sentence fragments are encouraged. People talk in fragments.
+  - One clear idea per sentence. No compound clauses stitched with "and".
+  - Talk like you're explaining it to another founder over coffee, not like
+    you're presenting in a conference room.
+  - Never use written-text language ("Today I want to discuss...",
+    "In this video...", "Let's talk about...").
+  - Use "I" and "you" heavily. Never "we" (company voice) or "one" (impersonal).
+
+HOOK RULES (most important part of the entire video)
+====================================================
+
+  - 5 to 9 spoken words maximum. No exceptions.
+  - Must pass the 0.5-second swipe test: would a stranger scrolling at 2am
+    keep watching past the first half-second of this video? Set
+    metadata.passes_swipe_test honestly based on this check.
+  - Best patterns: specific confession ("I used to..."), surprising number
+    ("I spent 156 hours..."), pattern interrupt ("Stop using X"), contrarian
+    setup ("Everyone's wrong about Y").
 
 DELIVERY STYLE OPTIONS
 ======================
@@ -323,8 +334,8 @@ HASHTAG RULES
 VALIDATION CHECKLIST (run before returning)
 ============================================
 
-  [ ] hook.text is 5 to 10 spoken words
-  [ ] hook passes the 0.5-second swipe test (would a stranger keep watching?)
+  [ ] hook.text is 5 to 9 spoken words
+  [ ] hook passes the 0.5-second swipe test (set passes_swipe_test honestly)
   [ ] body has 1 to 5 beats, each delivering one idea
   [ ] body beats numbered sequentially starting at 1
   [ ] cta is conversational, not a sales pitch
@@ -334,16 +345,15 @@ VALIDATION CHECKLIST (run before returning)
   [ ] caption extends the video instead of summarizing it
   [ ] caption length 20 to 500 chars
   [ ] 3 to 5 hashtags, mix of broad and niche, no # prefix
-  [ ] script uses contractions and sentence fragments (spoken cadence)
+  [ ] script uses heavy contractions and sentence fragments
   [ ] first-person voice throughout (I/you, never we/one)
   [ ] no anti-patterns from PLATFORM_TONE triggered
-  [ ] metadata.passes_swipe_test set honestly
   [ ] total duration (hook + body + cta) lands between 15 and 60 seconds
 
-If any validation check fails, regenerate before returning. The bundle will
-be rejected automatically by the schema validator if any field violates the
-JSON schema (e.g., overlay text > 5 words, body has 6+ beats, hook > 10 words).
-You will get the failure reason and be asked to retry.
+If any check fails, regenerate the entire bundle before returning. The bundle
+will be rejected automatically by the schema validator if any field violates
+the JSON schema (e.g., overlay text > 5 words, body has 6+ beats, hook > 9
+words). You will get the failure reason and be asked to retry.
 """
 
 
@@ -361,33 +371,27 @@ def append_ugc_schema_to_prompt(base_prompt: str, target_platform: str) -> str:
                          else.
 
     Returns:
-        The full prompt with UGC schema instructions appended.
+        The full prompt with UGC schema instructions appended, plus a
+        reminder pointing back to the CLIENT CONTEXT block at the top of
+        the base prompt so the model doesn't lose the per-client signal
+        when reading the schema instructions at the end.
     """
     return f"""{base_prompt}
 
 {UGC_OUTPUT_SCHEMA_INSTRUCTION}
 
 The metadata.platform field MUST be set to "{target_platform}".
+
+IMPORTANT: The CLIENT CONTEXT (BRAND_BIBLE, VOICE_FINGERPRINT, LEARNED_OVERRIDES,
+WINNING_UGC_EXAMPLES and ANTI_SAMPLES) appears at the top of this prompt.
+Use them to override the defaults in this schema while staying within the hard
+limits (9-word hook, 5-word overlays, etc.).
+The final bundle must sound like THIS specific founder, not generic UGC content.
 """
 
 
 # ============================================================================
 # SECTION 3: VALIDATOR (originally ugc_validator.py)
-# ============================================================================
-#
-# Server-side soft validation of UGC bundles after generation.
-#
-# Pydantic enforces the JSON schema (field types, lengths, ranges, sequential
-# beat numbering). This section catches the rules that depend on cross-field
-# relationships, platform-specific norms, or qualitative checks Pydantic alone
-# can't express.
-#
-# Usage:
-#     bundle = UGCBundle.model_validate_json(model_output)  # Pydantic schema check
-#     failures = validate_ugc_bundle(bundle)                # Soft checks
-#     if failures:
-#         # Send failures back to the model for regeneration
-#         ...
 # ============================================================================
 
 
@@ -502,6 +506,8 @@ def _check_hook_quality(bundle: UGCBundle) -> list[str]:
         "today i", "hey everyone", "what's up", "let me tell you",
         "i want to talk about", "i'm going to", "here's a thing",
         "so basically", "in this video", "guys", "you guys",
+        "today we're going to", "let's talk about", "quick tip",
+        "pro tip", "fun fact", "did you know", "the truth is",
     )
     hook_lower = bundle.hook.text.lower().strip()
     for weak in weak_openers:
@@ -532,17 +538,6 @@ def _check_swipe_test_self_report(bundle: UGCBundle) -> list[str]:
 # ============================================================================
 # SECTION 4: EXTRACTOR (originally ugc_extractor.py)
 # ============================================================================
-#
-# Extract specific artifacts from a UGCBundle for downstream consumers:
-#   - HeyGen / TTS engines need the spoken script as flat text
-#   - Post-production tools need overlay metadata for the video timeline
-#   - Social schedulers need caption + hashtags formatted correctly
-#   - Storyboard/QA views need a beat-by-beat breakdown with timing
-#
-# Replaces the original extractScriptText() with a richer set of extractors.
-# The HeyGen-compatible flat string is still available via
-# extract_script_for_heygen() so the migration is one-line.
-# ============================================================================
 
 
 def extract_script_for_heygen(bundle: UGCBundle) -> str:
@@ -558,21 +553,7 @@ def extract_script_for_heygen(bundle: UGCBundle) -> str:
 
 
 def extract_overlay_track(bundle: UGCBundle) -> list[dict]:
-    """Return overlay timing data formatted for video editor import.
-
-    Each entry has the text, the timestamp to appear, and the duration. Video
-    editors (CapCut, Premiere, custom pipelines) can use this to auto-place
-    text overlays on the timeline at the right moments.
-
-    Returns:
-        List of dicts shaped like:
-          {
-            "text": "BUFFER",
-            "start_seconds": 1.5,
-            "end_seconds": 3.5,
-            "duration_seconds": 2.0
-          }
-    """
+    """Return overlay timing data formatted for video editor import."""
     return [
         {
             "text": o.text,
@@ -585,20 +566,7 @@ def extract_overlay_track(bundle: UGCBundle) -> list[dict]:
 
 
 def extract_caption_for_post(bundle: UGCBundle, include_hashtags: bool = True) -> str:
-    """Format the caption for social media post upload.
-
-    Hashtags are stored without the # prefix in the bundle. This extractor
-    adds the # back when include_hashtags=True, so consumers don't have to.
-
-    Args:
-        bundle:           the UGC bundle
-        include_hashtags: whether to append the hashtag block. Default True.
-                          Set False for platforms that handle hashtags via
-                          a separate field (e.g., Instagram first-comment strategy).
-
-    Returns:
-        Caption string ready to paste into the social platform's compose field.
-    """
+    """Format the caption for social media post upload."""
     if not include_hashtags or not bundle.hashtags:
         return bundle.caption
 
@@ -607,32 +575,14 @@ def extract_caption_for_post(bundle: UGCBundle, include_hashtags: bool = True) -
 
 
 def extract_hashtag_list(bundle: UGCBundle, with_prefix: bool = True) -> list[str]:
-    """Return hashtags as a list, optionally with the # prefix added back.
-
-    Useful for platforms that take hashtags via a separate API field.
-    """
+    """Return hashtags as a list, optionally with the # prefix added back."""
     if with_prefix:
         return [f"#{tag}" for tag in bundle.hashtags]
     return list(bundle.hashtags)
 
 
 def extract_beat_breakdown(bundle: UGCBundle) -> list[dict]:
-    """Return a beat-by-beat breakdown including running timing.
-
-    Useful for storyboarding views, manual QA, and post-production planning
-    where you need to see exactly when each section starts and ends.
-
-    Returns:
-        List of dicts shaped like:
-          {
-            "section": "hook" | "body_beat_1" | "body_beat_2" | ... | "cta",
-            "start_seconds": 0.0,
-            "end_seconds": 3.0,
-            "duration_seconds": 3.0,
-            "text": "...",
-            "delivery": "punchy"
-          }
-    """
+    """Return a beat-by-beat breakdown including running timing."""
     breakdown: list[dict] = []
     cursor = 0.0
 
@@ -670,11 +620,7 @@ def extract_beat_breakdown(bundle: UGCBundle) -> list[dict]:
 
 
 def extract_full_export(bundle: UGCBundle) -> dict:
-    """Return everything: script, overlays, caption, hashtags, beat breakdown.
-
-    Useful for debugging, archiving, or when you want a single payload to
-    pass to a downstream service that handles multiple consumers.
-    """
+    """Return everything: script, overlays, caption, hashtags, beat breakdown."""
     return {
         "script": extract_script_for_heygen(bundle),
         "overlays": extract_overlay_track(bundle),
@@ -689,5 +635,5 @@ def extract_full_export(bundle: UGCBundle) -> dict:
 
 
 # ============================================================================
-# End of consolidated UGC module
+# End of consolidated UGC module v1.1
 # ============================================================================

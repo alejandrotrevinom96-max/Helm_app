@@ -62,7 +62,7 @@ class HookSection(BaseModel):
     """
     model_config = ConfigDict(extra="forbid")
 
-    text: str = Field(..., min_length=10, max_length=200)
+    text: str = Field(..., min_length=10, max_length=180)
     duration_seconds: float = Field(..., ge=1.0, le=4.0)
     delivery: DeliveryStyle
 
@@ -70,10 +70,10 @@ class HookSection(BaseModel):
     @classmethod
     def hook_word_count(cls, v: str) -> str:
         word_count = len(v.split())
-        if word_count > 10:
+        if word_count > 9:
             raise ValueError(
-                f"Hook is {word_count} words; spec max is 10. Trim it. "
-                f"Hooks longer than 10 spoken words are an anti-pattern."
+                f"Hook has {word_count} words. Maximum is 9 spoken words. "
+                f"Current hook: '{v}'. Trim it aggressively."
             )
         return v
 

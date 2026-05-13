@@ -61,6 +61,24 @@ import { computeConsistencyScore } from '@/lib/ai/consistency-score';
 // Now the same dual-learning blocks flow into the cached system
 // prompt here so the new structured generator honors them too.
 import { loadFeedbackMemoryBlock } from '@/lib/ai/feedback-memory';
+// PR Sprint 7.16 — Adaptive Voice Engine. Per-project learning
+// state (ClientContext) feeds the dynamic CLIENT CONTEXT block
+// of the user prompt + the model self-reports applied overrides
+// via <override_log> tags we parse server-side for the audit
+// log. Sits ON TOP of platform-tone + feedback-memory — doesn't
+// replace them.
+import {
+  loadClientContext,
+  logAudit,
+} from '@/lib/voice-engine/loader';
+import {
+  buildAdaptivePrompt,
+  parseOverrideLog,
+} from '@/lib/voice-engine/prompt-builder';
+import type {
+  ContentType as VoiceEngineContentType,
+  Platform as VoiceEnginePlatform,
+} from '@/lib/voice-engine/types';
 
 export const maxDuration = 60;
 
@@ -381,6 +399,27 @@ ${LANGUAGE_INSTRUCTION_AUDIENCE}`;
   const platformIsKnown =
     platformLower in PLATFORM_CONTENT_COMPATIBILITY;
 
+  // PR Sprint 7.16 — load Adaptive Voice Engine context once
+  // before the loop. The context is fixed for the whole batch
+  // (per-project), so loading it inside the loop would be
+  // redundant. Best-effort: a failure leaves the context
+  // undefined and we fall through to the non-adaptive prompt
+  // path (Sprint 7.13's buildGenerationPrompt).
+  let voiceEngineCtx: Awaited<
+    ReturnType<typeof loadClientContext>
+  > | null = null;
+  try {
+    voiceEngineCtx = await loadClientContext({
+      userId: user.id,
+      projectId,
+    });
+  } catch (err) {
+    console.warn(
+      '[generate-structured] voice engine context load failed:',
+      err instanceof Error ? err.message : err,
+    );
+  }
+
   for (const template of templates) {
     // PR Sprint 7.13 — validate platform + content_type
     // compatibility BEFORE the Opus call. If the combination is
@@ -426,22 +465,33 @@ ${LANGUAGE_INSTRUCTION_AUDIENCE}`;
     // Opus knows the exact JSON shape to emit. The
     // structureSchema lives in content_types (DB-driven) — that
     // hasn't moved.
+    // PR Sprint 7.16 — when the Voice Engine context is loaded,
+    // use the adaptive prompt (CLIENT CONTEXT block + override
+    // self-report contract). Otherwise fall back to the
+    // Sprint 7.13 platform-tone prompt — same scaffolding minus
+    // the per-client learning layer.
     const stackedPrompt =
       platformIsKnown && taxonomy
-        ? buildGenerationPrompt({
-            platform: platformLower,
-            contentType: taxonomy,
-            brandBible: brand,
-            voiceFingerprint: voice,
-            painPoint: userPrompt,
-            // PR Sprint 7.13 v2 — production default: examples ON.
-            // The CONTENT_TYPE_EXAMPLES block adds ~400-600 tokens
-            // to the user message but measurably improves output
-            // quality (LLMs pattern-match on the good/bad pairs).
-            // Flip to false only when iterating in dev where you
-            // want faster, cheaper loops with a known quality hit.
-            includeExamples: true,
-          })
+        ? voiceEngineCtx
+          ? buildAdaptivePrompt({
+              platform: platformLower as VoiceEnginePlatform,
+              contentType: taxonomy as VoiceEngineContentType,
+              clientContext: voiceEngineCtx,
+              painPoint: userPrompt,
+              includeExamples: true,
+            })
+          : buildGenerationPrompt({
+              platform: platformLower,
+              contentType: taxonomy,
+              brandBible: brand,
+              voiceFingerprint: voice,
+              painPoint: userPrompt,
+              // PR Sprint 7.13 v2 — production default: examples ON.
+              // The CONTENT_TYPE_EXAMPLES block adds ~400-600 tokens
+              // to the user message but measurably improves output
+              // quality (LLMs pattern-match on the good/bad pairs).
+              includeExamples: true,
+            })
         : null;
 
     const userMessage = stackedPrompt
@@ -510,7 +560,35 @@ Return STRICT JSON matching the schema. No markdown fences, no prose outside JSO
       } else {
         const textBlock = response.content.find((b) => b.type === 'text');
         const raw = textBlock?.type === 'text' ? textBlock.text.trim() : '';
-        const cleaned = raw
+
+        // PR Sprint 7.16 — strip + capture the model's
+        // <override_log> self-report BEFORE the JSON parse. The
+        // adaptive prompt asks Opus to append the tag block when
+        // it actually applied any learned override; that block is
+        // never part of the structured payload but our parser
+        // would choke if it leaked into the JSON. parseOverrideLog
+        // returns the clean output + the records; we persist the
+        // records to the audit log so operators can trace which
+        // overrides drove which drafts.
+        const { cleanDraft, records } = parseOverrideLog(raw);
+        if (records.length > 0 && voiceEngineCtx) {
+          // Fire-and-forget audit writes (one row per override
+          // applied). A failure here is non-fatal — the draft
+          // still ships.
+          for (const r of records) {
+            void logAudit({
+              userId: user.id,
+              projectId,
+              action: 'model_applied_override',
+              platform: platformLower as VoiceEnginePlatform,
+              notes: `dimension=${r.dimension} applied=${r.applied} default=${r.default} confidence=${r.confidence}`,
+            }).catch(() => {
+              /* non-fatal */
+            });
+          }
+        }
+
+        const cleaned = cleanDraft
           .replace(/^```(?:json)?\s*/i, '')
           .replace(/\s*```$/i, '')
           .trim();
