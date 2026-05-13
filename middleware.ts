@@ -76,8 +76,13 @@ function buildCsp(nonce: string): string {
     // gain.
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' data: https://fonts.gstatic.com",
-    "img-src 'self' blob: data: https://*.supabase.co https://*.fal.media https://fal.media https://*.fbcdn.net https://*.cdninstagram.com https://scontent-*.cdninstagram.com https://*.googleusercontent.com https://avatars.githubusercontent.com https://lh3.googleusercontent.com",
-    "media-src 'self' blob: https://*.supabase.co",
+    // PR Sprint 7.13 hotfix — added https://*.heygen.ai for the
+    // avatar selector preview images. HeyGen serves stock avatar
+    // previews from files2.heygen.ai / resource2.heygen.ai under
+    // the same root domain. *.tiktokcdn.com lets us render the
+    // founder's TikTok avatar in the Integrations card.
+    "img-src 'self' blob: data: https://*.supabase.co https://*.fal.media https://fal.media https://*.fbcdn.net https://*.cdninstagram.com https://scontent-*.cdninstagram.com https://*.googleusercontent.com https://avatars.githubusercontent.com https://lh3.googleusercontent.com https://*.heygen.ai https://*.tiktokcdn.com",
+    "media-src 'self' blob: https://*.supabase.co https://*.heygen.ai",
     "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.anthropic.com https://*.vercel.com https://vitals.vercel-insights.com https://va.vercel-scripts.com",
     "frame-ancestors 'none'",
     "form-action 'self'",

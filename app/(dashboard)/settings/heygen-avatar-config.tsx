@@ -49,6 +49,13 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
   const [avatars, setAvatars] = useState<AvatarOption[]>([]);
   const [avatarsLoading, setAvatarsLoading] = useState(false);
   const [avatarsError, setAvatarsError] = useState<string | null>(null);
+  // PR Sprint 7.13 hotfix — gender filter on the avatar grid.
+  // 'all' is the default; the buttons toggle to 'male' or
+  // 'female' which filters the rendered grid client-side
+  // (HeyGen's /v2/avatars already returns the full list).
+  const [genderFilter, setGenderFilter] = useState<
+    'all' | 'male' | 'female'
+  >('all');
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -227,9 +234,29 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
 
               {settings.avatarType === 'stock' && (
                 <>
+                  {/* PR Sprint 7.13 hotfix — visual grid replaces
+                      the previous text-only <select>. Each card
+                      shows the HeyGen preview image at 1:1,
+                      gender badge top-right, PREMIUM ribbon when
+                      applicable, and the selected card lights up
+                      with the accent border. Persistence is
+                      unchanged: clicking a card mutates
+                      settings.avatarId via setSettings; the "Save
+                      avatar settings" button still PATCHes the
+                      project (so the chosen avatar survives
+                      between sessions exactly like before). */}
                   {avatarsLoading && (
-                    <div className="text-xs text-text-3">
-                      Loading avatars…
+                    // Skeleton: 8 placeholder squares while the
+                    // upstream /avatars list resolves. Cheaper
+                    // than spinning a spinner — the founder sees
+                    // the grid shape immediately.
+                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
+                      {Array.from({ length: 8 }).map((_, i) => (
+                        <div
+                          key={i}
+                          className="aspect-square rounded-lg bg-bg-elev animate-pulse"
+                        />
+                      ))}
                     </div>
                   )}
                   {avatarsError && (
@@ -239,27 +266,148 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
                   )}
                   {!avatarsLoading &&
                     !avatarsError &&
-                    avatars.length > 0 && (
-                      <select
-                        value={settings.avatarId ?? ''}
-                        onChange={(e) =>
-                          setSettings((prev) => ({
-                            ...prev,
-                            avatarId: e.target.value || null,
-                          }))
-                        }
-                        className="w-full px-3 py-2 bg-bg border border-border rounded-lg text-sm outline-none focus:border-accent"
-                      >
-                        <option value="">— Pick an avatar —</option>
-                        {avatars.map((a) => (
-                          <option key={a.avatarId} value={a.avatarId}>
-                            {a.name}
-                            {a.gender ? ` · ${a.gender}` : ''}
-                            {a.premium ? ' · premium' : ''}
-                          </option>
-                        ))}
-                      </select>
-                    )}
+                    avatars.length > 0 &&
+                    (() => {
+                      // Client-side filter. We don't refetch when
+                      // the gender toggle changes — the upstream
+                      // call is cached for 10 min anyway and the
+                      // founder usually flips between filters a
+                      // few times before settling.
+                      const filtered = avatars.filter((a) => {
+                        if (genderFilter === 'all') return true;
+                        const g = (a.gender ?? '').toLowerCase();
+                        return g.startsWith(genderFilter[0]);
+                      });
+                      return (
+                        <>
+                          <div className="flex flex-wrap gap-1 mb-3">
+                            {(
+                              [
+                                ['all', 'All'],
+                                ['male', 'Male'],
+                                ['female', 'Female'],
+                              ] as const
+                            ).map(([key, label]) => (
+                              <button
+                                key={key}
+                                type="button"
+                                onClick={() => setGenderFilter(key)}
+                                className={`px-2.5 py-1 rounded text-[10px] font-mono uppercase tracking-[0.1em] transition-colors ${
+                                  genderFilter === key
+                                    ? 'bg-accent text-white'
+                                    : 'bg-bg border border-border text-text-2 hover:border-border-bright'
+                                }`}
+                              >
+                                {label}
+                              </button>
+                            ))}
+                            <span className="ml-auto self-center text-[10px] font-mono text-text-3">
+                              {filtered.length} of {avatars.length}
+                            </span>
+                          </div>
+                          {/* Scrollable grid — HeyGen's catalog
+                              can run 30-60+ avatars; cap visible
+                              height so the Settings page stays
+                              navigable. */}
+                          <div
+                            className="grid grid-cols-3 sm:grid-cols-4 gap-3 max-h-[420px] overflow-y-auto pr-1"
+                            // The scroll container's pr-1 leaves
+                            // room for the scrollbar so the right
+                            // edge of selected cards' borders
+                            // doesn't get clipped on Win/Linux
+                            // (where scrollbars take physical
+                            // width).
+                          >
+                            {filtered.map((a) => {
+                              const selected =
+                                a.avatarId === settings.avatarId;
+                              const genderLabel = a.gender
+                                ? a.gender
+                                    .charAt(0)
+                                    .toUpperCase()
+                                : null;
+                              return (
+                                <button
+                                  key={a.avatarId}
+                                  type="button"
+                                  onClick={() =>
+                                    setSettings((prev) => ({
+                                      ...prev,
+                                      avatarId: a.avatarId,
+                                    }))
+                                  }
+                                  className={`group relative aspect-square rounded-lg overflow-hidden border-2 transition-all text-left ${
+                                    selected
+                                      ? 'border-accent ring-2 ring-accent/30'
+                                      : 'border-border hover:border-border-bright'
+                                  }`}
+                                  aria-pressed={selected}
+                                >
+                                  {a.previewImageUrl ? (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img
+                                      src={a.previewImageUrl}
+                                      alt={a.name}
+                                      className="w-full h-full object-cover bg-bg-elev"
+                                      loading="lazy"
+                                    />
+                                  ) : (
+                                    <div className="w-full h-full flex items-center justify-center bg-bg-elev text-text-3 text-2xl">
+                                      ◯
+                                    </div>
+                                  )}
+
+                                  {/* Gender badge (top-right) */}
+                                  {genderLabel && (
+                                    <span className="absolute top-1.5 right-1.5 text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-bg/90 text-text-1 backdrop-blur-sm">
+                                      {genderLabel}
+                                    </span>
+                                  )}
+
+                                  {/* Premium badge (top-left) */}
+                                  {a.premium && (
+                                    <span className="absolute top-1.5 left-1.5 text-[9px] font-mono uppercase tracking-[0.08em] font-bold px-1.5 py-0.5 rounded bg-accent text-white">
+                                      Premium
+                                    </span>
+                                  )}
+
+                                  {/* Name (bottom gradient) */}
+                                  <div className="absolute bottom-0 inset-x-0 p-2 bg-gradient-to-t from-black/80 via-black/40 to-transparent">
+                                    <div className="text-[11px] font-medium text-white truncate">
+                                      {a.name}
+                                    </div>
+                                  </div>
+
+                                  {/* Selected checkmark */}
+                                  {selected && (
+                                    <div className="absolute inset-0 flex items-center justify-center bg-accent/15 pointer-events-none">
+                                      <div className="w-8 h-8 rounded-full bg-accent text-white flex items-center justify-center text-base">
+                                        ✓
+                                      </div>
+                                    </div>
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          {filtered.length === 0 && (
+                            <div className="text-xs text-text-3 mt-2">
+                              No avatars match this filter.
+                            </div>
+                          )}
+                          {settings.avatarId && (
+                            <div className="mt-3 text-[11px] font-mono text-text-3">
+                              Selected:{' '}
+                              <span className="text-text-1">
+                                {avatars.find(
+                                  (a) => a.avatarId === settings.avatarId,
+                                )?.name ?? settings.avatarId}
+                              </span>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
                 </>
               )}
             </div>
