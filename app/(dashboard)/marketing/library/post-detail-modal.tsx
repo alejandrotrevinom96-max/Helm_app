@@ -134,6 +134,17 @@ export function PostDetailModal({
   const [cloning, setCloning] = useState(false);
   const [movingToDraft, setMovingToDraft] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // PR Sprint 7.17 — inline edit on drafts. The Voice Engine
+  // needs (original, edited) pairs to learn from; "Edit & Save"
+  // exposes that signal cleanly. State is gated on
+  // isDraft below so the textarea never renders for scheduled
+  // / published rows (those go through the publisher's lane,
+  // not the engine's).
+  const [editing, setEditing] = useState(false);
+  const [editDraft, setEditDraft] = useState(post.content);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [editSavedAt, setEditSavedAt] = useState<number | null>(null);
   // PR #29 — manual retry for posts whose auto-publish failed. We
   // don't auto-poll the publishStatus because the Library refetches
   // every time the user opens this modal anyway.
@@ -443,6 +454,82 @@ export function PostDetailModal({
       setImageError(e instanceof Error ? e.message : 'Network error');
     } finally {
       setImageGenerating(false);
+    }
+  };
+
+  // PR Sprint 7.17 — Save an edited draft. Two side effects:
+  //   1. PATCH the draft so the new content is persisted +
+  //      surfaced in Library / Calendar / Generate-page rehydrate.
+  //   2. POST /api/voice-engine/record-edit so the heuristic
+  //      classifier turns (original, edited) into Signals that
+  //      feed processSignals → learned_overrides.
+  // We pass feedbackTier='minor_edits' (weight 0.7) because the
+  // founder still considered the draft worth keeping; "discard"
+  // is the Delete button and "regenerate" is a separate flow.
+  const handleSaveEdit = async () => {
+    if (editSaving) return;
+    const original = post.content;
+    const edited = editDraft.trim();
+    if (edited.length === 0) {
+      setEditError('Content cannot be empty');
+      return;
+    }
+    if (edited === original) {
+      // No change — close the editor without firing anything.
+      setEditing(false);
+      return;
+    }
+    setEditSaving(true);
+    setEditError(null);
+    try {
+      const patchRes = await fetch(
+        `/api/marketing/library/${post.id}?source=${post.source}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: edited }),
+        },
+      );
+      const patchData = (await patchRes.json().catch(() => ({}))) as {
+        post?: { content?: string };
+        previousContent?: string;
+        error?: string;
+      };
+      if (!patchRes.ok) {
+        setEditError(patchData.error ?? 'Save failed');
+        return;
+      }
+
+      // Optimistic local update so the modal reflects the new
+      // content without the parent refetch.
+      onUpdate({ ...post, content: edited });
+      setEditSavedAt(Date.now());
+      setEditing(false);
+
+      // Fire the Voice Engine. The classifier needs a content_type
+      // it understands; drafts always carry one when produced by
+      // the structured pipeline. Best-effort: a hook failure
+      // never blocks the save.
+      void fetch('/api/voice-engine/record-edit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId: post.projectId,
+          platform: post.platform,
+          contentType: post.contentType ?? 'text',
+          postId: post.id,
+          original: patchData.previousContent ?? original,
+          edited,
+          feedbackTier: 'minor_edits',
+        }),
+      }).catch(() => {
+        /* engine failure is operator-visible via the audit log;
+           don't surface to the founder */
+      });
+    } catch (e) {
+      setEditError(e instanceof Error ? e.message : 'Network error');
+    } finally {
+      setEditSaving(false);
     }
   };
 
@@ -792,11 +879,79 @@ export function PostDetailModal({
           </button>
         </div>
 
-        {/* Content */}
-        <div className="mb-4 p-4 bg-bg border border-border rounded-lg">
-          <p className="text-sm text-text-1 whitespace-pre-wrap">
-            {post.content}
-          </p>
+        {/* Content
+            PR Sprint 7.17 — drafts (source='generated') can now
+            be edited inline. The "Edit" toggle swaps the
+            read-only paragraph for a textarea + Save / Cancel.
+            On Save we PATCH the draft AND fire the Voice Engine
+            record-edit hook so the heuristic classifier turns
+            (original, edited) into learning signals. Scheduled
+            / published rows stay read-only here (they go
+            through the publisher's lane, not the engine's). */}
+        <div className="mb-4 p-4 bg-bg border border-border rounded-lg space-y-2">
+          {editing && isDraft ? (
+            <>
+              <textarea
+                value={editDraft}
+                onChange={(e) => setEditDraft(e.target.value)}
+                rows={8}
+                className="w-full px-3 py-2 bg-bg-elev border border-border rounded-md text-sm text-text-1 focus:outline-none focus:border-border-bright resize-y"
+                placeholder="Edit the draft content…"
+              />
+              {editError && (
+                <div className="text-xs text-danger">{editError}</div>
+              )}
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditing(false);
+                    setEditDraft(post.content);
+                    setEditError(null);
+                  }}
+                  disabled={editSaving}
+                  className="px-3 py-1.5 text-xs text-text-2 hover:text-text-1 rounded-md transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveEdit}
+                  disabled={editSaving}
+                  className="px-3 py-1.5 text-xs bg-accent text-white rounded-md hover:opacity-90 transition-opacity disabled:opacity-50"
+                >
+                  {editSaving ? 'Saving…' : 'Save edits'}
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="text-sm text-text-1 whitespace-pre-wrap">
+                {post.content}
+              </p>
+              {isDraft && (
+                <div className="flex items-center justify-between">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditDraft(post.content);
+                      setEditing(true);
+                      setEditError(null);
+                    }}
+                    className="text-xs text-accent hover:underline"
+                  >
+                    ✎ Edit content
+                  </button>
+                  {editSavedAt &&
+                    Date.now() - editSavedAt < 4000 && (
+                      <span className="text-[10px] font-mono text-emerald-500">
+                        Saved ✓
+                      </span>
+                    )}
+                </div>
+              )}
+            </>
+          )}
         </div>
 
         {/* Visual */}

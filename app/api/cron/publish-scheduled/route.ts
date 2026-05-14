@@ -26,6 +26,10 @@ import {
   calculateNextRetry,
   MAX_RETRIES,
 } from '@/lib/meta/publisher';
+// PR Sprint 7.17 — every successful cron publish feeds the
+// Voice Engine via the server-side hook. Fire-and-forget; an
+// engine failure never blocks the cron pass.
+import { recordPublishOnSuccess } from '@/lib/voice-engine/hooks';
 
 export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
@@ -128,6 +132,25 @@ export async function GET(request: Request) {
                 publishNextRetryAt: null,
               })
               .where(eq(scheduledPosts.id, post.id));
+            // PR Sprint 7.17 — feed the Voice Engine. The post
+            // row is already in scope from the outer SELECT, so
+            // no refetch needed. qualityScore defaults to 0.8
+            // for cron-driven publishes (implicit "worked"
+            // without explicit founder feedback). If the
+            // founder later rates the post worked/flopped, the
+            // existing Sprint 7.14 Performance Memory loop
+            // captures that separately.
+            void recordPublishOnSuccess({
+              userId: post.userId,
+              projectId: post.projectId,
+              platform: post.platform,
+              contentType: post.contentType,
+              postId: post.id,
+              text: post.content,
+              qualityScore: 0.8,
+            }).catch(() => {
+              /* already logged in hooks.ts */
+            });
             // PR #30 — separate counter for Stories so the response
             // surfaces "X feed posts + Y stories" instead of one
             // amalgamated number.

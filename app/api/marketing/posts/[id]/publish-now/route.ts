@@ -50,6 +50,11 @@ import {
 } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { publishPost } from '@/lib/meta/publisher';
+// PR Sprint 7.17 — fire the Voice Engine publish hook server-side
+// so every "Post now" feeds the per-project learning state.
+// Direct function call (not HTTP loopback) keeps the path
+// synchronous + cheap.
+import { recordPublishOnSuccess } from '@/lib/voice-engine/hooks';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -291,6 +296,39 @@ async function dispatchPublish(scheduledId: string): Promise<Response> {
       publishNextRetryAt: null,
     })
     .where(eq(scheduledPosts.id, scheduledId));
+
+  // PR Sprint 7.17 — feed the Voice Engine. Refetch the row
+  // (cheap; we just wrote to it) so the hook has every field
+  // it needs without forcing callers of dispatchPublish to
+  // thread them through. Fire-and-forget: an engine failure
+  // never fails the publish itself.
+  const [published] = await db
+    .select({
+      userId: scheduledPosts.userId,
+      projectId: scheduledPosts.projectId,
+      platform: scheduledPosts.platform,
+      contentType: scheduledPosts.contentType,
+      content: scheduledPosts.content,
+    })
+    .from(scheduledPosts)
+    .where(eq(scheduledPosts.id, scheduledId))
+    .limit(1);
+  if (published) {
+    void recordPublishOnSuccess({
+      userId: published.userId,
+      projectId: published.projectId,
+      platform: published.platform,
+      contentType: published.contentType,
+      postId: scheduledId,
+      text: published.content,
+      // "Post now" implies the founder thought it was ready;
+      // weight at 1.0 (publish-as-is) instead of the default
+      // 0.8 quality score the cron path uses.
+      qualityScore: 1.0,
+    }).catch(() => {
+      /* already logged in hooks.ts */
+    });
+  }
 
   return NextResponse.json({
     success: true,

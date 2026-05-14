@@ -67,6 +67,7 @@ export async function PATCH(
     metricsComments,
     metricsShares,
     scheduledFor,
+    content: contentEdit,
   } = body as {
     performanceRating?: unknown;
     performanceNote?: unknown;
@@ -75,19 +76,56 @@ export async function PATCH(
     metricsComments?: unknown;
     metricsShares?: unknown;
     scheduledFor?: unknown;
+    content?: unknown;
   };
 
-  // Drafts (generated_posts) don't have any of these fields — they only
-  // store content + status. PATCH on a draft is a no-op for now; the
-  // user route to "edit a draft" would be regenerate, not PATCH.
+  // PR Sprint 7.17 — DRAFT content edit. The pre-Sprint-7.17
+  // PATCH refused all draft writes with "Use clone, schedule,
+  // or delete" because the legacy assumption was that drafts
+  // are read-only artifacts. The Adaptive Voice Engine needs
+  // (original, edited) pairs to learn from — so we now allow
+  // a content-only edit on drafts. Other fields (rating /
+  // metrics / scheduledFor) still don't apply to drafts and
+  // we still refuse them.
   if (source === 'generated') {
-    return NextResponse.json(
-      {
-        error:
-          'Drafts cannot be edited directly. Use clone, schedule, or delete.',
-      },
-      { status: 400 }
-    );
+    if (typeof contentEdit !== 'string' || contentEdit.trim().length === 0) {
+      return NextResponse.json(
+        {
+          error:
+            'Drafts only accept a content edit. Pass { content: "..." }; rating/metrics/schedule belong to scheduled_posts.',
+        },
+        { status: 400 },
+      );
+    }
+    // Ownership-join: generated_posts has no userId column.
+    const [owned] = await db
+      .select({
+        id: generatedPosts.id,
+        previousContent: generatedPosts.content,
+      })
+      .from(generatedPosts)
+      .innerJoin(projects, eq(projects.id, generatedPosts.projectId))
+      .where(
+        and(eq(generatedPosts.id, id), eq(projects.userId, user.id)),
+      )
+      .limit(1);
+    if (!owned) {
+      return NextResponse.json(
+        { error: 'Draft not found or forbidden' },
+        { status: 404 },
+      );
+    }
+    const editedContent = contentEdit.trim();
+    await db
+      .update(generatedPosts)
+      .set({ content: editedContent })
+      .where(eq(generatedPosts.id, id));
+    // Return both versions so the client can fire the
+    // voice-engine record-edit hook without an extra refetch.
+    return NextResponse.json({
+      post: { id: owned.id, content: editedContent },
+      previousContent: owned.previousContent,
+    });
   }
 
   // Validate rating: null clears, valid string sets, anything else 400s.
