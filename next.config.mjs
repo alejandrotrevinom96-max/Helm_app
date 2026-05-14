@@ -1,3 +1,24 @@
+// PR Sprint 7.19 Round 1 — Sentry next.config integration.
+// Org: helm-mk
+// Project: javascript-nextjs
+//
+// `withSentryConfig` wraps the export to enable:
+//   - Source map upload at build time (so Sentry events show
+//     un-minified stack traces). Requires SENTRY_AUTH_TOKEN to
+//     be set in Vercel env; without it the upload step is a
+//     silent no-op and you get minified stacks but everything
+//     else works.
+//   - `/monitoring` tunnel route — proxies Sentry ingest
+//     through our own domain so adblockers don't drop events.
+//   - React component name annotation for better breadcrumbs.
+//
+// To activate fully:
+//   1. NEXT_PUBLIC_SENTRY_DSN=<dsn from sentry.io/settings/projects/javascript-nextjs/keys/>
+//   2. SENTRY_AUTH_TOKEN=<token from sentry.io/settings/account/api/auth-tokens/>
+//      (needs project:write scope for source map upload)
+//   Both set in Vercel project env. Redeploy.
+import { withSentryConfig } from '@sentry/nextjs';
+
 /** @type {import('next').NextConfig} */
 
 // PR #39 — Sprint 6.5: security headers.
@@ -129,4 +150,30 @@ const nextConfig = {
   },
 };
 
-export default nextConfig;
+export default withSentryConfig(nextConfig, {
+  // Set by the wizard from the values passed in the
+  // `npx @sentry/wizard@latest -i nextjs --saas --org helm-mk
+  // --project javascript-nextjs` invocation.
+  org: 'helm-mk',
+  project: 'javascript-nextjs',
+
+  // Quiet the build. Source map upload progress only matters
+  // when troubleshooting CI; in normal builds it's noise.
+  silent: !process.env.CI,
+
+  // Hide source maps from public bundles so customers can't
+  // download them. Sentry still receives them via the upload
+  // step before this happens.
+  hideSourceMaps: true,
+
+  // Tunnel events through our own domain to bypass ad blockers
+  // that drop direct requests to ingest.sentry.io. /monitoring
+  // becomes a thin proxy to Sentry.
+  tunnelRoute: '/monitoring',
+
+  // Auto-instrument Vercel cron monitors. No-op locally.
+  automaticVercelMonitors: true,
+
+  // Disable telemetry pings from the Sentry build plugin.
+  telemetry: false,
+});

@@ -191,7 +191,12 @@ export async function middleware(request: NextRequest) {
     pathname === '/security' ||
     pathname === '/blog' ||
     pathname.startsWith('/blog/') ||
-    pathname.startsWith('/.well-known/');
+    pathname.startsWith('/.well-known/') ||
+    // PR Sprint 7.19 Round 1 — Sentry tunnel route (next.config
+    // `tunnelRoute: '/monitoring'`). Anonymous events from
+    // unauthenticated visitors get POSTed here; redirecting to
+    // /login would silently drop every browser-side error.
+    pathname.startsWith('/monitoring');
   const isApiRoute = pathname.startsWith('/api');
   // PR #34 — Sprint 6.2: /api/public/* is the explicitly anonymous
   // surface (preview-bible for the landing page). Already covered by
