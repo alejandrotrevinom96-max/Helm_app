@@ -12,6 +12,7 @@
 import { db } from '@/lib/db';
 import { anthropicUsageLog } from '@/lib/db/schema';
 import { MODEL_PRICING_PER_MTOK, readCacheStats } from './claude';
+import { logger } from '@/lib/observability/logger';
 import type Anthropic from '@anthropic-ai/sdk';
 
 interface TrackArgs {
@@ -65,10 +66,15 @@ export async function trackUsage(args: TrackArgs): Promise<void> {
       estimatedCostUsd: cost.toFixed(6),
     });
   } catch (e) {
-    // Telemetry must never break the user-facing call.
-    console.error(
-      `[usage-tracker] insert failed for ${args.endpoint}:`,
-      e instanceof Error ? e.message : e
-    );
+    // Telemetry must never break the user-facing call. The
+    // logger emits to console + Sentry; no need for a second
+    // console.error.
+    logger.warn('ai/usage-tracker', 'usage log insert failed', {
+      endpoint: args.endpoint,
+      model: args.model,
+      userId: args.userId ?? undefined,
+      projectId: args.projectId ?? undefined,
+      error: e,
+    });
   }
 }

@@ -25,6 +25,7 @@ import {
 } from '@/lib/db/schema';
 import { asc, eq } from 'drizzle-orm';
 import { anthropic, MODELS, cachedSystem } from '@/lib/ai/claude';
+import { logger } from '@/lib/observability/logger';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -175,7 +176,12 @@ export async function POST(request: Request) {
     const textBlock = response.content.find((b) => b.type === 'text');
     assistantText = textBlock?.type === 'text' ? textBlock.text.trim() : '';
   } catch (e) {
-    console.error('[chat/message] Claude error:', e);
+    logger.error('chat/message', 'Claude inference failed', {
+      userId: user.id,
+      conversationId: conversation.id,
+      historyTurns: recent.length,
+      error: e,
+    });
     // Fall back to a graceful message so the user isn't left
     // staring at a spinner. Their message is already saved.
     assistantText =

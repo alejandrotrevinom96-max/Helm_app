@@ -23,6 +23,7 @@ import {
   users,
 } from '@/lib/db/schema';
 import { desc, eq, sql } from 'drizzle-orm';
+import { logger } from '@/lib/observability/logger';
 
 export const dynamic = 'force-dynamic';
 
@@ -190,10 +191,7 @@ async function safe<T>(label: string, fn: () => Promise<T>, fallback: T): Promis
   try {
     return await fn();
   } catch (e) {
-    console.error(
-      `[admin/overview] ${label} failed:`,
-      e instanceof Error ? e.message : String(e),
-    );
+    logger.error('admin/overview', `${label} query failed`, { error: e });
     return fallback;
   }
 }
