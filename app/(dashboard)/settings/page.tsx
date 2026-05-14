@@ -5,6 +5,7 @@ import { WebhooksConfig } from './webhooks-config';
 import { VisualsStatus } from './visuals-status';
 import { WeeklyBriefConfig } from './weekly-brief-config';
 import { HeygenAvatarConfig } from './heygen-avatar-config';
+import { DeleteProjectSection } from './delete-project-section';
 
 export default async function SettingsPage() {
   const supabase = await createClient();
@@ -37,6 +38,18 @@ export default async function SettingsPage() {
           <HeygenAvatarConfig
             projectId={activeProject.id}
             userId={user.id}
+          />
+        )}
+
+        {/* PR Sprint 7.19 — Danger Zone. Always last on the page
+            so destructive actions are visually separated from
+            the regular configuration cards. Only rendered when
+            an active project exists; without one there's
+            nothing to delete. */}
+        {activeProject && (
+          <DeleteProjectSection
+            projectId={activeProject.id}
+            projectName={activeProject.name}
           />
         )}
       </div>
