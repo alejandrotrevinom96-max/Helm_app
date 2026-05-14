@@ -8,15 +8,18 @@
 // (Vercel/Supabase/Meta) that live in IntegrationsClient. Reddit also
 // doesn't carry per-project state — it's user-scoped.
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { GlassCard } from '@/components/ui/glass-card';
 import { Button } from '@/components/ui/button';
+import { DisconnectButton } from '@/components/integrations/disconnect-button';
 
 interface Props {
   initiallyConnected: boolean;
 }
 
 export function RedditCard({ initiallyConnected }: Props) {
+  const router = useRouter();
   const [banner, setBanner] = useState<{
     kind: 'success' | 'error';
     msg: string;
@@ -75,19 +78,32 @@ export function RedditCard({ initiallyConnected }: Props) {
       </div>
 
       {initiallyConnected && (
-        <div className="mt-4 pt-4 border-t border-border flex items-center gap-3">
-          <Link
-            href="/api/integrations/reddit/auth"
-            className="text-xs font-mono text-text-3 hover:text-text-1 transition-colors"
-          >
-            Re-authorize →
-          </Link>
-          <Link
-            href="/research/sources"
-            className="text-xs font-mono text-accent hover:opacity-80"
-          >
-            Open Sources →
-          </Link>
+        <div className="mt-4 pt-4 border-t border-border flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-3">
+            <Link
+              href="/api/integrations/reddit/auth"
+              className="text-xs font-mono text-text-3 hover:text-text-1 transition-colors"
+            >
+              Re-authorize →
+            </Link>
+            <Link
+              href="/research/sources"
+              className="text-xs font-mono text-accent hover:opacity-80"
+            >
+              Open Sources →
+            </Link>
+          </div>
+          {/* PR Sprint 7.19 — Disconnect for Reddit. Best-effort
+              revocation against /api/v1/revoke_token before the
+              row is dropped (see the endpoint). router.refresh()
+              triggers the parent server component to re-fetch
+              userIntegrations so the badge flips back to the
+              "Connect Reddit" state. */}
+          <DisconnectButton
+            providerLabel="Reddit"
+            endpoint="/api/integrations/reddit/disconnect"
+            onDisconnected={() => router.refresh()}
+          />
         </div>
       )}
 

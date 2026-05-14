@@ -12,6 +12,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { GlassCard } from '@/components/ui/glass-card';
 import { Button } from '@/components/ui/button';
+import { DisconnectButton } from '@/components/integrations/disconnect-button';
 
 interface TestResp {
   configured?: boolean;
@@ -157,6 +158,23 @@ export function LinkedInCard({ projectId }: Props) {
                   Re-authorize
                 </Button>
               </Link>
+              {/* PR Sprint 7.19 — LinkedIn is per-project, so the
+                  disconnect endpoint needs projectId in the body.
+                  Local setState({...loading}) flips the card to
+                  the disconnected layout without waiting for the
+                  /test refetch. */}
+              <DisconnectButton
+                providerLabel="LinkedIn"
+                endpoint="/api/integrations/linkedin/disconnect"
+                body={{ projectId }}
+                onDisconnected={() => {
+                  setState({
+                    loading: false,
+                    configured: state.configured,
+                    connected: false,
+                  });
+                }}
+              />
             </>
           ) : (
             <Link href={connectHref}>

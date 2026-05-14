@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Skeleton } from '@/components/ui/skeleton';
+import { DisconnectButton } from '@/components/integrations/disconnect-button';
+import { Toaster } from '@/lib/toast/toast';
 
 // Direct deep-links to each provider's token page so users don't have to
 // hunt through dashboards. Added in PR #15 — instructions stay (some users
@@ -161,6 +163,14 @@ export function IntegrationsClient({
 
   return (
     <div className="p-4 md:p-8 max-w-4xl">
+      {/* PR Sprint 7.19 — Toaster sits inside the integrations
+          surface so the Disconnect confirmation lands somewhere
+          visually anchored to this page. Mounted once for ALL
+          cards (credential cards here + Reddit / X / LinkedIn /
+          TikTok / Meta cards rendered by the parent page).
+          Reusing the same Toaster avoids stacked duplicates. */}
+      <Toaster />
+
       <div className="mb-8 md:mb-10">
         <h1 className="font-display text-display-md font-light tracking-tight">Integrations</h1>
         <p className="text-text-2 mt-2 max-w-2xl text-sm">
@@ -297,7 +307,7 @@ function CredentialCard({
           </div>
           <p className="text-text-2 text-sm">{integration.description}</p>
         </div>
-        <div className="flex gap-3 flex-shrink-0 text-sm">
+        <div className="flex gap-3 flex-shrink-0 text-sm items-center">
           {isConnected && (
             <button
               onClick={testConnection}
@@ -313,6 +323,23 @@ function CredentialCard({
           >
             {showForm ? 'Cancel' : isConnected ? 'Replace token' : 'Connect'}
           </button>
+          {/* PR Sprint 7.19 — Disconnect appears ONLY for the
+              providers whose token sits in the user-scoped
+              `integrations` table AND has a /disconnect endpoint
+              wired (Vercel + Supabase). Meta-analytics shares
+              this CredentialCard but disconnect for Meta lives on
+              the dedicated MetaIntegrationCard (publishing) per
+              the existing UX — disconnecting from the analytics
+              card would also drop the publisher token, so we
+              steer the user to the publishing card. */}
+          {isConnected &&
+            (integration.id === 'vercel' || integration.id === 'supabase') && (
+              <DisconnectButton
+                providerLabel={integration.name}
+                endpoint={`/api/integrations/${integration.id}/disconnect`}
+                onDisconnected={() => router.refresh()}
+              />
+            )}
         </div>
       </div>
 

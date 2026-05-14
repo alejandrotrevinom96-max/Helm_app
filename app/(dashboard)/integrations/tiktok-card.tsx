@@ -11,6 +11,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { GlassCard } from '@/components/ui/glass-card';
 import { Button } from '@/components/ui/button';
+import { DisconnectButton } from '@/components/integrations/disconnect-button';
 
 interface TestResp {
   configured?: boolean;
@@ -184,6 +185,22 @@ export function TikTokCard() {
                   Re-authorize
                 </Button>
               </Link>
+              {/* PR Sprint 7.19 — TikTok disconnect. Calls the
+                  user-scoped DELETE endpoint which best-effort
+                  revokes against /v2/oauth/revoke/ before the
+                  DB row is dropped. setState flips the card
+                  back to the connect prompt immediately. */}
+              <DisconnectButton
+                providerLabel="TikTok"
+                endpoint="/api/integrations/tiktok/disconnect"
+                onDisconnected={() => {
+                  setState({
+                    loading: false,
+                    configured: state.configured,
+                    connected: false,
+                  });
+                }}
+              />
             </>
           ) : (
             <Link href={connectHref}>

@@ -101,6 +101,21 @@ export function XCard() {
         </div>
       </div>
 
+      {/* PR Sprint 7.19 — No standalone Disconnect for X. The
+          plan called for one on every connected integration, but
+          X uses env-var-based OAuth 1.0a creds (one set per
+          deployment, not per user). Disconnect from the UI would
+          either no-op or affect every user simultaneously. To
+          rotate the creds, an admin updates the env vars in
+          Vercel and redeploys. */}
+      {state.configured && state.username && (
+        <p className="mt-3 text-[11px] text-text-3">
+          X is configured via deploy-wide env vars (no per-user token).
+          To rotate, update X_API_KEY / X_API_SECRET / X_ACCESS_TOKEN /
+          X_ACCESS_TOKEN_SECRET in Vercel and redeploy.
+        </p>
+      )}
+
       {!state.configured && state.hint && (
         <div className="mt-3 p-3 bg-bg-elev rounded-lg text-xs font-mono text-text-2 space-y-1">
           <div className="text-text-3 uppercase tracking-[0.1em] text-[10px] mb-1">

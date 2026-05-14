@@ -84,6 +84,19 @@ export function ThreadsCard({ projectId }: Props) {
         </div>
       </div>
 
+      {/* PR Sprint 7.19 — No standalone Disconnect for Threads.
+          Threads piggybacks the Meta access token (single OAuth
+          row in meta_integrations), so a "Disconnect Threads"
+          button would have to either delete the Meta token
+          entirely (killing FB + IG publishing too) or no-op.
+          We point the founder at the right surface instead. */}
+      {state.connected && (
+        <p className="mt-3 text-[11px] text-text-3">
+          To disconnect Threads, disconnect Meta (Threads shares the same
+          access token).
+        </p>
+      )}
+
       {!state.connected && !state.loading && (
         <div className="mt-4 pt-4 border-t border-border space-y-2">
           {state.error && (
