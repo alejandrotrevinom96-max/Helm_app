@@ -226,6 +226,80 @@ export async function initInboxUpload(opts: {
 }
 
 /**
+ * Initialize a photo upload (single image or photo carousel) via
+ * the Content Posting API in MEDIA_UPLOAD mode. The post lands in
+ * the user's TikTok inbox/drafts; they finalize from the app.
+ *
+ * PR Sprint 7.19 — added so the cron + Library "Send to TikTok"
+ * flow can handle TikTok 'photo' and 'carousel' content types,
+ * not just HeyGen-rendered video.
+ *
+ * `photoUrls` accepts 1..35 URLs (TikTok's limit). All URLs must
+ * be HTTPS, publicly fetchable by TikTok's crawlers, and point at
+ * an image MIME type. We pass the first URL as the cover.
+ *
+ * Requires the access token to have `video.upload` scope — TikTok
+ * gates photo posting under the same scope (despite the name).
+ */
+export async function initPhotoUpload(opts: {
+  accessToken: string;
+  photoUrls: string[];
+  title?: string;
+  description?: string;
+}): Promise<{ publishId: string }> {
+  if (opts.photoUrls.length === 0) {
+    throw new Error('initPhotoUpload requires at least one photo URL');
+  }
+  if (opts.photoUrls.length > 35) {
+    throw new Error('TikTok accepts at most 35 photos per post');
+  }
+  const res = await fetch(
+    `${TIKTOK_API}/v2/post/publish/content/init/`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${opts.accessToken}`,
+        'Content-Type': 'application/json; charset=UTF-8',
+      },
+      body: JSON.stringify({
+        post_info: {
+          // TikTok requires non-empty title; use the caption's
+          // first chunk when present and fall back to a blank-
+          // ish placeholder the user will overwrite in-app.
+          title: (opts.title ?? '').slice(0, 90) || 'Untitled',
+          description: (opts.description ?? '').slice(0, 2200),
+          disable_comment: false,
+          // Inbox flow → privacy_level is irrelevant (user picks
+          // it in the app) but TikTok still wants the field
+          // present on direct posts; SELF_ONLY is the safe
+          // default that costs nothing in MEDIA_UPLOAD mode.
+          privacy_level: 'SELF_ONLY',
+          auto_add_music: false,
+        },
+        source_info: {
+          source: 'PULL_FROM_URL',
+          photo_cover_index: 0,
+          photo_images: opts.photoUrls,
+        },
+        // MEDIA_UPLOAD = inbox / draft. DIRECT_POST requires app
+        // audit; we deliberately use the same inbox UX as the
+        // video flow.
+        post_mode: 'MEDIA_UPLOAD',
+        media_type: 'PHOTO',
+      }),
+    },
+  );
+  const body = (await res.json().catch(() => ({}))) as InboxInitResponse;
+  if (!res.ok || body.error?.code !== 'ok' || !body.data?.publish_id) {
+    const msg =
+      body.error?.message ??
+      `TikTok photo init returned HTTP ${res.status}`;
+    throw new Error(msg);
+  }
+  return { publishId: body.data.publish_id };
+}
+
+/**
  * Fetch the status of an in-flight or completed publish job.
  * Statuses we surface to the UI:
  *   PROCESSING_UPLOAD   → keep polling

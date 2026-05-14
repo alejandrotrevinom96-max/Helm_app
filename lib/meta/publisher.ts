@@ -29,6 +29,7 @@ import {
   publishThreadsText,
   publishThreadsPhoto,
 } from '@/lib/threads/client';
+import { publishScheduledPostToTikTok } from '@/lib/tiktok/publish-scheduled';
 
 export interface PublishResult {
   success: boolean;
@@ -50,6 +51,19 @@ export interface PublishResult {
   // processing. Tells the polling cron to leave the row in
   // meta_processing and reschedule, not flip to failed.
   stillProcessing?: boolean;
+  // PR Sprint 7.19 — TikTok UGC posts wait on a HeyGen video
+  // render that takes minutes. When the video isn't ready, we
+  // surface notReadyYet=true so the cron RESETS publishStatus
+  // back to null (the row stays eligible) instead of marking
+  // failed or claiming the row indefinitely. No retry counter
+  // bump — the wait isn't a publish failure.
+  notReadyYet?: boolean;
+  // PR Sprint 7.19 — TikTok publish jobs land in the user's
+  // inbox / drafts; the user finalizes from the TikTok app.
+  // Setting tiktokPublishId on the success path lets the cron
+  // attach the publishId trace to the row's metaPostId field
+  // (which we re-use as a generic per-platform id).
+  tiktokPublishId?: string;
 }
 
 // Backoff schedule. Index = retry count we're about to enter (0-based:
@@ -126,24 +140,20 @@ export async function publishPost(postId: string): Promise<PublishResult> {
   }
 
   // PR Sprint 7.13 (BUG 1) — TikTok + Reddit dispatch.
-  // Pre-fix this function fell through to the Meta integration
-  // check for every platform that wasn't x/linkedin/threads, so a
-  // TikTok carousel surfaced "no hay integración de Meta" — the
-  // founder's bug report. The publisher now routes by platform
-  // FIRST and refuses cleanly with platform-specific copy.
-  //
-  // TikTok auto-publish for scheduled posts isn't wired yet — the
-  // Sprint 7.11 inbox flow is user-driven from Library (Send to
-  // TikTok button) because it needs a HeyGen-rendered video URL
-  // that the cron path can't auto-produce. So we surface the
-  // right next step instead of letting Meta validation fail with
-  // a misleading error.
+  // PR Sprint 7.19 — TikTok now branches by contentType. Photo
+  // and video drafts auto-publish to the user's TikTok inbox;
+  // carousels surface a manual-upload hint; UGC posts whose
+  // HeyGen video isn't rendered yet stay scheduled for the next
+  // cron tick (notReadyYet semantics handled by the cron — see
+  // app/api/cron/publish-scheduled/route.ts).
   if (post.platform === 'tiktok') {
+    const tiktokResult = await publishScheduledPostToTikTok(post);
     return {
-      success: false,
-      error:
-        'TikTok auto-publish from the scheduler isn\'t wired yet. Open this post in Library and use "Send to TikTok →" once a HeyGen video is ready, or publish manually from the TikTok app.',
-      isTransient: false,
+      success: tiktokResult.success,
+      error: tiktokResult.error,
+      isTransient: tiktokResult.isTransient,
+      notReadyYet: tiktokResult.notReadyYet,
+      tiktokPublishId: tiktokResult.publishId,
     };
   }
   if (post.platform === 'reddit') {

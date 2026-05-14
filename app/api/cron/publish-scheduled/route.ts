@@ -102,6 +102,25 @@ export async function GET(request: Request) {
 
           const result = await publishPost(post.id);
 
+          // PR Sprint 7.19 — TikTok UGC posts wait on a HeyGen
+          // video render that can take minutes. When the
+          // publisher returns notReadyYet=true, RESET this row's
+          // publishStatus back to null so the next cron tick
+          // (1 min later) re-checks. We do NOT bump
+          // publishRetryCount — the wait is expected behavior,
+          // not a publish failure.
+          if (result.notReadyYet) {
+            await db
+              .update(scheduledPosts)
+              .set({
+                publishStatus: null,
+                publishFailureReason: result.error ?? null,
+              })
+              .where(eq(scheduledPosts.id, post.id));
+            results.skipped += 1;
+            return;
+          }
+
           if (result.success) {
             // PR #32 — Sprint 5.3: Reels return success+pendingPolling
             // because we only created the container; /media_publish
@@ -126,7 +145,14 @@ export async function GET(request: Request) {
                 status: 'posted',
                 publishedAt: new Date(),
                 postedAt: new Date(),
-                metaPostId: result.metaPostId ?? null,
+                // PR Sprint 7.19 — for TikTok, metaPostId stores
+                // the TikTok publishId so the Library card can
+                // resolve the publish job lookup without a
+                // round-trip. The column name is platform-
+                // agnostic post-PR-#29; it's the "remote
+                // identifier" slot.
+                metaPostId:
+                  result.metaPostId ?? result.tiktokPublishId ?? null,
                 metaPermalink: result.permalink ?? null,
                 publishFailureReason: null,
                 publishNextRetryAt: null,

@@ -975,7 +975,10 @@ export function PostDetailModal({
           (!post.visualUrls || post.visualUrls.length === 0) &&
           generatedSingleUrl === null &&
           generatedSlideUrls.length === 0 && (
-            <div className="mb-4 p-4 bg-bg border border-border rounded-lg space-y-3">
+            <div
+              data-tiktok-image-gen
+              className="mb-4 p-4 bg-bg border border-border rounded-lg space-y-3"
+            >
               <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3">
                 AI image
               </div>
@@ -1390,31 +1393,58 @@ export function PostDetailModal({
             )}
 
             {post.publishStatus === 'failed' && (
-              <div className="space-y-2">
-                <div className="flex items-center gap-2 text-sm text-danger">
-                  <span>⚠</span>
-                  <span>Publishing failed</span>
+              post.platform === 'tiktok' ? (
+                <TikTokFailureBlock
+                  post={post}
+                  retryingPublish={retryingPublish}
+                  onRetry={handleRetryPublish}
+                />
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-sm text-danger">
+                    <span>⚠</span>
+                    <span>Publishing failed</span>
+                  </div>
+                  {post.publishFailureReason && (
+                    <div className="text-xs text-text-3 bg-bg-elev p-2 rounded font-mono break-words">
+                      {post.publishFailureReason}
+                    </div>
+                  )}
+                  {post.publishRetryCount > 0 && (
+                    <div className="text-[10px] text-text-3">
+                      Auto-retry attempts: {post.publishRetryCount}
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleRetryPublish}
+                    disabled={retryingPublish}
+                    className="px-3 py-1.5 bg-accent text-white rounded-lg text-xs font-medium hover:opacity-90 disabled:opacity-50"
+                  >
+                    {retryingPublish ? 'Retrying…' : '↻ Retry now'}
+                  </button>
                 </div>
-                {post.publishFailureReason && (
-                  <div className="text-xs text-text-3 bg-bg-elev p-2 rounded font-mono break-words">
-                    {post.publishFailureReason}
-                  </div>
-                )}
-                {post.publishRetryCount > 0 && (
-                  <div className="text-[10px] text-text-3">
-                    Auto-retry attempts: {post.publishRetryCount}
-                  </div>
-                )}
-                <button
-                  type="button"
-                  onClick={handleRetryPublish}
-                  disabled={retryingPublish}
-                  className="px-3 py-1.5 bg-accent text-white rounded-lg text-xs font-medium hover:opacity-90 disabled:opacity-50"
-                >
-                  {retryingPublish ? 'Retrying…' : '↻ Retry now'}
-                </button>
-              </div>
+              )
             )}
+
+            {/* PR Sprint 7.19 — TikTok UGC posts wait on a video
+                render. When the cron leaves publishStatus=null
+                with a stored failureReason, surface a non-alarming
+                "processing" notice instead of nothing at all. */}
+            {post.platform === 'tiktok' &&
+              post.publishStatus === null &&
+              post.publishFailureReason &&
+              (post.contentType === 'ugc' || post.contentType === 'reel') && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-sm text-amber-500">
+                    <span className="inline-block w-3 h-3 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
+                    <span>
+                      Your video is being processed. We&apos;ll publish
+                      automatically when it&apos;s ready.
+                    </span>
+                  </div>
+                </div>
+              )}
           </div>
         )}
 
@@ -1653,6 +1683,170 @@ export function PostDetailModal({
           onClose={() => setShowSchedule(false)}
         />
       )}
+    </div>
+  );
+}
+
+// ============================================================
+// TikTok failure block — PR Sprint 7.19
+// ============================================================
+//
+// Branches on contentType so we surface the right next step
+// instead of dumping the raw publisher error string. Pre-fix
+// every TikTok failure rendered the legacy "no completed HeyGen
+// video" message even for posts that never had a video
+// requirement (single photo, carousel).
+//
+// Cases:
+//   - 'photo' | 'single_image' | 'single_photo':
+//       "Generate an image first" + retry button. If no
+//       visualUrl, the retry won't help — the founder needs to
+//       go regenerate the image. We still surface Retry for
+//       the case where the image WAS generated after the
+//       failure (e.g. publish before image ready, then
+//       generate, then retry).
+//   - 'carousel':
+//       Manual-upload guidance with per-slide download links +
+//       a TikTok app deep link.
+//   - 'ugc' | 'reel' | other:
+//       Generic "publishing failed" + retry. Video-not-ready
+//       is handled separately by the publishStatus=null branch
+//       above, so anything that lands here with publishStatus
+//       =failed for video is a real failure.
+
+function TikTokFailureBlock({
+  post,
+  retryingPublish,
+  onRetry,
+}: {
+  post: LibraryPost;
+  retryingPublish: boolean;
+  onRetry: () => void;
+}) {
+  const ct = post.contentType ?? '';
+  const isPhoto =
+    ct === 'photo' || ct === 'single_image' || ct === 'single_photo';
+  const isCarousel = ct === 'carousel';
+
+  if (isPhoto) {
+    const hasImage = !!post.visualUrl;
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center gap-2 text-sm text-danger">
+          <span>⚠</span>
+          <span>
+            {hasImage
+              ? 'Publishing failed'
+              : 'Generate an image for this post before publishing to TikTok.'}
+          </span>
+        </div>
+        {hasImage && post.publishFailureReason && (
+          <div className="text-xs text-text-3 bg-bg-elev p-2 rounded font-mono break-words">
+            {post.publishFailureReason}
+          </div>
+        )}
+        <div className="flex flex-wrap gap-2">
+          {!hasImage && (
+            // The image-generation block lives above the failure
+            // block in the same modal — scroll into view is the
+            // right affordance.
+            <button
+              type="button"
+              onClick={() => {
+                const el = document.querySelector(
+                  '[data-tiktok-image-gen]',
+                ) as HTMLElement | null;
+                el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              }}
+              className="px-3 py-1.5 bg-accent text-white rounded-lg text-xs font-medium hover:opacity-90"
+            >
+              Generate image →
+            </button>
+          )}
+          {hasImage && (
+            <button
+              type="button"
+              onClick={onRetry}
+              disabled={retryingPublish}
+              className="px-3 py-1.5 bg-accent text-white rounded-lg text-xs font-medium hover:opacity-90 disabled:opacity-50"
+            >
+              {retryingPublish ? 'Retrying…' : '↻ Retry now'}
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (isCarousel) {
+    const slides = Array.isArray(post.visualUrls)
+      ? post.visualUrls.filter((u): u is string => typeof u === 'string')
+      : [];
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center gap-2 text-sm text-danger">
+          <span>⚠</span>
+          <span>TikTok Carousel requires manual upload.</span>
+        </div>
+        <p className="text-xs text-text-3">
+          Download your slides and upload them directly in the TikTok app.
+        </p>
+        {slides.length > 0 && (
+          <div className="flex flex-wrap gap-2 pt-1">
+            {slides.map((url, i) => (
+              <a
+                key={`${url}-${i}`}
+                href={url}
+                download
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-1.5 border border-border rounded-lg text-xs hover:border-border-bright"
+              >
+                ↓ Slide {i + 1}
+              </a>
+            ))}
+            <a
+              href="https://www.tiktok.com/upload"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-3 py-1.5 bg-accent text-white rounded-lg text-xs font-medium hover:opacity-90"
+            >
+              Open TikTok →
+            </a>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // UGC / reel / unknown — generic publishing failure (the
+  // video-not-ready case is rendered separately as a "pending"
+  // notice, NOT here). Keep the retry path so transient TikTok
+  // API errors recover with one click.
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2 text-sm text-danger">
+        <span>⚠</span>
+        <span>Publishing failed</span>
+      </div>
+      {post.publishFailureReason && (
+        <div className="text-xs text-text-3 bg-bg-elev p-2 rounded font-mono break-words">
+          {post.publishFailureReason}
+        </div>
+      )}
+      {post.publishRetryCount > 0 && (
+        <div className="text-[10px] text-text-3">
+          Auto-retry attempts: {post.publishRetryCount}
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={onRetry}
+        disabled={retryingPublish}
+        className="px-3 py-1.5 bg-accent text-white rounded-lg text-xs font-medium hover:opacity-90 disabled:opacity-50"
+      >
+        {retryingPublish ? 'Retrying…' : '↻ Retry now'}
+      </button>
     </div>
   );
 }
