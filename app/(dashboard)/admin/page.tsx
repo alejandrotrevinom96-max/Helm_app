@@ -31,7 +31,7 @@ import {
   chatConversations,
   chatMessages,
 } from '@/lib/db/schema';
-import { count, desc, eq, gte, sql } from 'drizzle-orm';
+import { and, count, desc, eq, gte, isNotNull } from 'drizzle-orm';
 
 export const dynamic = 'force-dynamic';
 
@@ -99,11 +99,21 @@ async function loadOverview() {
       .select({ c: count() })
       .from(generatedPosts)
       .where(gte(generatedPosts.createdAt, sevenDaysAgo)),
+    // Drizzle's typed gte() helper handles Date → timestamp
+    // serialization correctly. A raw sql`${date}` template
+    // literal does NOT — it leaks the JS Date through to
+    // postgres-js without typecast info and the driver throws
+    // "The 'string' argument must be of type string... Received
+    // an instance of Date". So this branch deliberately uses
+    // and(isNotNull(...), gte(...)) instead of a raw template.
     db
       .select({ c: count() })
       .from(scheduledPosts)
       .where(
-        sql`${scheduledPosts.postedAt} IS NOT NULL AND ${scheduledPosts.postedAt} >= ${sevenDaysAgo}`,
+        and(
+          isNotNull(scheduledPosts.postedAt),
+          gte(scheduledPosts.postedAt, sevenDaysAgo),
+        ),
       ),
   ]);
 
