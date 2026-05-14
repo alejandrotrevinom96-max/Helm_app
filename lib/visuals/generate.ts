@@ -1,5 +1,13 @@
 import { fal } from '@fal-ai/client';
 import type { BrandBible, ImageStyle } from '@/lib/types/brand';
+import { logger } from '@/lib/observability/logger';
+import { buildVisualPromptIR } from '@/lib/voice-engine/visuals/visual-prompt-builder';
+import {
+  getImageSizeForFal,
+  renderForFlux,
+} from '@/lib/voice-engine/visuals/visual-renderer-flux';
+import { validateVisualPromptIR } from '@/lib/voice-engine/visuals/visual-validator';
+import { SubjectExtractionError } from '@/lib/voice-engine/visuals/visual-subject-extractor';
 
 // fal.ai client picks up FAL_API_KEY automatically when present in env, but
 // we config explicitly so a missing key shows up as a clearer error than
@@ -25,6 +33,14 @@ export interface VisualPrompt {
   brandBible: BrandBible | null;
   style?: ImageStyle;
   aspectRatio?: AspectRatio;
+  // Sprint 7.19 Round 1 — optional inputs that unlock the IR
+  // pipeline path. When both `painPoint` and `contentType` are
+  // present AND the brand bible has the minimum fields AND the
+  // ENABLE_VISUAL_IR_PIPELINE flag is on, generateVisual()
+  // routes through buildVisualPromptIR + renderForFlux instead
+  // of the legacy prompt builder.
+  painPoint?: string;
+  contentType?: 'photo' | 'carousel' | 'ugc';
 }
 
 export interface VisualResult {
@@ -75,21 +91,169 @@ const PLATFORM_DEFAULT_ASPECT: Record<
   tiktok: 'portrait',
 };
 
+/** Feature flag — when "true", route eligible visual jobs
+ * through the new IR pipeline. Default OFF so production keeps
+ * using the legacy prompt builder until the founder flips this.
+ */
+function irPipelineEnabled(): boolean {
+  return process.env.ENABLE_VISUAL_IR_PIPELINE === 'true';
+}
+
+/** Map the legacy 3-value aspect ratio to a fal image_size +
+ * pixel dims. Kept here because the legacy path still uses it. */
+function legacyDimsFor(aspectRatio: AspectRatio) {
+  return ASPECT_DIMENSIONS[aspectRatio];
+}
+
+/** Build the fal-ai input pair for the IR-pipeline path. */
+function falInputFromIR(ir: {
+  platform: { aspect_ratio: '1:1' | '4:5' | '9:16' | '16:9' | '3:2' };
+}): { image_size: FalImageSize; width: number; height: number } {
+  const named = getImageSizeForFal(ir.platform.aspect_ratio);
+  // getImageSizeForFal returns the same name set we accept. Map
+  // back to pixel dims for the VisualResult bookkeeping.
+  const dimsTable: Record<string, { width: number; height: number }> = {
+    square_hd: { width: 1024, height: 1024 },
+    portrait_4_3: { width: 832, height: 1216 },
+    portrait_16_9: { width: 768, height: 1344 },
+    landscape_16_9: { width: 1344, height: 768 },
+    landscape_4_3: { width: 1216, height: 832 },
+  };
+  const dims = dimsTable[named] ?? { width: 1024, height: 1024 };
+  return { image_size: named as FalImageSize, ...dims };
+}
+
 export async function generateVisual(
   input: VisualPrompt
 ): Promise<VisualResult | null> {
   if (!process.env.FAL_API_KEY) {
-    console.warn('[visuals] FAL_API_KEY not set, skipping image generation');
+    logger.warn('visuals/generate', 'FAL_API_KEY not set, skipping image generation');
     return null;
   }
 
+  // Decide which builder to use. Conditions for the new pipeline:
+  //   - Feature flag is ON
+  //   - We have painPoint + contentType (the new pipeline needs both)
+  //   - The (platform, contentType) combo is supported by the new
+  //     PLATFORM_VISUAL_LANGUAGE map (Reddit isn't, e.g.)
+  //   - We have a brand bible with the minimum visual fields
+  const canUseIR =
+    irPipelineEnabled() &&
+    !!input.painPoint &&
+    !!input.contentType &&
+    !!input.brandBible &&
+    input.platform !== 'reddit';
+
+  if (canUseIR) {
+    const irResult = await tryIRPipelinePath(input);
+    if (irResult) return irResult;
+    // tryIRPipelinePath already logged the failure; we fall
+    // through to the legacy builder so the user still gets an
+    // image rather than a null.
+    logger.warn(
+      'visuals/generate',
+      'IR pipeline failed, falling back to legacy buildVisualPrompt',
+      { platform: input.platform, contentType: input.contentType },
+    );
+  }
+
+  return runLegacyPath(input);
+}
+
+// ============================================================
+// IR pipeline path (Sprint 7.19)
+// ============================================================
+
+async function tryIRPipelinePath(
+  input: VisualPrompt,
+): Promise<VisualResult | null> {
+  const bible = input.brandBible;
+  if (!bible || !input.painPoint || !input.contentType) return null;
+
+  try {
+    const ir = await buildVisualPromptIR({
+      pain_point: input.painPoint,
+      caption: input.postContent,
+      brand_bible: {
+        archetype: bible.archetype?.primary ?? 'modern',
+        photography_mood: bible.visual?.photographyMood ?? 'warm and human',
+        image_style: bible.visual?.imageStyle ?? 'photography',
+        colors: [
+          bible.visual?.colors?.primary,
+          bible.visual?.colors?.secondary,
+          bible.visual?.colors?.accent,
+        ].filter(Boolean) as string[],
+        voice_descriptor: null,
+      },
+      platform: input.platform,
+      content_type: input.contentType,
+    });
+
+    // Soft-validation. We log failures but proceed — these are
+    // hints, not hard rejects. Hard rejects already throw inside
+    // buildVisualPromptIR via Zod.
+    const failures = validateVisualPromptIR(ir);
+    if (failures.length > 0) {
+      logger.warn('visuals/generate', 'IR soft-validation failures', {
+        failures,
+        platform: input.platform,
+        contentType: input.contentType,
+      });
+    }
+
+    const prompt = renderForFlux(ir);
+    const fal_input = falInputFromIR(ir);
+
+    const result = (await fal.subscribe('fal-ai/flux-pro/v1.1', {
+      input: {
+        prompt,
+        image_size: fal_input.image_size,
+        num_images: 1,
+      },
+      logs: false,
+    })) as {
+      data?: { images?: Array<{ url: string }> };
+      images?: Array<{ url: string }>;
+    };
+    const imageUrl =
+      result?.data?.images?.[0]?.url ?? result?.images?.[0]?.url ?? null;
+    if (!imageUrl) {
+      logger.error('visuals/generate', 'fal.ai returned no image URL (IR path)');
+      return null;
+    }
+
+    return {
+      url: imageUrl,
+      provider: 'fal',
+      prompt,
+      costEstimate: 0.055, // ~$0.05 fal + ~$0.005 Haiku subject extractor
+      width: fal_input.width,
+      height: fal_input.height,
+    };
+  } catch (e) {
+    if (e instanceof SubjectExtractionError) {
+      logger.warn(
+        'visuals/generate',
+        'SubjectBlock extraction failed after retries',
+        { error: e },
+      );
+    } else {
+      logger.error('visuals/generate', 'IR pipeline crashed', { error: e });
+    }
+    return null;
+  }
+}
+
+// ============================================================
+// Legacy path (pre-Sprint-7.19 — buildVisualPrompt)
+// ============================================================
+
+async function runLegacyPath(input: VisualPrompt): Promise<VisualResult | null> {
   const aspectRatio = input.aspectRatio ?? PLATFORM_DEFAULT_ASPECT[input.platform];
-  const dims = ASPECT_DIMENSIONS[aspectRatio];
+  const dims = legacyDimsFor(aspectRatio);
   const prompt = buildVisualPrompt(input);
 
   try {
-    // Flux Pro v1.1 input is more constrained than older Flux endpoints
-    // (no num_inference_steps); the SDK enforces the schema at compile time.
     const result = (await fal.subscribe('fal-ai/flux-pro/v1.1', {
       input: {
         prompt,
@@ -101,16 +265,12 @@ export async function generateVisual(
       data?: { images?: Array<{ url: string }> };
       images?: Array<{ url: string }>;
     };
-
-    // SDK shape varies by version — accept both `result.data.images` and
-    // `result.images`. Either way, take the first image URL.
     const imageUrl =
       result?.data?.images?.[0]?.url ?? result?.images?.[0]?.url ?? null;
     if (!imageUrl) {
-      console.error('[visuals] fal.ai returned no image URL');
+      logger.error('visuals/generate', 'fal.ai returned no image URL (legacy path)');
       return null;
     }
-
     return {
       url: imageUrl,
       provider: 'fal',
@@ -120,10 +280,9 @@ export async function generateVisual(
       height: dims.height,
     };
   } catch (e) {
-    console.error(
-      '[visuals] fal.ai generation failed:',
-      e instanceof Error ? e.message : String(e)
-    );
+    logger.error('visuals/generate', 'fal.ai generation failed (legacy path)', {
+      error: e,
+    });
     return null;
   }
 }

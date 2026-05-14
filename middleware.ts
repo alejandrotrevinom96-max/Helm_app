@@ -83,7 +83,11 @@ function buildCsp(nonce: string): string {
     // founder's TikTok avatar in the Integrations card.
     "img-src 'self' blob: data: https://*.supabase.co https://*.fal.media https://fal.media https://*.fbcdn.net https://*.cdninstagram.com https://scontent-*.cdninstagram.com https://*.googleusercontent.com https://avatars.githubusercontent.com https://lh3.googleusercontent.com https://*.heygen.ai https://*.tiktokcdn.com",
     "media-src 'self' blob: https://*.supabase.co https://*.heygen.ai",
-    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.anthropic.com https://*.vercel.com https://vitals.vercel-insights.com https://va.vercel-scripts.com",
+    // PR Sprint 7.19 Round 1 — Sentry ingest endpoints added so
+    // the browser SDK can POST events to sentry.io without the
+    // CSP blocking. Both `ingest.sentry.io` and the region-
+    // specific `ingest.us.sentry.io` are covered.
+    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.anthropic.com https://*.vercel.com https://vitals.vercel-insights.com https://va.vercel-scripts.com https://*.ingest.sentry.io https://*.ingest.us.sentry.io",
     "frame-ancestors 'none'",
     "form-action 'self'",
     "base-uri 'self'",
