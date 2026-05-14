@@ -8,6 +8,7 @@ import { setActiveProject } from '@/app/(dashboard)/actions';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
 import { FounderCard } from './founder-card';
 import { AddProjectModal } from './add-project-modal';
+import { isAdmin } from '@/lib/config';
 
 // PR #22 reorder: Marketing first (the star feature in the v2.0
 // pivot), Analytics deemphasized to penultimate before setup. Validate
@@ -212,6 +213,40 @@ export function Sidebar({
               </Link>
             );
           })}
+
+          {/* PR Sprint 7.19 — admin-only section. Only renders for
+              emails in lib/config.ts → ADMIN_EMAILS. The /admin and
+              /admin/inbox routes also enforce the same check on the
+              server, so this is UI hygiene, not security. */}
+          {isAdmin(user.email) && (
+            <>
+              <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 px-3 mb-2 mt-4">
+                Admin
+              </div>
+              <Link
+                href="/admin/inbox"
+                className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
+                  pathname.startsWith('/admin/inbox')
+                    ? 'bg-accent-soft text-accent'
+                    : 'text-text-2 hover:bg-surface-1 hover:text-text-1'
+                }`}
+              >
+                <InboxIcon />
+                Inbox
+              </Link>
+              <Link
+                href="/admin"
+                className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
+                  pathname === '/admin'
+                    ? 'bg-accent-soft text-accent'
+                    : 'text-text-2 hover:bg-surface-1 hover:text-text-1'
+                }`}
+              >
+                <AdminIcon />
+                Overview
+              </Link>
+            </>
+          )}
         </nav>
 
         <div className="px-3 py-2 border-t border-border">
@@ -276,6 +311,23 @@ function CompassIcon() {
     <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
       <circle cx="12" cy="12" r="10" />
       <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" />
+    </svg>
+  );
+}
+
+function InboxIcon() {
+  return (
+    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+      <path d="M22 12h-6l-2 3h-4l-2-3H2" />
+      <path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z" />
+    </svg>
+  );
+}
+
+function AdminIcon() {
+  return (
+    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+      <path d="M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z" />
     </svg>
   );
 }

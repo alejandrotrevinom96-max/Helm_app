@@ -1,88 +1,64 @@
-// PR Sprint 7.15 — native Helm AI chat endpoint.
+// PR Sprint 7.19 — post a user message into a chat conversation.
 //
 // POST /api/chat/message
-// Body: {
-//   message: string,
-//   projectId?: string | null,
-//   history: { role: 'user' | 'assistant', content: string }[],
-// }
+// Body: { conversationId: string, content: string }
+// Returns: { userMessage, assistantMessage? }
 //
-// Architecture
-// ------------
-//   - Haiku 4.5, not Opus. This is a casual chat assistant, not
-//     content generation — the cost / latency profile of Opus
-//     would be wrong (we want fast, cheap, conversational).
-//   - Rate-limited 20 messages / hour / user so a runaway loop
-//     can't burn through budget (cap ~$0.10 / hour worst-case
-//     at Haiku rates).
-//   - System prompt is short by design: Helm context + concision
-//     directive. The page chrome around the widget is the visual
-//     branding; the prompt doesn't need to repeat it.
-//   - History is sent verbatim from the client. The widget keeps
-//     it in useState for the active session — DB is the
-//     persistent ledger but not the read source for the next
-//     call, so the same conversation can continue without
-//     waiting on a SELECT.
-//   - We persist BOTH the user message and the assistant reply
-//     to chat_messages so analytics / support / future "resume
-//     last conversation" features have the data ready.
+// Routing rules:
+//   - mode === 'ai'    → persist user message, call Claude Haiku,
+//                        persist assistant reply, return both.
+//   - mode === 'agent' → persist user message only and return an
+//                        ack. The founder will reply from the
+//                        admin inbox; Realtime delivers it back
+//                        to the widget.
 //
-// Auth: any logged-in Helm user. Project ownership is OPTIONAL
-// — when projectId is provided we verify the user owns it
-// (so a malicious client can't tag messages onto someone else's
-// project). When null, we accept it (mid-onboarding case).
+// Auth: the conversation's owner only. (Admins use
+// /api/chat/admin/reply to post into a conversation they don't
+// own.)
 import { NextResponse } from 'next/server';
+import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { db } from '@/lib/db';
-import { chatMessages, projects } from '@/lib/db/schema';
-import { eq, and } from 'drizzle-orm';
-import { anthropic, MODELS } from '@/lib/ai/claude';
-import { checkRateLimit } from '@/lib/rate-limit';
-import { trackUsage } from '@/lib/ai/usage-tracker';
+import {
+  chatConversations,
+  chatMessages,
+} from '@/lib/db/schema';
+import { asc, eq } from 'drizzle-orm';
+import { anthropic, MODELS, cachedSystem } from '@/lib/ai/claude';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-const MAX_HISTORY_MESSAGES = 20; // hard cap on tokens we send up
-const MAX_MESSAGE_CHARS = 4000;
+const BodySchema = z.object({
+  conversationId: z.string(),
+  content: z.string().trim().min(1).max(4000),
+});
 
-const SYSTEM_PROMPT = `You are Helm's built-in assistant. Helm is a marketing OS for founders and small teams. You help users think through their marketing strategy, content ideas, and how to get the most out of Helm. Be concise, direct, and founder-friendly. Never be corporate. Max 3 sentences per response unless the user explicitly asks for more detail.`;
+// System prompt for the AI-mode chat. Kept short — this is a
+// support / nudge bot, not a content generator. The brand voice
+// lives elsewhere (lib/ai/claude.ts buildBrandPrompt) and we
+// don't want this assistant to drift into writing posts.
+const CHAT_SYSTEM = `You are "Helm AI", the in-product assistant for Helm (trythelm.com).
 
-export const maxDuration = 30;
+Helm is a marketing assistant for founders: it helps them define a brand voice, generate social posts (Instagram, LinkedIn, X, Threads, Reddit), run research, and publish via integrations.
 
-type Role = 'user' | 'assistant';
-interface HistoryItem {
-  role: Role;
-  content: string;
-}
+Your job here is to help the user inside the product:
+- Answer "how do I do X" questions about Helm features.
+- Help them think through positioning, audience, or content strategy.
+- If the user wants to talk to a human, tell them they can switch the chat to "Agent" mode using the toggle at the top of the widget — the founder (Alejandro) will reply.
 
-function sanitizeHistory(raw: unknown): HistoryItem[] {
-  if (!Array.isArray(raw)) return [];
-  const out: HistoryItem[] = [];
-  for (const item of raw) {
-    if (!item || typeof item !== 'object') continue;
-    const obj = item as Record<string, unknown>;
-    const role = obj.role;
-    const content = obj.content;
-    if (
-      (role === 'user' || role === 'assistant') &&
-      typeof content === 'string' &&
-      content.length > 0
-    ) {
-      out.push({
-        role,
-        // Cap each message so a hostile client can't inflate the
-        // prompt; the Anthropic API will still error on truly
-        // pathological inputs but this softens the worst case.
-        content: content.slice(0, MAX_MESSAGE_CHARS),
-      });
-    }
-  }
-  // Keep only the tail — recent context matters more than ancient
-  // context, and the rate-limited 20/hr is a per-call cap not a
-  // per-turn cap.
-  return out.slice(-MAX_HISTORY_MESSAGES);
-}
+Style:
+- Concise. 2-4 short paragraphs max. No walls of text.
+- First person, calm, founder-to-founder tone.
+- No emojis unless the user uses them first.
+- If you don't know something Helm-specific, say so plainly and suggest switching to Agent mode.
+
+Never invent features. If asked about something that doesn't exist in Helm yet, say it's not built and offer to log feedback.`;
+
+// Limit the rolling history we feed Claude. Anthropic accepts
+// much more, but the support chat doesn't need deep memory and
+// this keeps tokens predictable.
+const HISTORY_TURN_LIMIT = 20;
 
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -93,149 +69,151 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  // Rate limit: 20 messages / hour / user. Haiku at $0.80/M input
-  // + $4/M output keeps the worst case under ~$0.20/hour even at
-  // the max. Plenty of headroom for casual chat without inviting
-  // a loop bug to drain the budget.
-  const limit = checkRateLimit(
-    `chat-message:${user.id}`,
-    20,
-    60 * 60 * 1000,
-  );
-  if (!limit.allowed) {
-    return NextResponse.json(
-      {
-        error: 'Rate limit exceeded',
-        hint: `Chat caps at 20 messages / hour. Try again in ${Math.ceil(limit.resetMs / 60000)} minutes.`,
-      },
-      { status: 429 },
-    );
-  }
-
-  let body: {
-    message?: unknown;
-    projectId?: unknown;
-    history?: unknown;
-  };
+  let body: unknown;
   try {
-    body = (await request.json()) as typeof body;
+    body = await request.json();
   } catch {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
-  if (
-    typeof body.message !== 'string' ||
-    body.message.trim().length === 0
-  ) {
+  const parsed = BodySchema.safeParse(body);
+  if (!parsed.success) {
     return NextResponse.json(
-      { error: 'message required' },
+      { error: 'Invalid body', details: parsed.error.flatten() },
       { status: 400 },
     );
   }
-  const message = body.message.slice(0, MAX_MESSAGE_CHARS).trim();
-
-  // projectId is optional. When present, verify ownership before
-  // tagging messages onto a project the founder doesn't own.
-  let projectId: string | null = null;
-  if (typeof body.projectId === 'string' && body.projectId.length > 0) {
-    if (!UUID_RE.test(body.projectId)) {
-      return NextResponse.json(
-        { error: 'Invalid projectId' },
-        { status: 400 },
-      );
-    }
-    const [owned] = await db
-      .select({ id: projects.id })
-      .from(projects)
-      .where(
-        and(
-          eq(projects.id, body.projectId),
-          eq(projects.userId, user.id),
-        ),
-      )
-      .limit(1);
-    if (!owned) {
-      return NextResponse.json(
-        { error: 'Project not found or forbidden' },
-        { status: 403 },
-      );
-    }
-    projectId = owned.id;
+  if (!UUID_RE.test(parsed.data.conversationId)) {
+    return NextResponse.json(
+      { error: 'Invalid conversationId' },
+      { status: 400 },
+    );
   }
 
-  const history = sanitizeHistory(body.history);
-  const messages: HistoryItem[] = [
-    ...history,
-    { role: 'user' as const, content: message },
-  ];
+  // Verify conversation + ownership.
+  const [conversation] = await db
+    .select()
+    .from(chatConversations)
+    .where(eq(chatConversations.id, parsed.data.conversationId))
+    .limit(1);
+  if (!conversation) {
+    return NextResponse.json(
+      { error: 'Conversation not found' },
+      { status: 404 },
+    );
+  }
+  if (conversation.userId !== user.id) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
+  if (conversation.status !== 'active') {
+    return NextResponse.json(
+      { error: 'Conversation is closed' },
+      { status: 409 },
+    );
+  }
 
-  // Call Haiku. Keep the system prompt short + uncached — at
-  // ~80 tokens it doesn't reach Anthropic's 1024-token minimum
-  // cacheable prefix anyway.
-  let reply: string;
+  // Persist the user's message first so it survives even if
+  // Claude errors below.
+  const [userMessage] = await db
+    .insert(chatMessages)
+    .values({
+      conversationId: conversation.id,
+      role: 'user',
+      content: parsed.data.content,
+    })
+    .returning();
+
+  // Touch the conversation so the inbox sorts it to the top.
+  await db
+    .update(chatConversations)
+    .set({ updatedAt: new Date() })
+    .where(eq(chatConversations.id, conversation.id));
+
+  // Agent mode: don't call Claude. The founder will reply from
+  // the inbox; Realtime delivers the reply to the widget.
+  if (conversation.mode === 'agent') {
+    return NextResponse.json({
+      userMessage: {
+        id: userMessage.id,
+        role: userMessage.role,
+        content: userMessage.content,
+        createdAt: userMessage.createdAt.toISOString(),
+      },
+      assistantMessage: null,
+      mode: 'agent' as const,
+    });
+  }
+
+  // AI mode: build rolling history for context.
+  const history = await db
+    .select({
+      role: chatMessages.role,
+      content: chatMessages.content,
+    })
+    .from(chatMessages)
+    .where(eq(chatMessages.conversationId, conversation.id))
+    .orderBy(asc(chatMessages.createdAt));
+
+  // Anthropic expects strict alternating user/assistant. Map
+  // 'agent' → 'assistant' (when a human took over earlier the
+  // model should treat those as prior assistant turns), and drop
+  // the trailing user message duplicate if any.
+  const recent = history.slice(-HISTORY_TURN_LIMIT);
+  const messagesForClaude = recent.map((m) => ({
+    role: m.role === 'user' ? ('user' as const) : ('assistant' as const),
+    content: m.content,
+  }));
+
+  let assistantText = '';
   try {
     const response = await anthropic.messages.create({
       model: MODELS.HAIKU,
       max_tokens: 600,
-      system: SYSTEM_PROMPT,
-      messages,
+      system: cachedSystem(CHAT_SYSTEM),
+      messages: messagesForClaude,
     });
     const textBlock = response.content.find((b) => b.type === 'text');
-    reply =
-      textBlock?.type === 'text'
-        ? textBlock.text.trim()
-        : "Sorry, I couldn't generate a reply. Try rephrasing?";
-
-    // Best-effort usage telemetry; matches the pattern other
-    // endpoints in this codebase use.
-    void trackUsage({
-      endpoint: 'chat-message',
-      model: MODELS.HAIKU,
-      usage: response.usage,
-      userId: user.id,
-      projectId: projectId ?? undefined,
-    }).catch(() => {
-      /* non-fatal */
-    });
-  } catch (err) {
-    console.error(
-      '[chat/message] anthropic call failed:',
-      err instanceof Error ? err.message : err,
-    );
-    return NextResponse.json(
-      {
-        error:
-          err instanceof Error
-            ? err.message
-            : 'Chat service temporarily unavailable',
-      },
-      { status: 502 },
-    );
+    assistantText = textBlock?.type === 'text' ? textBlock.text.trim() : '';
+  } catch (e) {
+    console.error('[chat/message] Claude error:', e);
+    // Fall back to a graceful message so the user isn't left
+    // staring at a spinner. Their message is already saved.
+    assistantText =
+      "Sorry — I'm having trouble responding right now. You can switch to Agent mode at the top of the widget and Alejandro will get back to you.";
   }
 
-  // Persist both messages. Best-effort — if the insert fails the
-  // founder still gets the reply, we just lose the ledger row.
-  try {
-    await db.insert(chatMessages).values([
-      {
-        userId: user.id,
-        projectId,
-        role: 'user',
-        content: message,
-      },
-      {
-        userId: user.id,
-        projectId,
-        role: 'assistant',
-        content: reply,
-      },
-    ]);
-  } catch (persistErr) {
-    console.warn(
-      '[chat/message] persist failed (non-fatal):',
-      persistErr instanceof Error ? persistErr.message : persistErr,
-    );
+  if (!assistantText) {
+    assistantText =
+      "Sorry — I couldn't generate a reply. Try rephrasing, or switch to Agent mode for a human reply.";
   }
 
-  return NextResponse.json({ reply });
+  const [assistantMessage] = await db
+    .insert(chatMessages)
+    .values({
+      conversationId: conversation.id,
+      role: 'assistant',
+      content: assistantText,
+    })
+    .returning();
+
+  await db
+    .update(chatConversations)
+    .set({ updatedAt: new Date() })
+    .where(eq(chatConversations.id, conversation.id));
+
+  return NextResponse.json({
+    userMessage: {
+      id: userMessage.id,
+      role: userMessage.role,
+      content: userMessage.content,
+      createdAt: userMessage.createdAt.toISOString(),
+    },
+    assistantMessage: {
+      id: assistantMessage.id,
+      role: assistantMessage.role,
+      content: assistantMessage.content,
+      createdAt: assistantMessage.createdAt.toISOString(),
+    },
+    mode: 'ai' as const,
+  });
 }

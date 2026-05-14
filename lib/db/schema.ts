@@ -1681,29 +1681,59 @@ export const voiceEngineAuditLog = pgTable('voice_engine_audit_log', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
-// ===== Chat Messages =====
-// PR Sprint 7.15 — native Helm AI chat widget.
+// ===== Chat Conversations & Messages =====
+// PR Sprint 7.19 — Helm Chat System (AI + Agent).
 //
-// One row per message (both user prompts and assistant replies).
-// Lives in DB so analytics + support can see the conversation
-// shape per founder; UI state still lives in component memory
-// for the active session (DB is the persistent ledger, not the
-// session store).
+// REPLACES the Sprint 7.15 chat_messages table. The old shape
+// (one flat row per message keyed only by userId) couldn't
+// express "this conversation is currently in agent mode" or
+// "the admin replied at 14:32" — both required for the
+// AI/Agent toggle the founder requested. The migration script
+// drops the old table + recreates the new schema.
 //
-// projectId is OPTIONAL: a founder mid-onboarding might open the
-// chat before they have an active project. We still let them ask
-// questions and store the messages with project_id=NULL.
+// Lifecycle:
+//   1. User opens the widget → POST /api/chat/conversation
+//      returns the active conversation (or creates one).
+//   2. User sends → /api/chat/message routes by mode:
+//      ai     → Claude Haiku replies inline
+//      agent  → message queued; Supabase Realtime ships the
+//               admin's reply when one lands.
+//   3. User toggles mode → PATCH /mode flips the column.
+//
+// One ACTIVE conversation per (user, project). Closing one is
+// effectively "start a new thread" — we don't delete history.
+
+export const chatConversations = pgTable(
+  'chat_conversations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    // Optional — onboarding-stage founders may not have a
+    // project yet. Same defensive nullability as Sprint 7.15.
+    projectId: uuid('project_id').references(() => projects.id, {
+      onDelete: 'set null',
+    }),
+    // 'ai' = Claude responds; 'agent' = founder/admin responds
+    // manually via /admin/inbox. Default 'ai' so first-touch
+    // chats get an immediate reply.
+    mode: text('mode').notNull().default('ai'),
+    // 'active' | 'closed'. Only one active per (user, project).
+    status: text('status').notNull().default('active'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+);
+
 export const chatMessages = pgTable('chat_messages', {
   id: uuid('id').primaryKey().defaultRandom(),
-  userId: uuid('user_id')
+  conversationId: uuid('conversation_id')
     .notNull()
-    .references(() => users.id, { onDelete: 'cascade' }),
-  projectId: uuid('project_id').references(() => projects.id, {
-    onDelete: 'set null',
-  }),
-  // 'user' | 'assistant' — mirror Anthropic's role taxonomy so a
-  // future "rehydrate from DB" feature can build a Messages.create
-  // payload directly from these rows.
+    .references(() => chatConversations.id, { onDelete: 'cascade' }),
+  // 'user' (founder typing) | 'assistant' (Claude reply) |
+  // 'agent' (Helm admin reply). Three distinct roles so the
+  // widget can badge agent messages differently from AI.
   role: text('role').notNull(),
   content: text('content').notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
@@ -1744,5 +1774,6 @@ export type BrandAnalysisJob = typeof brandAnalysisJobs.$inferSelect;
 export type OnboardingProgressRow = typeof onboardingProgress.$inferSelect;
 export type HeygenJob = typeof heygenJobs.$inferSelect;
 export type ChatMessage = typeof chatMessages.$inferSelect;
+export type ChatConversation = typeof chatConversations.$inferSelect;
 export type ClientContextRow = typeof clientContexts.$inferSelect;
 export type VoiceEngineAuditEntry = typeof voiceEngineAuditLog.$inferSelect;
