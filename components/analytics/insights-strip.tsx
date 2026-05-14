@@ -65,6 +65,14 @@ export function InsightsStrip() {
   // Skeleton — 2 rows of shimmer-ish bars at the height of an
   // actual insight item, so the layout doesn't jump when data
   // arrives.
+  //
+  // Hotfix: pre-fix the row background was `bg-bg-elev/40`,
+  // which in dark mode resolved to oklch(18% 0 0) @ 40%
+  // opacity — visibly DARKER than the page bg (oklch(15%)),
+  // producing the "zona negra opaca entre secciones" the
+  // founder reported. Swapped to `.glass` (var(--surface-1) +
+  // backdrop blur) so the strip blends with every other
+  // Editorial Glass surface on the page.
   if (state.kind === 'loading') {
     return (
       <section aria-label="This week — loading" className="mb-6">
@@ -75,7 +83,7 @@ export function InsightsStrip() {
           {[0, 1].map((i) => (
             <div
               key={i}
-              className="flex items-center gap-2 p-3 rounded-lg border border-border bg-bg-elev/40"
+              className="glass flex items-center gap-2 p-3 rounded-lg"
             >
               <span className="w-3 h-3 rounded-full bg-text-3/15 animate-pulse" />
               <span className="h-3 flex-1 rounded bg-text-3/15 animate-pulse" />
@@ -101,7 +109,7 @@ export function InsightsStrip() {
         {state.insights.map((insight, i) => (
           <div
             key={i}
-            className="flex items-start gap-2 p-3 rounded-lg border border-border bg-bg-elev/40 text-sm text-text-2"
+            className="glass flex items-start gap-2 p-3 rounded-lg text-sm text-text-2"
           >
             <span
               className={`text-base leading-none shrink-0 ${TINTS[insight.type]}`}

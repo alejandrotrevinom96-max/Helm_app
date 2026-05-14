@@ -13,14 +13,27 @@
 // Surface:
 //   - 52px terracotta launcher button bottom-right.
 //   - 340×480 Editorial Glass panel with:
-//       Header: "Helm AI" + green status dot + AI/Agent toggle +
-//       close button.
+//       Header: dot (green = AI, orange = Agent) + name ("Helm AI"
+//       / "Helm Team") + subtitle + 2-option mode pill + close.
 //       Body:   scrollable message list with user (terracotta),
 //       assistant (glass), agent (glass + "Founder" tag) bubbles.
 //       Footer: textarea + send button. Enter sends, Shift+Enter
 //       newlines. Disabled while sending.
 //   - Unread badge on the launcher when the panel is closed and
 //     a new agent/assistant message arrives via Realtime.
+//
+// UX hotfix layer (post-Sprint-7.19):
+//   1. Optimistic user bubble on every send so the message
+//      appears immediately, before the API responds.
+//   2. In Agent mode, every user send is followed by a local-
+//      only system bubble ("We've received your message…") so
+//      the user knows the message is queued for the founder.
+//      The system bubble is purely client-side (never written
+//      to chat_messages) and stays in place once shown.
+//   3. Header re-skin: replaced the single "AI" / "Agent" toggle
+//      button with a 2-option pill toggle that's always visible,
+//      so the mode switch is discoverable. Adds dynamic name +
+//      dot color + subtitle for the current mode.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
@@ -34,6 +47,12 @@ interface ChatMessage {
   role: Role;
   content: string;
   createdAt: string;
+  /**
+   * True for local-only system bubbles (e.g. the "We've received
+   * your message" confirmation in Agent mode). MessageBubble
+   * renders these with muted styling and never persists them.
+   */
+  system?: boolean;
 }
 
 interface Props {
@@ -41,6 +60,9 @@ interface Props {
 }
 
 const LS_OPEN_KEY = 'helm-chat-open';
+
+const AGENT_CONFIRMATION =
+  "We've received your message. We'll get back to you as soon as possible.";
 
 export function ChatWidget({ projectId }: Props) {
   const [open, setOpen] = useState(false);
@@ -193,17 +215,37 @@ export function ChatWidget({ projectId }: Props) {
     setSending(true);
     setError(null);
 
-    // Optimistic user bubble. Realtime will deliver the
-    // persisted row in a moment with a real id — we dedupe by id
-    // when it arrives.
-    const tempId = `temp-${Date.now()}`;
+    // Optimistic user bubble (renders immediately, before the
+    // POST resolves). Realtime will deliver the persisted row in
+    // a moment with a real id — we dedupe by id when it arrives.
+    const tempId = `temp-user-${Date.now()}`;
     const optimistic: ChatMessage = {
       id: tempId,
       role: 'user',
       content: trimmed,
       createdAt: new Date().toISOString(),
     };
-    setMessages((prev) => [...prev, optimistic]);
+
+    // In Agent mode, immediately append a local-only confirmation
+    // so the user knows their message is queued for the founder.
+    // Purely client-side — never written to chat_messages.
+    const isAgent = mode === 'agent';
+    const systemId = `sys-${Date.now()}`;
+    const systemBubble: ChatMessage | null = isAgent
+      ? {
+          id: systemId,
+          role: 'assistant',
+          content: AGENT_CONFIRMATION,
+          createdAt: new Date().toISOString(),
+          system: true,
+        }
+      : null;
+
+    setMessages((prev) => [
+      ...prev,
+      optimistic,
+      ...(systemBubble ? [systemBubble] : []),
+    ]);
 
     try {
       const res = await fetch('/api/chat/message', {
@@ -219,18 +261,30 @@ export function ChatWidget({ projectId }: Props) {
       };
       if (!res.ok) {
         setError(data.error ?? 'Could not send message');
-        // Roll back the optimistic bubble.
-        setMessages((prev) => prev.filter((m) => m.id !== tempId));
+        // Roll back optimistic bubble + system confirmation.
+        setMessages((prev) =>
+          prev.filter((m) => m.id !== tempId && m.id !== systemId),
+        );
         setInput(trimmed);
         return;
       }
 
-      // Replace the temp bubble with the real persisted message.
+      // Replace the temp user bubble with the real persisted row.
+      // Keep the system confirmation in place (it's local-only).
       setMessages((prev) => {
         const next = prev.filter((m) => m.id !== tempId);
         const seen = new Set(next.map((m) => m.id));
         if (data.userMessage && !seen.has(data.userMessage.id)) {
-          next.push(data.userMessage);
+          // Insert the real user message BEFORE the system
+          // confirmation so the order reads:
+          //   user → system → (assistant or agent reply)
+          // instead of system → user.
+          const sysIdx = next.findIndex((m) => m.id === systemId);
+          if (sysIdx >= 0) {
+            next.splice(sysIdx, 0, data.userMessage);
+          } else {
+            next.push(data.userMessage);
+          }
         }
         if (
           data.assistantMessage &&
@@ -242,12 +296,14 @@ export function ChatWidget({ projectId }: Props) {
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Network error');
-      setMessages((prev) => prev.filter((m) => m.id !== tempId));
+      setMessages((prev) =>
+        prev.filter((m) => m.id !== tempId && m.id !== systemId),
+      );
       setInput(trimmed);
     } finally {
       setSending(false);
     }
-  }, [input, sending, conversationId]);
+  }, [input, sending, conversationId, mode]);
 
   const handleKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -256,44 +312,40 @@ export function ChatWidget({ projectId }: Props) {
     }
   };
 
-  const toggleMode = useCallback(async () => {
-    if (!conversationId || switchingMode) return;
-    const next: Mode = mode === 'ai' ? 'agent' : 'ai';
-    setSwitchingMode(true);
-    try {
-      const res = await fetch(
-        `/api/chat/conversation/${conversationId}/mode`,
-        {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ mode: next }),
-        },
-      );
-      if (!res.ok) {
-        setError('Could not switch mode');
-        return;
-      }
-      setMode(next);
-      // When switching INTO agent mode, drop a system-style note
-      // so the user knows their next message goes to a human.
-      if (next === 'agent') {
-        setMessages((prev) => [
-          ...prev,
+  /**
+   * Switch to a specific mode (called by the pill toggle's two
+   * buttons). Idempotent — clicking the current mode is a no-op.
+   * Persists via PATCH /api/chat/conversation/[id]/mode; Realtime
+   * also picks up the mode change so the admin inbox stays in
+   * sync.
+   */
+  const setModeAndPersist = useCallback(
+    async (next: Mode) => {
+      if (!conversationId || switchingMode || next === mode) return;
+      setSwitchingMode(true);
+      setError(null);
+      try {
+        const res = await fetch(
+          `/api/chat/conversation/${conversationId}/mode`,
           {
-            id: `sys-${Date.now()}`,
-            role: 'assistant',
-            content:
-              "We've received your message. Alejandro (founder) will reply here as soon as he can.",
-            createdAt: new Date().toISOString(),
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode: next }),
           },
-        ]);
+        );
+        if (!res.ok) {
+          setError('Could not switch mode');
+          return;
+        }
+        setMode(next);
+      } catch {
+        setError('Could not switch mode');
+      } finally {
+        setSwitchingMode(false);
       }
-    } catch {
-      setError('Could not switch mode');
-    } finally {
-      setSwitchingMode(false);
-    }
-  }, [conversationId, mode, switchingMode]);
+    },
+    [conversationId, mode, switchingMode],
+  );
 
   return (
     <>
@@ -339,31 +391,21 @@ export function ChatWidget({ projectId }: Props) {
           role="dialog"
           aria-label="Helm chat"
         >
-          {/* Header */}
-          <div className="px-4 py-3 border-b border-border flex items-center justify-between shrink-0 gap-2">
-            <div className="flex items-center gap-2 min-w-0">
-              <span
-                className="w-2 h-2 rounded-full bg-success shrink-0"
-                style={{
-                  boxShadow: '0 0 8px rgba(52, 211, 153, 0.6)',
-                }}
-              />
-              <span className="font-display text-sm font-medium truncate">
-                Helm {mode === 'ai' ? 'AI' : 'Agent'}
-              </span>
-            </div>
+          {/* Header: dot + name + subtitle + mode pill + close */}
+          <div className="px-4 py-3 border-b border-border flex items-center justify-between shrink-0 gap-3">
+            <ModeIdentity mode={mode} />
 
-            <div className="flex items-center gap-1">
-              <ModeToggle
+            <div className="flex items-center gap-2 shrink-0">
+              <ModePillToggle
                 mode={mode}
-                onToggle={toggleMode}
+                onSelect={setModeAndPersist}
                 disabled={switchingMode || !conversationId}
               />
               <button
                 type="button"
                 onClick={() => setOpen(false)}
                 aria-label="Close chat"
-                className="text-text-3 hover:text-text-1 text-lg leading-none p-1 ml-1"
+                className="text-text-3 hover:text-text-1 text-lg leading-none p-1"
               >
                 ✕
               </button>
@@ -384,12 +426,22 @@ export function ChatWidget({ projectId }: Props) {
               <div className="text-xs text-text-3 text-center py-6 px-2">
                 {mode === 'ai'
                   ? 'Ask anything about Helm, your brand, or content strategy.'
-                  : 'Send a message — Alejandro will reply here.'}
+                  : "Send a message — we'll reply as soon as we can."}
               </div>
             )}
             {messages.map((m) => (
-              <MessageBubble key={m.id} role={m.role} content={m.content} />
+              <MessageBubble
+                key={m.id}
+                role={m.role}
+                content={m.content}
+                system={m.system}
+              />
             ))}
+            {/* Typing indicator only meaningful in AI mode —
+                Claude is "thinking" between send and response.
+                Agent mode never shows it because the human-reply
+                latency is hours, not seconds, and the local
+                system bubble already conveyed the wait. */}
             {sending && mode === 'ai' && <TypingIndicator />}
           </div>
 
@@ -407,7 +459,7 @@ export function ChatWidget({ projectId }: Props) {
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKey}
               placeholder={
-                mode === 'ai' ? 'Ask Helm AI…' : 'Message Alejandro…'
+                mode === 'ai' ? 'Ask Helm AI…' : 'Message the Helm team…'
               }
               rows={1}
               disabled={sending || loading || !conversationId}
@@ -442,46 +494,128 @@ export function ChatWidget({ projectId }: Props) {
   );
 }
 
-function ModeToggle({
+// ============================================================
+// Header subcomponents
+// ============================================================
+
+/**
+ * Dot + name + subtitle. The dot color, name, and subtitle all
+ * shift with mode:
+ *   AI    → green dot · "Helm AI"   · "Claude answers instantly"
+ *   Agent → orange dot · "Helm Team" · "We'll reply as soon as possible"
+ */
+function ModeIdentity({ mode }: { mode: Mode }) {
+  const isAi = mode === 'ai';
+  return (
+    <div className="flex items-center gap-2 min-w-0">
+      <span
+        className="w-2 h-2 rounded-full shrink-0"
+        style={{
+          background: isAi ? 'var(--success)' : '#F59E0B',
+          boxShadow: isAi
+            ? '0 0 8px rgba(52, 211, 153, 0.6)'
+            : '0 0 8px rgba(245, 158, 11, 0.6)',
+        }}
+        aria-hidden="true"
+      />
+      <div className="min-w-0">
+        <div className="font-display text-sm font-medium leading-tight truncate">
+          {isAi ? 'Helm AI' : 'Helm Team'}
+        </div>
+        <div className="text-[10px] text-text-3 leading-tight truncate">
+          {isAi
+            ? 'Claude answers instantly'
+            : "We'll reply as soon as possible"}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Two-option pill toggle: both labels visible at all times.
+ * Active = terracotta-filled, inactive = muted text. Click on
+ * the inactive option triggers PATCH /mode via onSelect.
+ */
+function ModePillToggle({
   mode,
-  onToggle,
+  onSelect,
   disabled,
 }: {
   mode: Mode;
-  onToggle: () => void;
+  onSelect: (next: Mode) => void;
   disabled: boolean;
+}) {
+  return (
+    <div
+      role="tablist"
+      aria-label="Conversation mode"
+      className="flex items-center rounded-md border border-border bg-bg p-0.5"
+    >
+      <PillOption
+        active={mode === 'ai'}
+        onClick={() => onSelect('ai')}
+        disabled={disabled}
+        label="AI"
+      />
+      <PillOption
+        active={mode === 'agent'}
+        onClick={() => onSelect('agent')}
+        disabled={disabled}
+        label="AGENT"
+      />
+    </div>
+  );
+}
+
+function PillOption({
+  active,
+  onClick,
+  disabled,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  disabled: boolean;
+  label: string;
 }) {
   return (
     <button
       type="button"
-      onClick={onToggle}
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
       disabled={disabled}
-      aria-label={`Switch to ${mode === 'ai' ? 'Agent' : 'AI'} mode`}
-      className="text-[11px] uppercase tracking-wider px-2 py-1 rounded-md border border-border hover:border-border-bright text-text-2 hover:text-text-1 disabled:opacity-50 transition-colors"
-      title={
-        mode === 'ai'
-          ? 'Switch to Agent mode (talk to Alejandro)'
-          : 'Switch back to AI mode'
-      }
+      className={`px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+        active
+          ? 'bg-accent text-white'
+          : 'text-text-3 hover:text-text-1'
+      }`}
     >
-      {mode === 'ai' ? 'AI' : 'Agent'}
+      {label}
     </button>
   );
 }
 
+// ============================================================
+// Body subcomponents
+// ============================================================
+
 function MessageBubble({
   role,
   content,
+  system,
 }: {
   role: Role;
   content: string;
+  system?: boolean;
 }) {
   const isUser = role === 'user';
   const isAgent = role === 'agent';
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
       <div className="max-w-[85%]">
-        {isAgent && (
+        {isAgent && !system && (
           <div className="text-[10px] uppercase tracking-wider text-text-3 mb-1 px-1">
             Founder
           </div>
@@ -490,9 +624,11 @@ function MessageBubble({
           className={`px-3 py-2 rounded-2xl text-sm whitespace-pre-wrap break-words ${
             isUser
               ? 'bg-accent text-white rounded-br-md'
-              : isAgent
-                ? 'bg-surface-2 text-text-1 border border-accent/30 rounded-bl-md'
-                : 'bg-surface-2 text-text-1 border border-border rounded-bl-md'
+              : system
+                ? 'bg-surface-1 text-text-3 border border-border italic rounded-bl-md'
+                : isAgent
+                  ? 'bg-surface-2 text-text-1 border border-accent/30 rounded-bl-md'
+                  : 'bg-surface-2 text-text-1 border border-border rounded-bl-md'
           }`}
         >
           {content}
