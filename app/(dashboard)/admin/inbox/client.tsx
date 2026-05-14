@@ -13,6 +13,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import type { RealtimeChannel } from '@supabase/supabase-js';
+import { EmptyState } from '@/components/ui/empty-state';
+import { ErrorState } from '@/components/ui/error-state';
+import { ListSkeleton } from '@/components/ui/skeleton';
 
 type Mode = 'ai' | 'agent';
 type Role = 'user' | 'assistant' | 'agent';
@@ -308,12 +311,41 @@ export function InboxClient() {
         {/* List */}
         <aside className="border-r border-border overflow-y-auto">
           {loadingList && (
-            <div className="p-6 text-xs text-text-3">Loading…</div>
-          )}
-          {!loadingList && conversations.length === 0 && (
-            <div className="p-6 text-xs text-text-3">
-              No conversations yet.
+            <div className="p-3">
+              <ListSkeleton rows={5} />
             </div>
+          )}
+          {!loadingList && error && conversations.length === 0 && (
+            <div className="p-3">
+              <ErrorState
+                compact
+                title="Couldn't load inbox"
+                description={error}
+                onRetry={loadList}
+              />
+            </div>
+          )}
+          {!loadingList && !error && conversations.length === 0 && (
+            <EmptyState
+              compact
+              title="No conversations yet"
+              description="When users open the chat widget, their threads show up here. You can reply as the founder or hand off to AI."
+              icon={
+                <svg
+                  width="20"
+                  height="20"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.75"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+                </svg>
+              }
+            />
           )}
           {conversations.map((c) => {
             const active = c.id === activeId;
@@ -351,8 +383,11 @@ export function InboxClient() {
         {/* Active conversation */}
         <section className="flex flex-col overflow-hidden">
           {!activeId && (
-            <div className="flex-1 flex items-center justify-center text-text-3 text-sm">
-              Select a conversation
+            <div className="flex-1 flex items-center justify-center p-6">
+              <EmptyState
+                title="Select a conversation"
+                description="Pick a thread from the left to see the full transcript and reply as the founder."
+              />
             </div>
           )}
           {activeId && (
@@ -393,15 +428,21 @@ export function InboxClient() {
                 className="flex-1 overflow-y-auto px-6 py-4 space-y-3"
               >
                 {loadingDetail && (
-                  <div className="text-xs text-text-3">Loading…</div>
+                  <div className="space-y-2 py-2">
+                    <div className="h-10 w-2/3 rounded-2xl bg-surface-1 animate-pulse" />
+                    <div className="h-10 w-1/2 rounded-2xl bg-surface-1 animate-pulse ml-auto" />
+                    <div className="h-10 w-3/4 rounded-2xl bg-surface-1 animate-pulse" />
+                  </div>
                 )}
                 {detail?.messages.map((m) => (
                   <AdminBubble key={m.id} message={m} />
                 ))}
                 {detail?.messages.length === 0 && !loadingDetail && (
-                  <div className="text-xs text-text-3 text-center py-6">
-                    No messages in this conversation yet.
-                  </div>
+                  <EmptyState
+                    compact
+                    title="Empty conversation"
+                    description="This thread exists but no one has sent a message yet."
+                  />
                 )}
               </div>
 

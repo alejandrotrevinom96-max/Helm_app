@@ -165,6 +165,53 @@ body {
   border-radius: 4px;
 }
 
+/* PR Sprint 7.19 Round 2 — Polish primitives.
+   ====================================================
+   `.lift` — interactive cards / buttons. Subtle 1px Y nudge +
+   shadow on hover, instant when pressed. The same animation
+   curve everywhere makes the product feel cohesive.
+
+   `.interactive` — any clickable surface that isn't a button.
+   Adds the cursor + a faint background highlight on hover so
+   the user knows it's actionable. */
+.lift {
+  transition: transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    box-shadow 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.lift:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-2);
+}
+.lift:active {
+  transform: translateY(0);
+  transition-duration: 60ms;
+}
+
+.interactive {
+  cursor: pointer;
+  transition: background-color 150ms ease, border-color 150ms ease;
+}
+.interactive:hover {
+  background-color: var(--surface-1);
+}
+
+/* Smooth fade-in for content that mounts after a load. Compose
+   with Tailwind's animate-* utilities — applied where it makes
+   sense, not globally. */
+@keyframes helm-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.fade-in {
+  animation: helm-fade-in 300ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
 @keyframes pulse-dot {
   0%,
   100% {

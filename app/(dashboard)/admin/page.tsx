@@ -24,6 +24,7 @@ import {
 } from '@/lib/db/schema';
 import { desc, eq, sql } from 'drizzle-orm';
 import { logger } from '@/lib/observability/logger';
+import { EmptyState } from '@/components/ui/empty-state';
 
 export const dynamic = 'force-dynamic';
 
@@ -320,7 +321,12 @@ export default async function AdminOverviewPage() {
         </h2>
         <div className="glass rounded-xl overflow-hidden border border-border">
           {data.recentSignups.length === 0 && (
-            <div className="px-4 py-6 text-xs text-text-3">No users yet.</div>
+            <EmptyState
+              compact
+              title="No users yet"
+              description="Signups will appear here as people create accounts."
+              action={{ label: 'View waitlist signups', href: '/research' }}
+            />
           )}
           {data.recentSignups.map((u, i) => (
             <div
@@ -352,9 +358,12 @@ export default async function AdminOverviewPage() {
         </h2>
         <div className="glass rounded-xl overflow-hidden border border-border">
           {data.recentPublished.length === 0 && (
-            <div className="px-4 py-6 text-xs text-text-3">
-              No posts published yet.
-            </div>
+            <EmptyState
+              compact
+              title="Nothing published yet"
+              description="Scheduled posts that go live will show up here with their platform and timestamp."
+              action={{ label: 'Schedule a post', href: '/marketing/generate' }}
+            />
           )}
           {data.recentPublished.map((p, i) => (
             <div

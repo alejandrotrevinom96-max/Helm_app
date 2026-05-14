@@ -11,11 +11,12 @@
 // in each bucket, and we don't want to hold every post in memory just to
 // show one tab. We let the server return the filtered set and trust it.
 import { useEffect, useState, useCallback } from 'react';
-import Link from 'next/link';
 import type { LibraryPost, LibraryStatus } from '@/app/api/marketing/library/route';
 import { LibraryFilters } from './filters';
 import { LibraryPostCard } from './post-card';
 import { PostDetailModal } from './post-detail-modal';
+import { EmptyState } from '@/components/ui/empty-state';
+import { CardGridSkeleton } from '@/components/ui/skeleton';
 
 // PR #30 — Sprint 5.2: 'stories' is a sibling tab to the lifecycle
 // statuses. PR #32 — Sprint 5.3 added 'reels' the same way. Both
@@ -276,31 +277,46 @@ export function LibraryClient({
             })
           : posts;
         if (loading) {
-          return (
-            <div className="text-center py-12 text-text-3 text-sm">
-              Loading posts…
-            </div>
-          );
+          return <CardGridSkeleton count={6} columns={2} />;
         }
         if (visiblePosts.length === 0) {
           const hasAnyFilter =
             filters.search || filters.platform || filters.contentType;
+          const title = hasAnyFilter
+            ? 'No posts match those filters'
+            : activeTab === 'all'
+              ? 'No posts yet'
+              : `No ${activeTab} posts yet`;
+          const description = hasAnyFilter
+            ? 'Try widening the search, switching the platform filter, or clearing filters entirely.'
+            : 'Helm writes posts in your brand voice across Instagram, LinkedIn, X, Threads, Reddit, Facebook, and TikTok. Generate your first one to see it here.';
           return (
-            <div className="p-12 border border-dashed border-border rounded-xl text-center">
-              <p className="text-text-3 text-sm mb-4">
-                {activeTab === 'all'
-                  ? hasAnyFilter
-                    ? 'No posts match those filters.'
-                    : 'No posts yet. Generate your first post.'
-                  : `No ${activeTab} posts${hasAnyFilter ? ' match those filters' : ''}.`}
-              </p>
-              <Link
-                href="/marketing/generate"
-                className="inline-flex px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity"
-              >
-                → Generate
-              </Link>
-            </div>
+            <EmptyState
+              title={title}
+              description={description}
+              action={{
+                label: hasAnyFilter ? 'Clear filters' : 'Generate first post',
+                href: hasAnyFilter ? '/marketing/library' : '/marketing/generate',
+              }}
+              icon={
+                <svg
+                  width="20"
+                  height="20"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.75"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                  <line x1="16" y1="13" x2="8" y2="13" />
+                  <line x1="16" y1="17" x2="8" y2="17" />
+                </svg>
+              }
+            />
           );
         }
         return (
