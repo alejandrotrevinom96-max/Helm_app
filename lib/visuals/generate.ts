@@ -128,6 +128,28 @@ export async function generateVisual(
   }
 }
 
+/**
+ * @deprecated Sprint 7.19 — replaced by the
+ * lib/voice-engine/visuals/ pipeline (buildVisualPromptIR +
+ * renderForFlux). The new pipeline runs a mini-LLM call that
+ * translates pain_point + caption into a concrete visual
+ * scene before sending to Flux, which dramatically lifts image
+ * quality (no more stock-feeling output). Kept for one sprint
+ * so existing call sites don't break; remove once all visual
+ * generation flows route through the IR pipeline.
+ *
+ * Migration path:
+ *   import { buildVisualPromptIR } from
+ *     '@/lib/voice-engine/visuals/visual-prompt-builder';
+ *   import { renderForFlux, getImageSizeForFal } from
+ *     '@/lib/voice-engine/visuals/visual-renderer-flux';
+ *
+ *   const ir = await buildVisualPromptIR({
+ *     pain_point, caption, brand_bible, platform, content_type,
+ *   });
+ *   const prompt = renderForFlux(ir);
+ *   const image_size = getImageSizeForFal(ir.platform.aspect_ratio);
+ */
 export function buildVisualPrompt(input: VisualPrompt): string {
   const bible = input.brandBible;
   const colors = bible?.visual?.colors;
