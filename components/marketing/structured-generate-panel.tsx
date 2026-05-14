@@ -37,6 +37,7 @@ import { GlassCard } from '@/components/ui/glass-card';
 import { Button } from '@/components/ui/button';
 import { StructuredDraftCard } from './StructuredDraftCard';
 import { StructuredDraftErrorBoundary } from './StructuredDraftErrorBoundary';
+import { GenerationProgress } from './generation-progress';
 
 type Platform =
   | 'instagram'
@@ -130,7 +131,7 @@ const ERROR_DISPLAY: Record<
 > = {
   overloaded: {
     icon: '⏳',
-    title: 'Anthropic is overloaded',
+    title: 'AI is busy right now',
     defaultHint: 'Wait ~1 minute and retry.',
   },
   rate_limit: {
@@ -145,7 +146,7 @@ const ERROR_DISPLAY: Record<
   },
   json: {
     icon: '🔧',
-    title: 'Opus returned malformed output',
+    title: 'AI returned malformed output',
     defaultHint: 'Retry — this is transient.',
   },
   auth: {
@@ -157,7 +158,7 @@ const ERROR_DISPLAY: Record<
     icon: '📝',
     title: 'Brand context missing',
     defaultHint:
-      'Fill out the brand bible (niche + audience) so Opus has material to work with.',
+      'Fill out the brand bible (niche + audience) so Helm has material to work with.',
   },
   unknown: {
     icon: '😞',
@@ -337,9 +338,8 @@ export function StructuredGeneratePanel({ projectId }: Props) {
           Generate
         </h2>
         <p className="text-sm text-text-3 mt-1">
-          Per-platform structured drafts. Opus 4.7 writes; Flux generates
-          images on-demand from each draft; HeyGen for videos (coming
-          soon).
+          Per-platform structured drafts. Images and videos generated
+          on-demand from each draft.
         </p>
       </div>
 
@@ -419,12 +419,12 @@ export function StructuredGeneratePanel({ projectId }: Props) {
                       <div className="flex gap-1.5 mt-2 flex-wrap">
                         {isFlux && (
                           <span className="text-[9px] font-mono uppercase tracking-[0.1em] px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-500 border border-blue-500/30">
-                            🎨 Flux image (on-demand)
+                            🎨 AI image
                           </span>
                         )}
                         {isHeygen && (
                           <span className="text-[9px] font-mono uppercase tracking-[0.1em] px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-500 border border-purple-500/30">
-                            🎬 HeyGen video (queued)
+                            🎬 AI video
                           </span>
                         )}
                       </div>
@@ -436,9 +436,7 @@ export function StructuredGeneratePanel({ projectId }: Props) {
           </div>
         )}
         <p className="text-xs text-text-3 mt-3">
-          1 structured draft per selected type (Opus 4.7). Flux images are
-          generated on-demand per carousel from the Library. HeyGen videos
-          land in a queue — the live integration ships soon.
+          1 structured draft per selected type.
         </p>
       </GlassCard>
 
@@ -464,16 +462,20 @@ export function StructuredGeneratePanel({ projectId }: Props) {
         >
           {buttonLabel}
         </Button>
-        {selected.length > 0 && (
+        {selected.length > 0 && !generating && (
           <p className="text-xs text-text-3 mt-2">
             Estimated: ~{estimatedSeconds}s
-            {hasVideoSelection && (
-              <span>
-                {' '}
-                · videos queue up — HeyGen ships in a future sprint.
-              </span>
-            )}
+            {hasVideoSelection && <span> · videos coming soon.</span>}
           </p>
+        )}
+        {/* PR Sprint 7.19 — visible progress while generating.
+            Replaces the silent ~35s gap between click and result.
+            Auto-unmounts when `generating` flips back to false. */}
+        {generating && (
+          <GenerationProgress
+            estimatedSeconds={estimatedSeconds}
+            includeImages={selected.some((t) => FLUX_TYPES.has(t))}
+          />
         )}
       </div>
 

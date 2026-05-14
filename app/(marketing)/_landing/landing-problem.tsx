@@ -31,9 +31,9 @@ const PILLARS: Pillar[] = [
     label: 'Marketing',
     title: 'AI-powered, voice-aware content',
     description:
-      'Generate brand-aware drafts in your voice. Schedule across Instagram, X, LinkedIn, Threads, Facebook, and Reddit. Track what works.\n\nPowered by Claude Opus 4.7 with your voice fingerprint, pillars, and brand bible loaded automatically — every draft sounds like you, not like a marketing intern.',
+      'Generate brand-aware drafts in your voice. Schedule across Instagram, X, LinkedIn, Threads, Facebook, and Reddit. Track what works.\n\nYour voice fingerprint, pillars, and brand bible load automatically — every draft sounds like you, not like a marketing intern.',
     features: [
-      'Brand-aware drafts (Claude Opus 4.7)',
+      'Brand-aware drafts',
       'Multi-platform publishing',
       'Calendar + scheduling',
       'Voice fingerprint learning',

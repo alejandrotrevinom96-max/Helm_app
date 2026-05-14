@@ -31,11 +31,11 @@ const FEATURES: Feature[] = [
   },
   {
     title: 'Carousel Generator',
-    body: '5–8 slide carousels with cover, value slides, and CTA. Flux generates images on-demand.',
+    body: '5–8 slide carousels with cover, value slides, and CTA. AI images generated on-demand.',
   },
   {
     title: 'Reel Scripts',
-    body: 'Hook + beats + on-screen text. HeyGen video integration coming v3.0.',
+    body: 'Hook + beats + on-screen text. AI video integration coming v3.0.',
   },
   {
     title: 'Calendar & Scheduling',

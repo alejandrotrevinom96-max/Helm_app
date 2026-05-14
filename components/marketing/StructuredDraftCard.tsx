@@ -348,7 +348,7 @@ export function StructuredDraftCard({
             {heygenStatus === 'queued' && (
               <span
                 className="text-[9px] font-mono uppercase tracking-[0.1em] px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-500 border border-purple-500/30"
-                title="The script is ready. Rendered video ships when HeyGen integration goes live."
+                title="The script is ready. Video rendering ships when the integration goes live."
               >
                 🎬 video queued
               </span>
@@ -532,7 +532,6 @@ function CarouselSlideImagesBlock({
   canGenerate: boolean;
 }) {
   if (slideCount === 0) return null;
-  const estCost = (slideCount * 0.05).toFixed(2);
   const hasUrls = state.urls.length > 0;
   return (
     <div className="mb-4 p-3 border border-border rounded-lg bg-bg-elev/40">
@@ -552,13 +551,12 @@ function CarouselSlideImagesBlock({
             disabled={!canGenerate || state.kind === 'generating'}
             className="text-xs font-mono px-2 py-1 rounded bg-accent text-white hover:opacity-90 disabled:opacity-50"
             // PR #80 — Sprint 7.5.2 (Bug #4): tooltip keeps the
-            // per-image cost visible for power users on hover so
-            // the founder can still audit spend. The button text
-            // itself drops the dollar amount — consumer products
-            // don't show infra costs in primary CTAs because they
-            // generate friction and confusion. Backend tracking
-            // (visual_generations.generationCostUsd) is unchanged.
-            title={`Flux Pro v1.1, 1:1, ~${slideCount} × $0.05 ≈ $${estCost}`}
+            // PR Sprint 7.19 — title tooltip used to surface
+            // model name + price; consumer-facing copy no
+            // longer shows internal tool names or per-image
+            // cost. Backend tracking (visual_generations.
+            // generationCostUsd) is unchanged.
+            title={`Generates ${slideCount} AI images`}
           >
             {state.kind === 'generating'
               ? `Generating ${slideCount} slides…`
@@ -624,7 +622,7 @@ function SinglePhotoImageBlock({
           onClick={onGenerate}
           disabled={!canGenerate || state.kind === 'generating'}
           className="text-xs font-mono px-2 py-1 rounded bg-accent text-white hover:opacity-90 disabled:opacity-50"
-          title="Flux Pro v1.1, ~$0.05"
+          title="Generate AI image"
         >
           {state.kind === 'generating'
             ? 'Generating…'

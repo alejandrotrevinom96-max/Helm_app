@@ -214,7 +214,7 @@ export function BrandAnalysisCard({ projectId }: Props) {
               Smart brand analysis
             </h3>
             <p className="text-sm text-text-3 max-w-prose">
-              Opus 4.7 reads your brand bible and returns niche + audience
+              Helm reads your brand bible and returns niche + audience
               layers + competitor gap + recommended search keywords. Cached
               30 days — re-run when your positioning shifts.
             </p>

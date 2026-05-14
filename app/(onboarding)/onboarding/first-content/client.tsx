@@ -79,7 +79,7 @@ const ERROR_DISPLAY: Record<
 > = {
   overloaded: {
     icon: '⏳',
-    title: 'Anthropic is overloaded',
+    title: 'AI is busy right now',
     defaultHint:
       "This is temporary — wait ~1 minute and retry. It usually works on the second try.",
   },
@@ -96,7 +96,7 @@ const ERROR_DISPLAY: Record<
   },
   json: {
     icon: '🔧',
-    title: 'Opus returned malformed output',
+    title: 'AI returned malformed output',
     defaultHint:
       "This is transient — retry, almost always works on the second try.",
   },
@@ -287,7 +287,7 @@ export function FirstContentClient({ projectId, seedPrompt }: Props) {
           Generating your first post
         </h1>
         <p className="text-text-3 mb-2">
-          Opus 4.7 with your brand context + real pain points.
+          Generated in your voice, using your brand context + real pain points.
         </p>
         <p className="text-xs text-text-3 mt-1">
           {elapsed < 12

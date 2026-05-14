@@ -253,17 +253,17 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
         Video Avatar
       </div>
       <h3 className="font-display text-xl font-light mb-1">
-        Avatar for HeyGen video generation
+        Avatar for AI video generation
       </h3>
       <p className="text-sm text-text-2 mb-5">
         Helm uses this avatar to turn Reel and UGC scripts into talking-
-        head videos. Stock avatars ship immediately; uploaded photos use
-        HeyGen&apos;s Avatar IV pipeline (5 - 10 minutes per render).
+        head videos. Stock avatars ship immediately; uploaded photos take
+        5 - 10 minutes per render.
       </p>
 
       {envDisabled && (
         <div className="mb-5 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg text-xs text-amber-600">
-          HeyGen isn&apos;t enabled on this deployment yet. Your selection
+          AI video isn&apos;t enabled on this deployment yet. Your selection
           will save and apply automatically once we flip the integration
           on.
         </div>
@@ -294,7 +294,7 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
                 Use a stock avatar
               </div>
               <div className="text-xs text-text-3 mb-3">
-                Pick from HeyGen&apos;s curated catalog. Fastest path —
+                Pick from our curated catalog. Fastest path —
                 videos render in ~2 minutes.
               </div>
 
@@ -381,7 +381,7 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
                           >
                             🎬 Choose avatar →
                             <span className="block text-[11px] text-text-3 mt-1">
-                              Browse HeyGen&apos;s stock avatar catalog
+                              Browse the stock avatar catalog
                               ({avatars.length} available)
                             </span>
                           </button>
@@ -419,8 +419,8 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
                 Use my photo
               </div>
               <div className="text-xs text-text-3 mb-3">
-                Upload a single portrait — Helm sends it to HeyGen&apos;s
-                Avatar IV model. JPG, PNG, or WebP. Max{' '}
+                Upload a single portrait — Helm turns it into a talking-
+                head avatar. JPG, PNG, or WebP. Max{' '}
                 {AVATAR_MAX_BYTES / (1024 * 1024)} MB.
               </div>
 
@@ -609,7 +609,7 @@ function AvatarPickerModal({
         <div className="px-5 md:px-7 py-4 border-b border-border flex items-start justify-between gap-4 shrink-0">
           <div>
             <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-1">
-              HeyGen stock catalog
+              Stock catalog
             </div>
             <h3 className="font-display text-xl md:text-2xl font-light">
               Choose an avatar

@@ -316,8 +316,8 @@ export function StructuredDraftsPanel({ projectId }: Props) {
               </div>
             )}
             <p className="text-xs text-text-3 mt-3">
-              We&apos;ll generate 1 structured draft for each selected type
-              (Opus 4.7). Selections are saved per platform.
+              We&apos;ll generate 1 structured draft for each selected type.
+              Selections are saved per platform.
             </p>
           </GlassCard>
 

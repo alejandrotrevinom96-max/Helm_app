@@ -158,7 +158,7 @@ export function DraftCard({
             <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2">
               Generating…
             </div>
-            <p className="text-[10px] text-text-3">Flux Pro · ~8 seconds</p>
+            <p className="text-[10px] text-text-3">AI image · ~8 seconds</p>
           </div>
         </div>
       )}
@@ -168,7 +168,7 @@ export function DraftCard({
           onClick={onGenerateVisual}
           className="mb-3 w-full text-xs py-3 border border-dashed border-border rounded-lg text-text-3 hover:border-accent hover:text-accent transition-colors"
         >
-          + Add visual ($0.05)
+          + Add visual
         </button>
       )}
 

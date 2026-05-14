@@ -501,7 +501,7 @@ export function ChatWidget({ projectId }: Props) {
 /**
  * Dot + name + subtitle. The dot color, name, and subtitle all
  * shift with mode:
- *   AI    → green dot · "Helm AI"   · "Claude answers instantly"
+ *   AI    → green dot · "Helm AI"   · "Instant AI replies"
  *   Agent → orange dot · "Helm Team" · "We'll reply as soon as possible"
  */
 function ModeIdentity({ mode }: { mode: Mode }) {
@@ -524,7 +524,7 @@ function ModeIdentity({ mode }: { mode: Mode }) {
         </div>
         <div className="text-[10px] text-text-3 leading-tight truncate">
           {isAi
-            ? 'Claude answers instantly'
+            ? 'Instant AI replies'
             : "We'll reply as soon as possible"}
         </div>
       </div>

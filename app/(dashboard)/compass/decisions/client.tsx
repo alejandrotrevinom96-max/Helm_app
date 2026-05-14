@@ -467,7 +467,7 @@ function NewDecisionForm({
             size="sm"
           >
             {scoringLoading
-              ? 'Scoring… (~15s with Opus)'
+              ? 'Scoring… (~15s)'
               : '⚡ Score alignment'}
           </Button>
           <button

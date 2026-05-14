@@ -27,7 +27,6 @@ interface Props {
   enabled: boolean;
 }
 
-const COST_PER_IMAGE = 0.05;
 const BATCH_SIZE = 12;
 
 type ImageRow = BrandImageValidation;
@@ -60,9 +59,7 @@ export function ImageValidationSection({ projectId, enabled }: Props) {
   const handleGenerate = async () => {
     if (
       !confirm(
-        `Generate ${BATCH_SIZE} validation images? Estimated cost ~$${(
-          BATCH_SIZE * COST_PER_IMAGE
-        ).toFixed(2)} on your fal.ai account. Takes ~30 seconds.`
+        `Generate ${BATCH_SIZE} validation images? Takes ~30 seconds.`
       )
     ) {
       return;
@@ -218,9 +215,7 @@ export function ImageValidationSection({ projectId, enabled }: Props) {
           ) : (
             <span className="flex items-center gap-2">
               <Sparkles className="w-4 h-4" />
-              Generate 12 images (~${(BATCH_SIZE * COST_PER_IMAGE).toFixed(
-                2
-              )})
+              Generate {BATCH_SIZE} images
             </span>
           )}
         </Button>

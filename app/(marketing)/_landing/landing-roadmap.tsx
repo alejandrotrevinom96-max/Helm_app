@@ -27,7 +27,7 @@ const CURRENT: string[] = [
 const V30: string[] = [
   'Threads auto-publishing',
   'Reddit auto-publishing',
-  'HeyGen video integration',
+  'AI video integration',
   'Real PDF LinkedIn carousels',
   'Multi-user team support (basic)',
 ];

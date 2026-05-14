@@ -46,7 +46,7 @@ interface Props {
 const PHASE_COPY: Record<Phase, { title: string; subtitle: string }> = {
   configuring: {
     title: 'Configuring research sources',
-    subtitle: 'Opus is picking subreddits, keywords + competitors…',
+    subtitle: 'Picking subreddits, keywords + competitors…',
   },
   scanning: {
     title: 'Scanning Reddit + Hacker News + IndieHackers',

@@ -35,26 +35,9 @@ export function VisualsStatus() {
       </h3>
 
       {enabled ? (
-        <>
-          <p className="text-sm text-text-2 mb-2">
-            Helm uses fal.ai Flux Pro to generate visuals automatically for
-            each post.
-          </p>
-          <div className="grid grid-cols-2 gap-4 text-xs mt-4 pt-4 border-t border-border">
-            <div>
-              <div className="text-[10px] font-mono uppercase tracking-[0.1em] text-text-3 mb-1">
-                Cost per image
-              </div>
-              <div className="text-text-1">$0.05 USD</div>
-            </div>
-            <div>
-              <div className="text-[10px] font-mono uppercase tracking-[0.1em] text-text-3 mb-1">
-                Provider
-              </div>
-              <div className="text-text-1">fal.ai · Flux Pro v1.1</div>
-            </div>
-          </div>
-        </>
+        <p className="text-sm text-text-2 mb-2">
+          Helm generates AI visuals automatically for each post.
+        </p>
       ) : (
         <>
           <p className="text-sm text-text-2 mb-3">
@@ -62,18 +45,9 @@ export function VisualsStatus() {
             generated without images.
           </p>
           <p className="text-xs text-text-3">
-            To enable: add{' '}
-            <code className="bg-bg-elev px-1 py-0.5 rounded">FAL_API_KEY</code>{' '}
-            to your Vercel environment variables. Get a key at{' '}
-            <a
-              href="https://fal.ai"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-accent hover:underline"
-            >
-              fal.ai
-            </a>
-            .
+            Visual generation requires an image-provider API key in the
+            deployment environment. Contact the workspace owner if you
+            need this enabled.
           </p>
         </>
       )}

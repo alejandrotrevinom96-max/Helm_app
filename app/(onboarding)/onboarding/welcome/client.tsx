@@ -40,7 +40,7 @@ const STEP_PREVIEWS = [
     n: 4,
     icon: '✨',
     label: 'Your first post',
-    desc: 'Instagram carousel in YOUR voice. Opus 4.7.',
+    desc: 'Instagram carousel in YOUR voice.',
   },
 ];
 

@@ -301,7 +301,7 @@ function VoiceFingerprintSection({
           onClick={handleReanalyze}
           disabled={refreshing}
           className="text-[10px] text-accent hover:underline disabled:opacity-50 whitespace-nowrap"
-          title="Re-run Opus voice analysis on the current Quote Vault"
+          title="Re-run voice analysis on the current Quote Vault"
         >
           {refreshing ? 'Analyzing…' : '↻ Re-analyze'}
         </button>

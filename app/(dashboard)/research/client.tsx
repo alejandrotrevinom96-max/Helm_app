@@ -481,7 +481,7 @@ export function ResearchClient({
             <Skeleton className="h-3 w-4/6" />
           </div>
           <p className="text-xs text-text-3 italic">
-            Claude Opus is synthesizing… ~30-60 seconds.
+            Helm is synthesizing… ~30-60 seconds.
           </p>
         </GlassCard>
       )}

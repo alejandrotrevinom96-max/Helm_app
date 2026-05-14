@@ -574,7 +574,7 @@ export function PostDetailModal({
         setHeygenError(
           fireData.error ??
             fireData.hint ??
-            'Could not start HeyGen generation',
+            'Could not start video generation',
         );
       }
       // Refetch the job either way — fireData failures still
@@ -977,12 +977,12 @@ export function PostDetailModal({
           generatedSlideUrls.length === 0 && (
             <div className="mb-4 p-4 bg-bg border border-border rounded-lg space-y-3">
               <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3">
-                Flux image
+                AI image
               </div>
               <p className="text-sm text-text-2">
                 {isCarouselFormat
-                  ? 'Generate one Flux Pro image per slide. ~$0.05 per slide.'
-                  : 'Generate a Flux Pro image for this post. ~$0.05.'}
+                  ? 'Generate an AI image per slide.'
+                  : 'Generate an AI image for this post.'}
               </p>
               <button
                 type="button"
@@ -1045,7 +1045,7 @@ export function PostDetailModal({
           <div className="mb-4 p-4 bg-bg border border-border rounded-lg">
             <div className="flex items-center justify-between mb-3">
               <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3">
-                HeyGen video
+                AI video
               </div>
               {heygenJob && (
                 <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3">
@@ -1078,7 +1078,7 @@ export function PostDetailModal({
             {heygenJob?.status === 'queued' && (
               <div className="flex items-center gap-2 text-sm text-amber-500">
                 <span>⏱</span>
-                <span>Video queued — waiting for the worker.</span>
+                <span>Video queued — generation will start shortly.</span>
               </div>
             )}
 
@@ -1086,7 +1086,7 @@ export function PostDetailModal({
               <div className="flex items-center gap-2 text-sm text-amber-500">
                 <span className="inline-block w-3 h-3 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
                 <span>
-                  Generating… HeyGen typically takes 2 - 10 minutes.
+                  Generating… videos typically take 2 - 10 minutes.
                 </span>
               </div>
             )}
@@ -1101,7 +1101,7 @@ export function PostDetailModal({
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={heygenJob.thumbnailUrl}
-                    alt="HeyGen video thumbnail"
+                    alt="Video thumbnail"
                     className="rounded-lg w-full max-w-xs"
                   />
                 )}

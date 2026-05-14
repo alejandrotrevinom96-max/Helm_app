@@ -91,7 +91,6 @@ export function XCard() {
           <p className="text-sm text-text-3 max-w-prose">
             Auto-publish single tweets and 2-8 tweet threads from structured
             drafts. Uses your X API credentials (OAuth 1.0a User Context).
-            Pay-per-use plan: ~$200/mo Basic tier covers 100/hr writes.
           </p>
         </div>
         <div className="shrink-0">

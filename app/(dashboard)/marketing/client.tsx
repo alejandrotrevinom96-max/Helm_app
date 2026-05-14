@@ -948,7 +948,7 @@ export function MarketingClient({
             >
               {loading
                 ? 'Generating…'
-                : `Generate ${platforms.length > 1 ? `${platforms.length} versions` : ''} with Claude →`}
+                : `Generate ${platforms.length > 1 ? `${platforms.length} versions` : ''} →`}
             </button>
             {error && <p className="text-xs text-danger mt-3">{error}</p>}
           </div>

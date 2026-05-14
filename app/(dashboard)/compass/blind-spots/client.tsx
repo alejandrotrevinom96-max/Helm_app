@@ -348,7 +348,7 @@ export function BlindSpotsClient({
               Run your first scan
             </h3>
             <p className="text-sm text-text-3 max-w-xl mx-auto">
-              Opus 4.7 will analyze your brand + recent content across all 6
+              Helm will analyze your brand + recent content across all 6
               frameworks and return concrete, evidence-backed findings. Takes
               about 30 seconds.
             </p>

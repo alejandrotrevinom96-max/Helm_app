@@ -515,7 +515,7 @@ function DiscoverMode({
       {discovering && (
         <div className="py-4">
           <p className="text-sm text-text-2 mb-1 italic">
-            Scraping pages, then analyzing with Claude Opus…
+            Analyzing your brand…
           </p>
           {/* PR #72 — Sprint 7.2A hotfix: tell the founder it's safe
               to wait + that we won't double-bill if they reload. */}
