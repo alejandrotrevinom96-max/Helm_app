@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { GlassCard } from '@/components/ui/glass-card';
+import { EmptyState } from '@/components/ui/empty-state';
 import { formatScheduledDate } from '@/lib/utils';
 import {
   EditScheduledModal,
@@ -276,10 +277,40 @@ export function ScheduledManager({ posts }: { posts: Post[] }) {
 
       <div className="space-y-2">
         {filtered.length === 0 ? (
-          <GlassCard className="p-8 text-center text-text-2">
-            {posts.length === 0
-              ? 'No scheduled posts yet. Compose one in /marketing.'
-              : 'No posts match the current filters.'}
+          <GlassCard className="p-0">
+            {posts.length === 0 ? (
+              <EmptyState
+                title="No scheduled posts yet"
+                description="Schedule posts to publish automatically across your connected platforms. Drafts move here once you set a date and time."
+                action={{
+                  label: 'Generate + schedule a post',
+                  href: '/marketing/generate',
+                }}
+                icon={
+                  <svg
+                    width="20"
+                    height="20"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.75"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                    <line x1="16" y1="2" x2="16" y2="6" />
+                    <line x1="8" y1="2" x2="8" y2="6" />
+                    <line x1="3" y1="10" x2="21" y2="10" />
+                  </svg>
+                }
+              />
+            ) : (
+              <EmptyState
+                title="No posts match those filters"
+                description="Try widening the platform filter or clearing the search."
+              />
+            )}
           </GlassCard>
         ) : (
           <>
