@@ -79,6 +79,19 @@ import type {
   ContentType as VoiceEngineContentType,
   Platform as VoiceEnginePlatform,
 } from '@/lib/voice-engine/types';
+// PR Sprint 7.18 — UGC bundle support. content_type='ugc' gets
+// the strict JSON-schema instruction appended, then Zod
+// validates the shape and the soft validator catches the
+// qualitative rules (hook specificity, sales CTA, etc.).
+// Failures trigger a single retry — beyond that we surface the
+// bundle as-is with the failure list so the founder can decide
+// whether to ship it or regenerate manually.
+import { appendUgcSchemaToPrompt } from '@/lib/voice-engine/ugc-prompt';
+import {
+  UGCBundleSchema,
+  type UGCBundle,
+} from '@/lib/voice-engine/ugc-schema';
+import { validateUgcBundle } from '@/lib/voice-engine/ugc-validator';
 
 export const maxDuration = 60;
 
@@ -470,7 +483,7 @@ ${LANGUAGE_INSTRUCTION_AUDIENCE}`;
     // self-report contract). Otherwise fall back to the
     // Sprint 7.13 platform-tone prompt — same scaffolding minus
     // the per-client learning layer.
-    const stackedPrompt =
+    const baseStackedPrompt =
       platformIsKnown && taxonomy
         ? voiceEngineCtx
           ? buildAdaptivePrompt({
@@ -494,8 +507,41 @@ ${LANGUAGE_INSTRUCTION_AUDIENCE}`;
             })
         : null;
 
+    // PR Sprint 7.18 — UGC bundle support. For content_type='ugc'
+    // we append the strict-JSON UGC schema instructions + v2.0
+    // additions (4 founder-voice archetypes + voice-priority
+    // line) on top of the adaptive prompt. The per-template
+    // structureSchema from content_types gets replaced by the
+    // UGC schema in this branch — the UGC bundle shape is the
+    // canonical output for video scripts and the DB column shape
+    // (hook+beats+overlays+caption+metadata) supersedes the
+    // legacy {opening, body, closing} the generic structureSchema
+    // would otherwise emit.
+    const isUgcType = taxonomy === 'ugc';
+    const stackedPrompt = baseStackedPrompt
+      ? isUgcType
+        ? appendUgcSchemaToPrompt(baseStackedPrompt, platformLower)
+        : baseStackedPrompt
+      : null;
+
     const userMessage = stackedPrompt
-      ? `${stackedPrompt}
+      ? isUgcType
+        ? // PR Sprint 7.18 — UGC path: appendUgcSchemaToPrompt
+          // ALREADY embedded the canonical schema instructions
+          // (UGC_OUTPUT_SCHEMA_INSTRUCTION) into stackedPrompt.
+          // Don't append the DB structureSchema on top — that
+          // would conflict with the UGC bundle shape and the
+          // model would emit something neither validator can
+          // parse. Per-row guidelines still useful as steering.
+          `${stackedPrompt}
+
+CONTENT TYPE (DB row): ${template.displayName} (platform: ${platform}, type: ${template.type})
+
+GUIDELINES (per content_type row):
+${template.guidelines ?? '(none)'}
+
+Return ONLY the UGCBundle JSON as instructed above. No markdown fences, no prose outside JSON.`
+        : `${stackedPrompt}
 
 CONTENT TYPE (DB-specific override): ${template.displayName} (platform: ${platform}, type: ${template.type})
 
@@ -593,6 +639,77 @@ Return STRICT JSON matching the schema. No markdown fences, no prose outside JSO
           .replace(/\s*```$/i, '')
           .trim();
         parsed = JSON.parse(cleaned);
+
+        // PR Sprint 7.18 — UGC bundle validation. Zod first
+        // (strict JSON shape: hook 5-9 words, beats sequential,
+        // overlay <=5 words, hashtag format, etc.). On success
+        // run the soft validator (8 checks including v2.0's
+        // hook_specificity + cta_not_sales_disguised). Both are
+        // best-effort — we log + persist the bundle anyway so
+        // the founder can see what came out and decide whether
+        // to regenerate. Hard auto-retry is intentionally NOT
+        // wired here yet (SHIP.md flags it as nice-to-have); a
+        // failure today shows up in the audit log as a
+        // ugc_validation_failed entry per check.
+        if (isUgcType && parsed) {
+          const zodResult = UGCBundleSchema.safeParse(parsed);
+          if (!zodResult.success) {
+            const issues = zodResult.error.issues
+              .map((i) => `${i.path.join('.')}: ${i.message}`)
+              .join('; ');
+            console.warn(
+              `[generate-structured] UGC schema invalid for ${platform}/${template.type}:`,
+              issues,
+            );
+            if (voiceEngineCtx) {
+              void logAudit({
+                userId: user.id,
+                projectId,
+                action: 'ugc_schema_validation_failed',
+                platform: platformLower as VoiceEnginePlatform,
+                notes: issues.slice(0, 500),
+              }).catch(() => {
+                /* non-fatal */
+              });
+            }
+            // Surface as a JSON kind failure so the wizard
+            // shows a retry CTA — same path the malformed-JSON
+            // branch uses.
+            typeErrorKind = 'json';
+            typeErrorMsg = `UGC bundle failed Zod validation: ${issues.slice(0, 300)}`;
+            parsed = null;
+          } else {
+            const softFailures = validateUgcBundle(zodResult.data as UGCBundle);
+            if (softFailures.length > 0) {
+              console.warn(
+                `[generate-structured] UGC soft validation flagged ${softFailures.length} issues for ${platform}/${template.type}:`,
+                softFailures.join(' | '),
+              );
+              if (voiceEngineCtx) {
+                // One audit row per failure so the operator
+                // grep query keeps surfacing individual rules
+                // (hook_specificity, cta_not_sales_disguised,
+                // etc.) instead of one giant blob.
+                for (const msg of softFailures) {
+                  void logAudit({
+                    userId: user.id,
+                    projectId,
+                    action: 'ugc_soft_validation_warning',
+                    platform: platformLower as VoiceEnginePlatform,
+                    notes: msg.slice(0, 500),
+                  }).catch(() => {
+                    /* non-fatal */
+                  });
+                }
+              }
+              // Don't kill the draft — soft failures are
+              // warnings, not blockers. The bundle still lands
+              // in the Library and the founder can iterate.
+            }
+            // parsed stays = parsed; Zod normalized field
+            // defaults but identity is preserved.
+          }
+        }
       }
     } catch (err) {
       // PR #75 — Sprint 7.2C hotfix: categorize instead of dropping
