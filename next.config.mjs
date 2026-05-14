@@ -157,6 +157,12 @@ export default withSentryConfig(nextConfig, {
   org: 'helm-mk',
   project: 'javascript-nextjs',
 
+  // Auth token for source map upload at build time. Required
+  // for un-minified stack traces. Read from Vercel env; absent
+  // in dev/local builds (source maps still build but don't get
+  // uploaded — Sentry events show minified frames).
+  authToken: process.env.SENTRY_AUTH_TOKEN,
+
   // Quiet the build. Source map upload progress only matters
   // when troubleshooting CI; in normal builds it's noise.
   silent: !process.env.CI,
@@ -165,6 +171,12 @@ export default withSentryConfig(nextConfig, {
   // download them. Sentry still receives them via the upload
   // step before this happens.
   hideSourceMaps: true,
+
+  // Pull in additional client chunks for source map upload
+  // (per the canonical SDK guide). Without this, some lazy-
+  // loaded chunks ship minified frames to Sentry even with
+  // auth token set.
+  widenClientFileUpload: true,
 
   // Tunnel events through our own domain to bypass ad blockers
   // that drop direct requests to ingest.sentry.io. /monitoring
