@@ -25,46 +25,50 @@ interface Pillar {
 // tagline + 2-paragraph body + 5 features. Tone shifts from "voice
 // of the founder" to "voice of the product", because the new copy
 // is selling a Marketing OS, not selling a hands-on assistant.
+// PR Sprint 7.19 — landing v3.1 (PRODUCTION). Module copy rebuilt
+// to lead with outcome rather than category — each H3 names the
+// thing the founder gets, not the thing Helm has. The em-dashes
+// from the PR #82 version are pruned per the brief's humanized-
+// prose pass.
 const PILLARS: Pillar[] = [
   {
     icon: Megaphone,
     label: 'Marketing',
-    title: 'AI-powered, voice-aware content',
+    title: 'Posts that sound like you, not like ChatGPT.',
     description:
-      'Generate brand-aware drafts in your voice. Schedule across Instagram, X, LinkedIn, Threads, Facebook, and Reddit. Track what works.\n\nYour voice fingerprint, pillars, and brand bible load automatically — every draft sounds like you, not like a marketing intern.',
+      'Your voice fingerprint, brand pillars, and past hits load on every draft, so what comes out reads like you wrote it. Then you schedule once and publish to X, LinkedIn, Threads, Instagram, Facebook, and Reddit.',
     features: [
-      'Brand-aware drafts',
-      'Multi-platform publishing',
-      'Calendar + scheduling',
-      'Voice fingerprint learning',
-      'Performance memory',
+      'Drafts in your voice, not in AI voice',
+      'One brief, six platform-native outputs',
+      'Calendar with drag-and-drop scheduling',
+      'Tag posts "Worked" or "Flopped". Helm learns what converts.',
     ],
   },
   {
     icon: Search,
     label: 'Research',
-    title: 'Pain points from your real audience',
+    title:
+      "Stop guessing what your audience wants. Read what they're already saying.",
     description:
-      'Stop guessing what your audience wants. Helm scans Reddit, forums, and your community to extract pain points, opportunities, and quotes — ranked by frequency and intensity.\n\nEach insight comes with a one-click "Generate post" button that turns audience signal into shipping content.',
+      'Helm mines Reddit, forums, and your own community for pain points and ranks them by how often people complain and how hard. Every insight has a "Generate post" button, so signal turns into content in one click.',
     features: [
-      'Reddit + forum mining',
-      'Pain point ranking',
-      'Direct quote extraction',
-      'One-click post generation',
+      'Listens to your audience without manual scraping',
+      'Pain points ranked by frequency and intensity',
+      'Direct quotes you can drop into a post',
+      'One click from insight to draft to scheduled post',
     ],
   },
   {
     icon: Compass,
     label: 'Compass',
-    title: 'Strategic clarity in 30 seconds',
+    title: 'Strategic clarity in 30 seconds. No framework theater.',
     description:
-      'What should you actually work on this week? Compass scores your moves by Impact × Effort, benchmarks you against competitors, surfaces blind spots, and tracks every strategic decision you make.\n\nNo more "I think we should…" meetings. Just signal-backed direction.',
+      "What should you actually work on this week? Compass scores every move by Impact and Effort, benchmarks you against competitors, surfaces what you're blind to, and logs every decision so you can see your own patterns.",
     features: [
-      'Priority Matrix (Impact × Effort)',
-      'Positioning Benchmark',
-      'Strategic Timeline',
-      'Blind Spots Detector',
-      'Decision Log',
+      'Priority matrix scored by Impact and Effort',
+      'Positioning benchmark that scans competitors for you',
+      'Blind-spot detector across 6 frameworks',
+      'Decision log with outcome tracking',
     ],
   },
 ];
@@ -81,7 +85,7 @@ function LandingPillars() {
             What&apos;s inside
           </div>
           <h2 className="font-display text-4xl md:text-5xl tracking-tight font-light">
-            One workspace. Three modules. Zero context-switching.
+            One workspace. Three modules. No tab-switching.
           </h2>
         </div>
 

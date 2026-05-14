@@ -14,8 +14,12 @@
 // "further out". The Meta Ads sub-bullets in v3.5 are intentionally
 // nested — they show the depth that's coming so visitors don't
 // dismiss the column as one line of vapor.
+// PR Sprint 7.19 — landing v3.1 (PRODUCTION): copy aligned to
+// the source-of-truth landing doc. Em-dashes pruned, "drafts +
+// scheduling" → "drafts and scheduling" for the humanized-prose
+// pass.
 const CURRENT: string[] = [
-  'Marketing module (drafts + scheduling)',
+  'Marketing module (drafts and scheduling)',
   'Research module (audience mining)',
   'Compass module (strategic dashboard)',
   'X publishing',
@@ -41,15 +45,15 @@ interface RoadmapItem {
 }
 
 const V35: RoadmapItem[] = [
-  { text: 'Instagram auto-publishing (Meta)' },
-  { text: 'Facebook auto-publishing (Meta)' },
+  { text: 'Instagram auto-publishing' },
+  { text: 'Facebook auto-publishing' },
   {
     text: 'Meta Ads Manager integration',
     sub: [
       'Create campaigns',
-      'Edit budgets & targeting',
-      'Pause/resume campaigns',
-      'Performance vs. content cross-reference',
+      'Edit budgets and targeting',
+      'Pause and resume campaigns',
+      'Cross-reference ad performance with content',
     ],
   },
   { text: 'Per-platform analytics deep-dive' },

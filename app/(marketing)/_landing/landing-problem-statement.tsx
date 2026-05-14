@@ -27,15 +27,14 @@ export function LandingProblemStatement() {
           <p>
             Notion for the strategy. ChatGPT for the draft. Figma for the
             image. Buffer for the schedule. Twitter Analytics for the
-            metrics. Reddit for the audience research. Google Docs for the
-            recap.
+            metrics. Reddit for the audience. Google Docs for the recap.
           </p>
-          <p>
-            Marketing isn&apos;t supposed to feel like firefighting. But every
-            solo founder, indie hacker, and one-person marketing team knows
-            the truth: the tooling is broken.
+          <p>Every tool was good. Putting them together was the problem.</p>
+          <p className="text-text-1 font-medium">
+            Helm pulls your stack into one workspace, and it learns what
+            actually works for your audience instead of just remembering
+            what you posted.
           </p>
-          <p className="text-text-1 font-medium">Helm fixes it.</p>
         </div>
       </div>
     </section>

@@ -1,16 +1,12 @@
 // PR #82 — Sprint 7.7: persona self-identification section.
-//
-// 5 cards mapped to the 5 segments the v3.0 positioning explicitly
-// names: solo founders, indie hackers, agencies/operators,
-// bootstrap SaaS, content creators. Job-to-be-done: the visitor
-// scans the cards, recognizes themselves in one, and the framing
-// flips from "what is this?" to "this is for me".
-//
-// Layout: 5 cards in a 3-col grid (last row has 2 + a soft spacer
-// on lg, single column on mobile). The cost-anchor on "Bootstrap
-// SaaS" ($200 + $100 + $50) is intentional — it's the only card
-// with a money number because that's the segment where price is
-// the decision lever.
+// PR Sprint 7.19 — landing v3.1 (PRODUCTION): trimmed from 5
+// personas to 3 (Solo Founders / Indie Hackers / Bootstrap
+// SaaS). Per the brief: "Cut personas from 5 to 3" + sharper
+// ICP framing. Agencies/Operators and Content Creators were
+// real fits but diluted the core message; they'll come back as
+// /use-cases pages when they earn their own copy. New H2 names
+// the antagonist ("Buffer wasn't designed for") so the visitor
+// understands the wedge.
 interface Persona {
   title: string;
   body: string;
@@ -19,23 +15,15 @@ interface Persona {
 const PERSONAS: Persona[] = [
   {
     title: 'Solo Founders',
-    body: "You built the product. You'd rather build the next feature than write another LinkedIn post. Helm writes posts in your voice while you ship.",
+    body: "You'd rather build the next feature than write another LinkedIn post. Helm writes in your voice while you ship.",
   },
   {
     title: 'Indie Hackers',
-    body: "You're juggling 4 side projects, 2 day jobs, and 0 time for marketing tools that need their own onboarding. Helm onboards in 5 minutes.",
-  },
-  {
-    title: 'Agencies & Operators',
-    body: 'Managing marketing for multiple clients or products? Helm isolates each project completely — one workspace, multiple brands, zero confusion.',
+    body: 'Four projects, two jobs, zero patience for tools that need their own onboarding. Helm sets up in 5 minutes and stays out of your way.',
   },
   {
     title: 'Bootstrap SaaS',
-    body: '$200/mo for Buffer + $100/mo for ChatGPT + $50/mo for Notion + your time. Helm replaces the stack for less than half.',
-  },
-  {
-    title: 'Content Creators',
-    body: 'Your voice is your moat. Helm learns it from your past posts, quotes, and feedback — then writes drafts that sound like you, not like AI.',
+    body: "You're already paying for Buffer, ChatGPT, Notion, and your time. Helm replaces the stack for one bill and learns your brand on day one.",
   },
 ];
 
@@ -51,8 +39,7 @@ export function LandingPersonas() {
             Who it&apos;s for
           </div>
           <h2 className="font-display text-4xl md:text-5xl tracking-tight font-light leading-tight">
-            For solo founders, indie hackers, and one-person
-            marketing teams.
+            Built for the people Buffer wasn&apos;t designed for.
           </h2>
         </div>
 

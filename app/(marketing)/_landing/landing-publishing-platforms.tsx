@@ -69,7 +69,7 @@ export function LandingPublishingPlatforms() {
             Publish where your audience lives.
           </h2>
           <p className="text-base md:text-lg text-text-2 max-w-2xl mx-auto">
-            Connect once. Publish everywhere. Track everything.
+            Connect once. Helm handles the rest.
           </p>
         </div>
 
