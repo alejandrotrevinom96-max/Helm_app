@@ -68,7 +68,11 @@ export function AddProjectModal({
           brandUrl: brandUrl.trim() || null,
         }),
       });
-      const data = await res.json().catch(() => ({}));
+      const data = (await res.json().catch(() => ({}))) as {
+        success?: boolean;
+        project?: { id?: string };
+        error?: string;
+      };
       if (!res.ok) {
         throw new Error(data?.error ?? 'Failed to create project');
       }
@@ -80,7 +84,28 @@ export function AddProjectModal({
       // refresh() makes server components (sidebar, dashboard) pick
       // up the new active project without a full reload.
       router.refresh();
-      router.push('/marketing/generate');
+
+      // PR Sprint 7.19 — send the founder into the onboarding wizard
+      // scoped to this new project, instead of dropping them at
+      // /marketing/generate (which previously left a new project
+      // without a brand bible). We jump directly to the BRAND step
+      // (skipping welcome + project, which are already complete from
+      // a returning-user's perspective — the project just got
+      // created). The query params let the brand client target this
+      // specific project + signal to the rest of the wizard that
+      // this is a per-project flow, not a first-time signup.
+      const newProjectId = data.project?.id;
+      if (newProjectId) {
+        router.push(
+          `/onboarding/brand?project=${encodeURIComponent(
+            newProjectId,
+          )}&newProject=1`,
+        );
+      } else {
+        // Defensive — endpoint succeeded but didn't return the id.
+        // Fall back to the legacy behavior so the user isn't stuck.
+        router.push('/marketing/generate');
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create project');
     } finally {

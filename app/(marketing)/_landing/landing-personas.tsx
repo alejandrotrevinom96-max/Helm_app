@@ -43,7 +43,7 @@ export function LandingPersonas() {
   return (
     <section
       id="who"
-      className="py-24 px-4 md:px-8 border-t border-border"
+      className="py-14 md:py-20 px-4 md:px-8 border-t border-border"
     >
       <div className="max-w-6xl mx-auto">
         <div className="text-center mb-12 md:mb-16">

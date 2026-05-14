@@ -211,6 +211,46 @@ export async function middleware(request: NextRequest) {
     return applySecurityHeaders(NextResponse.redirect(url), nonce);
   }
 
+  // PR Sprint 7.19 — onboarding redirect for users who signed up
+  // but haven't completed the 5-step wizard.
+  //
+  // Pre-fix, only the dashboard layout enforced onboarding (and
+  // only when the user had ZERO projects). New users created
+  // via the email-signup flow could land on /marketing after
+  // the auth callback without ever seeing the wizard.
+  //
+  // Now: any logged-in user trying to reach a protected route
+  // gets bounced to /onboarding/welcome until
+  // users.has_completed_onboarding flips to true. The flag is
+  // set by /api/onboarding/wizard-state when the founder
+  // finishes step 5 (first-content).
+  //
+  // RLS note: this query runs as the authenticated role via the
+  // Supabase REST client and depends on the
+  // "Users can read own row" policy (scripts/hotfix-users-rls-
+  // self-read.sql) which lets the user SELECT their own row.
+  // Without that policy, the query returns zero rows and the
+  // redirect silently no-ops.
+  if (
+    user &&
+    !isAuthRoute &&
+    !isPublicRoute &&
+    !isApiRoute &&
+    !pathname.startsWith('/onboarding')
+  ) {
+    const { data: profile } = await supabase
+      .from('users')
+      .select('has_completed_onboarding')
+      .eq('id', user.id)
+      .single();
+
+    if (profile && profile.has_completed_onboarding === false) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/onboarding/welcome';
+      return applySecurityHeaders(NextResponse.redirect(url), nonce);
+    }
+  }
+
   // Redirect logged-in users away from login page
   if (user && pathname === '/login') {
     const url = request.nextUrl.clone();

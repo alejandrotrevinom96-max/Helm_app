@@ -61,7 +61,7 @@ export function LandingFAQ() {
   return (
     <section
       id="faq"
-      className="py-24 px-4 md:px-8 border-t border-border"
+      className="py-14 md:py-20 px-4 md:px-8 border-t border-border"
     >
       <div className="max-w-3xl mx-auto">
         <div className="text-center mb-12">

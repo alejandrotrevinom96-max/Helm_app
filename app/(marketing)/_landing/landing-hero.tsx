@@ -180,7 +180,7 @@ export function LandingHero() {
   };
 
   return (
-    <section className="pt-32 md:pt-36 pb-20 md:pb-24 px-4 md:px-8 max-w-5xl mx-auto relative">
+    <section className="pt-28 md:pt-32 pb-12 md:pb-16 px-4 md:px-8 max-w-5xl mx-auto relative">
       {/* Subtle accent halo behind the hero — softer than the v1
           glow so the page reads as editorial, not AI-tool. */}
       <div

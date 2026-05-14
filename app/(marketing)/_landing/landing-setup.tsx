@@ -13,7 +13,7 @@ function LandingCTA() {
   return (
     <section
       id="pricing"
-      className="py-24 px-4 md:px-8 border-t border-border"
+      className="py-14 md:py-20 px-4 md:px-8 border-t border-border"
     >
       <div className="max-w-3xl mx-auto text-center">
         <div className="text-[10px] font-mono uppercase tracking-[0.2em] text-text-3 mb-3">
