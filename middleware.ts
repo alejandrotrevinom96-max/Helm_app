@@ -204,6 +204,22 @@ export async function middleware(request: NextRequest) {
   // we keep this comment so future devs don't add a guard that
   // breaks the public preview.
 
+  // PR Sprint 7.19 follow-up — /onboarding/* is self-guarding.
+  //
+  // Each wizard step is a server component that runs its own
+  // auth check (app/(onboarding)/layout.tsx → redirect('/login')
+  // when no user) AND completion check (welcome/page.tsx →
+  // redirect('/marketing/library') when already-onboarded). The
+  // middleware must not intercept these paths or it would race
+  // the per-step routing and produce loops or skipped steps.
+  //
+  // Pass-through is placed BEFORE every other redirect so any
+  // future logged-in / unauthenticated logic in this middleware
+  // can't accidentally re-claim the onboarding tree.
+  if (pathname.startsWith('/onboarding')) {
+    return applySecurityHeaders(supabaseResponse, nonce);
+  }
+
   // Protect dashboard routes
   if (!user && !isAuthRoute && !isPublicRoute && !isApiRoute) {
     const url = request.nextUrl.clone();
@@ -231,6 +247,11 @@ export async function middleware(request: NextRequest) {
   // self-read.sql) which lets the user SELECT their own row.
   // Without that policy, the query returns zero rows and the
   // redirect silently no-ops.
+  //
+  // The `!pathname.startsWith('/onboarding')` guard from the
+  // pre-fix version is no longer needed here — the early
+  // pass-through above already covers it — but kept for
+  // belt-and-braces in case the early return is ever moved.
   if (
     user &&
     !isAuthRoute &&

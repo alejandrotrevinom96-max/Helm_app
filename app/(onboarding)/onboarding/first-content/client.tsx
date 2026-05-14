@@ -424,9 +424,18 @@ export function FirstContentClient({ projectId, seedPrompt }: Props) {
         )}
       </GlassCard>
 
+      {/* PR Sprint 7.19 follow-up — completion CTA points at
+          /marketing/generate per the routing-fix sprint. The
+          founder's first draft is already saved (Library link
+          remains accessible from the sidebar + the "Suggested
+          next steps" card below); Generate is the next action
+          surface for "ship more content". */}
       <div className="flex items-center justify-center gap-3 flex-wrap mb-12">
-        <Button onClick={() => router.push('/marketing/library')} size="lg">
-          View in my Library →
+        <Button
+          onClick={() => router.push('/marketing/generate')}
+          size="lg"
+        >
+          Start creating →
         </Button>
         <button
           type="button"
