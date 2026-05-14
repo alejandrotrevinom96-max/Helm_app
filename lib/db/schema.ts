@@ -9,6 +9,7 @@ import {
   date,
   boolean,
   unique,
+  uniqueIndex,
   bigint,
 } from 'drizzle-orm/pg-core';
 import type { BrandBible } from '@/lib/types/brand';
@@ -1739,9 +1740,62 @@ export const chatMessages = pgTable('chat_messages', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
+// ===== Daily Metric Snapshots (Round 3a) =====
+// PR Sprint 7.19 Round 3a — daily time-series storage that
+// underpins the analytics insight engine.
+//
+// Why daily snapshots vs computing on read:
+//   - Anomaly detection needs a 30-day baseline. Computing
+//     COUNT(*) ranges on every dashboard load doesn't scale.
+//   - The numbers from "X days ago" must be stable across
+//     re-renders so the Claude insight generator sees the same
+//     data the user saw.
+//   - Cheap to keep — one row per (project, day, metric) tuple
+//     stays well under 100k rows for a year of activity.
+//
+// Lifecycle:
+//   1. cron at 03:00 UTC writes one row per metric per project
+//      for "yesterday" (the just-closed day).
+//   2. backfill script populates trailing 30 days once at first
+//      install, so anomaly detection has something to compare.
+//   3. insight generator queries the rolling window and writes
+//      its conclusions to a separate `metric_insights` table
+//      (Round 3b).
+export const metricDailySnapshots = pgTable(
+  'metric_daily_snapshots',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    // Soft ref (no FK). Historical data outlives the project so
+    // archive doesn't wipe insights.
+    projectId: uuid('project_id').notNull(),
+    snapshotDate: date('snapshot_date').notNull(),
+    // Stable string identifier — see scripts/hotfix-...sql for
+    // the canonical list. Round 3b reads this column.
+    metricKey: text('metric_key').notNull(),
+    // NUMERIC in pg → string in postgres-js by default; the
+    // cron writer + insight reader normalize via Number().
+    value: numeric('value').notNull(),
+    // Optional slicing dimensions (platform, content_type).
+    dimensions: jsonb('dimensions'),
+    dimensionsHash: text('dimensions_hash'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    // Cron upsert key — matches the SQL unique index.
+    uniqIdx: uniqueIndex('metric_daily_snapshots_uniq_idx').on(
+      t.projectId,
+      t.snapshotDate,
+      t.metricKey,
+      t.dimensionsHash,
+    ),
+  }),
+);
+
 // ===== Type exports =====
 export type User = typeof users.$inferSelect;
 export type Project = typeof projects.$inferSelect;
+export type MetricDailySnapshot = typeof metricDailySnapshots.$inferSelect;
+export type NewMetricDailySnapshot = typeof metricDailySnapshots.$inferInsert;
 export type Integration = typeof integrations.$inferSelect;
 export type MetricSnapshot = typeof metricSnapshots.$inferSelect;
 export type GeneratedPost = typeof generatedPosts.$inferSelect;

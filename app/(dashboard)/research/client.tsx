@@ -5,6 +5,7 @@ import Link from 'next/link';
 import type { Project, ResearchFinding } from '@/lib/db/schema';
 import { timeAgo, formatRelativeDate } from '@/lib/utils';
 import { GlassCard } from '@/components/ui/glass-card';
+import { EmptyState } from '@/components/ui/empty-state';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { SimpleMarkdown } from '@/components/ui/simple-markdown';
@@ -561,19 +562,36 @@ export function ResearchClient({
           </div>
 
           {visibleFindings.length === 0 && findings.length === 0 && (
-            <GlassCard className="p-8 md:p-12 text-center">
-              <p className="font-display text-2xl mb-2">No findings yet</p>
-              <p className="text-text-2 text-sm">
-                Add keywords above and click <em className="text-text-1">Scan now</em>{' '}
-                to search Reddit, HN, and Indie Hackers for matching posts.
-              </p>
+            <GlassCard className="p-0">
+              <EmptyState
+                title="No findings yet"
+                description="Add keywords above and click Scan now to search Reddit, HN, and Indie Hackers for posts that match your project."
+                icon={
+                  <svg
+                    width="22"
+                    height="22"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.75"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <circle cx="11" cy="11" r="8" />
+                    <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                  </svg>
+                }
+              />
             </GlassCard>
           )}
 
           {visibleFindings.length === 0 && findings.length > 0 && (
-            <p className="text-text-3 text-sm">
-              No findings from {filter}. Try a different filter or scan again.
-            </p>
+            <EmptyState
+              compact
+              title={`No findings from ${filter}`}
+              description="Try a different source filter or run another scan."
+            />
           )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
