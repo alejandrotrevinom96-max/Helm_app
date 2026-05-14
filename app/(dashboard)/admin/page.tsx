@@ -19,106 +19,146 @@
 
 import { db } from '@/lib/db';
 import {
-  users,
-  projects,
-  integrations,
-  generatedPosts,
   scheduledPosts,
-  heygenJobs,
-  brandAnalysis,
-  clientContexts,
-  voiceEngineAuditLog,
-  chatConversations,
-  chatMessages,
+  users,
 } from '@/lib/db/schema';
-import { and, count, desc, eq, gte, isNotNull } from 'drizzle-orm';
+import { desc, eq, sql } from 'drizzle-orm';
 
 export const dynamic = 'force-dynamic';
 
-async function loadOverview() {
-  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+// Sprint 7.19 follow-up — fix admin overview "server-side
+// exception" caused by Supabase pooler statement_timeout (code
+// 57014) when 17 parallel COUNT(*) queries fired via
+// Promise.all. Some individually timed out and tanked the whole
+// page.
+//
+// Strategy now:
+//   1) Consolidate all 17 counts into ONE SQL round-trip via
+//      scalar subqueries. Postgres pipelines this trivially
+//      and the entire stat block finishes in one connection
+//      checkout instead of fighting for 17.
+//   2) Each block (counts, heygen group-by, recent signups,
+//      recent published) lives inside its own try/catch. If any
+//      one fails, the rest still render. The page becomes
+//      strictly degraded instead of strictly broken.
+//   3) Dates serialize to ISO strings before going into the raw
+//      sql template — postgres-js's text-mode serializer chokes
+//      on raw JS Date objects in template-literal params
+//      (different bug from earlier; that one was inside a typed
+//      Drizzle helper, this one is a raw sql template).
 
-  // Run everything in parallel. Each promise is small (one count
-  // each) so the wall-clock is ~max latency to Postgres.
-  const [
-    userCount,
-    projectCount,
-    integrationCount,
-    conversationCount,
-    activeConversationCount,
-    agentConversationCount,
-    messageCount,
-    draftCount,
-    scheduledCount,
-    publishedCount,
-    heygenByStatus,
-    clientContextCount,
-    voiceAuditRecent,
-    brandAnalysisCount,
-    last7Signups,
-    last7Drafts,
-    last7Published,
-  ] = await Promise.all([
-    db.select({ c: count() }).from(users),
-    db.select({ c: count() }).from(projects),
-    db.select({ c: count() }).from(integrations),
-    db.select({ c: count() }).from(chatConversations),
-    db
-      .select({ c: count() })
-      .from(chatConversations)
-      .where(eq(chatConversations.status, 'active')),
-    db
-      .select({ c: count() })
-      .from(chatConversations)
-      .where(eq(chatConversations.mode, 'agent')),
-    db.select({ c: count() }).from(chatMessages),
-    db.select({ c: count() }).from(generatedPosts),
-    db.select({ c: count() }).from(scheduledPosts),
-    db
-      .select({ c: count() })
-      .from(scheduledPosts)
-      .where(eq(scheduledPosts.status, 'posted')),
-    db
-      .select({
-        status: heygenJobs.status,
-        c: count(),
-      })
-      .from(heygenJobs)
-      .groupBy(heygenJobs.status),
-    db.select({ c: count() }).from(clientContexts),
-    db
-      .select({ c: count() })
-      .from(voiceEngineAuditLog)
-      .where(gte(voiceEngineAuditLog.createdAt, sevenDaysAgo)),
-    db.select({ c: count() }).from(brandAnalysis),
-    db
-      .select({ c: count() })
-      .from(users)
-      .where(gte(users.createdAt, sevenDaysAgo)),
-    db
-      .select({ c: count() })
-      .from(generatedPosts)
-      .where(gte(generatedPosts.createdAt, sevenDaysAgo)),
-    // Drizzle's typed gte() helper handles Date → timestamp
-    // serialization correctly. A raw sql`${date}` template
-    // literal does NOT — it leaks the JS Date through to
-    // postgres-js without typecast info and the driver throws
-    // "The 'string' argument must be of type string... Received
-    // an instance of Date". So this branch deliberately uses
-    // and(isNotNull(...), gte(...)) instead of a raw template.
-    db
-      .select({ c: count() })
-      .from(scheduledPosts)
-      .where(
-        and(
-          isNotNull(scheduledPosts.postedAt),
-          gte(scheduledPosts.postedAt, sevenDaysAgo),
-        ),
-      ),
-  ]);
+type CountRow = {
+  users: string | number;
+  projects: string | number;
+  integrations: string | number;
+  conversations: string | number;
+  active_conversations: string | number;
+  agent_conversations: string | number;
+  messages: string | number;
+  drafts: string | number;
+  scheduled: string | number;
+  published: string | number;
+  client_contexts: string | number;
+  voice_audit_7d: string | number;
+  brand_analyses: string | number;
+  signups_7d: string | number;
+  drafts_7d: string | number;
+  published_7d: string | number;
+};
 
-  // Recent signups (last 10).
-  const recentSignups = await db
+type HeygenRow = { status: string; c: string | number };
+
+const ZERO_COUNTS = {
+  users: 0,
+  projects: 0,
+  integrations: 0,
+  conversations: 0,
+  activeConversations: 0,
+  agentConversations: 0,
+  messages: 0,
+  drafts: 0,
+  scheduled: 0,
+  published: 0,
+  clientContexts: 0,
+  voiceAudit7d: 0,
+  brandAnalyses: 0,
+  signups7d: 0,
+  drafts7d: 0,
+  published7d: 0,
+};
+
+// postgres-js returns COUNT(*) as a string (bigint), even when
+// the underlying value fits in JS number range. Normalize once
+// at the boundary so the render layer doesn't have to.
+const toNum = (v: unknown): number => {
+  if (typeof v === 'number') return v;
+  if (typeof v === 'string') {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  }
+  return 0;
+};
+
+async function loadCounts(sevenDaysAgoIso: string) {
+  // Single SQL round-trip — 17 scalar subqueries. Each is
+  // independent of the others; Postgres picks an optimal plan.
+  // Passing the ISO timestamp as a parameter avoids the JS
+  // Date-to-text serialization bug that bit us before.
+  const rows = (await db.execute(sql`
+    SELECT
+      (SELECT COUNT(*) FROM users) AS users,
+      (SELECT COUNT(*) FROM projects) AS projects,
+      (SELECT COUNT(*) FROM integrations) AS integrations,
+      (SELECT COUNT(*) FROM chat_conversations) AS conversations,
+      (SELECT COUNT(*) FROM chat_conversations WHERE status = 'active') AS active_conversations,
+      (SELECT COUNT(*) FROM chat_conversations WHERE mode = 'agent') AS agent_conversations,
+      (SELECT COUNT(*) FROM chat_messages) AS messages,
+      (SELECT COUNT(*) FROM generated_posts) AS drafts,
+      (SELECT COUNT(*) FROM scheduled_posts) AS scheduled,
+      (SELECT COUNT(*) FROM scheduled_posts WHERE status = 'posted') AS published,
+      (SELECT COUNT(*) FROM client_contexts) AS client_contexts,
+      (SELECT COUNT(*) FROM voice_engine_audit_log WHERE created_at >= ${sevenDaysAgoIso}::timestamp) AS voice_audit_7d,
+      (SELECT COUNT(*) FROM brand_analysis) AS brand_analyses,
+      (SELECT COUNT(*) FROM users WHERE created_at >= ${sevenDaysAgoIso}::timestamp) AS signups_7d,
+      (SELECT COUNT(*) FROM generated_posts WHERE created_at >= ${sevenDaysAgoIso}::timestamp) AS drafts_7d,
+      (SELECT COUNT(*) FROM scheduled_posts WHERE posted_at IS NOT NULL AND posted_at >= ${sevenDaysAgoIso}::timestamp) AS published_7d
+  `)) as unknown as CountRow[];
+
+  const r = rows[0];
+  if (!r) return ZERO_COUNTS;
+  return {
+    users: toNum(r.users),
+    projects: toNum(r.projects),
+    integrations: toNum(r.integrations),
+    conversations: toNum(r.conversations),
+    activeConversations: toNum(r.active_conversations),
+    agentConversations: toNum(r.agent_conversations),
+    messages: toNum(r.messages),
+    drafts: toNum(r.drafts),
+    scheduled: toNum(r.scheduled),
+    published: toNum(r.published),
+    clientContexts: toNum(r.client_contexts),
+    voiceAudit7d: toNum(r.voice_audit_7d),
+    brandAnalyses: toNum(r.brand_analyses),
+    signups7d: toNum(r.signups_7d),
+    drafts7d: toNum(r.drafts_7d),
+    published7d: toNum(r.published_7d),
+  };
+}
+
+async function loadHeygenByStatus(): Promise<Record<string, number>> {
+  const rows = (await db.execute(sql`
+    SELECT status, COUNT(*) AS c
+    FROM heygen_jobs
+    GROUP BY status
+  `)) as unknown as HeygenRow[];
+  const out: Record<string, number> = {};
+  for (const r of rows) out[r.status] = toNum(r.c);
+  return out;
+}
+
+async function loadRecentSignups() {
+  return db
     .select({
       id: users.id,
       email: users.email,
@@ -128,9 +168,10 @@ async function loadOverview() {
     .from(users)
     .orderBy(desc(users.createdAt))
     .limit(10);
+}
 
-  // Posts published in last 7 days (sample).
-  const recentPublished = await db
+async function loadRecentPublished() {
+  return db
     .select({
       id: scheduledPosts.id,
       platform: scheduledPosts.platform,
@@ -141,31 +182,37 @@ async function loadOverview() {
     .where(eq(scheduledPosts.status, 'posted'))
     .orderBy(desc(scheduledPosts.postedAt))
     .limit(10);
+}
+
+// Each block lands in its own try/catch. One failure renders a
+// degraded section but never crashes the whole page.
+async function safe<T>(label: string, fn: () => Promise<T>, fallback: T): Promise<T> {
+  try {
+    return await fn();
+  } catch (e) {
+    console.error(
+      `[admin/overview] ${label} failed:`,
+      e instanceof Error ? e.message : String(e),
+    );
+    return fallback;
+  }
+}
+
+async function loadOverview() {
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const sevenDaysAgoIso = sevenDaysAgo.toISOString();
+
+  const [counts, heygenByStatus, recentSignups, recentPublished] =
+    await Promise.all([
+      safe('counts', () => loadCounts(sevenDaysAgoIso), ZERO_COUNTS),
+      safe('heygenByStatus', () => loadHeygenByStatus(), {}),
+      safe('recentSignups', () => loadRecentSignups(), []),
+      safe('recentPublished', () => loadRecentPublished(), []),
+    ]);
 
   return {
-    users: userCount[0]?.c ?? 0,
-    projects: projectCount[0]?.c ?? 0,
-    integrations: integrationCount[0]?.c ?? 0,
-    conversations: conversationCount[0]?.c ?? 0,
-    activeConversations: activeConversationCount[0]?.c ?? 0,
-    agentConversations: agentConversationCount[0]?.c ?? 0,
-    messages: messageCount[0]?.c ?? 0,
-    drafts: draftCount[0]?.c ?? 0,
-    scheduled: scheduledCount[0]?.c ?? 0,
-    published: publishedCount[0]?.c ?? 0,
-    heygenByStatus: heygenByStatus.reduce<Record<string, number>>(
-      (acc, r) => {
-        acc[r.status] = r.c;
-        return acc;
-      },
-      {},
-    ),
-    clientContexts: clientContextCount[0]?.c ?? 0,
-    voiceAudit7d: voiceAuditRecent[0]?.c ?? 0,
-    brandAnalyses: brandAnalysisCount[0]?.c ?? 0,
-    signups7d: last7Signups[0]?.c ?? 0,
-    drafts7d: last7Drafts[0]?.c ?? 0,
-    published7d: last7Published[0]?.c ?? 0,
+    ...counts,
+    heygenByStatus,
     recentSignups,
     recentPublished,
   };
