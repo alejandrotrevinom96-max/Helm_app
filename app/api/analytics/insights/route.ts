@@ -11,11 +11,17 @@
 // the quality of "you have 4 posts, generate more". The model
 // budget here is "fast and free-ish".
 //
-// Idempotent / cheap: no DB write, no cache layer in this PR. If a
-// future sprint hits cost concerns, add a 5-minute Redis cache
-// keyed on (userId, postsThisWeek, postsLastWeek, ...). For now
-// per-page-load is fine — this is the analytics page, not a hot
-// path.
+// Perf fix (Sprint 7.20) — DB-backed 24h cache.
+//   Pre-fix this endpoint ran a fresh Haiku call on every render
+//   of /analytics (~9.5s wall-clock blocking the strip). Now we
+//   check `analytics_insights_cache` keyed on (userId,
+//   projectsHash, expiresAt > now()) before generating. On miss
+//   the AI runs as before and we upsert the result with a 24h
+//   TTL. The hash is sha256 of the sorted project IDs so
+//   adding/removing a project invalidates the cache naturally;
+//   bare metric changes don't (a 24h cadence on actionable
+//   bullets is fine — the underlying numbers update live in the
+//   widgets below).
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { db } from '@/lib/db';
@@ -26,8 +32,10 @@ import {
   waitlistResponses,
   waitlistPages,
   metricSnapshots,
+  analyticsInsightsCache,
 } from '@/lib/db/schema';
 import { eq, and, gte, lt, count, inArray, desc } from 'drizzle-orm';
+import { createHash } from 'crypto';
 import {
   anthropic,
   MODELS,
@@ -85,6 +93,41 @@ export async function GET() {
 
   if (projectIds.length === 0) {
     return NextResponse.json({ insights: [] });
+  }
+
+  // Cache key — sorted IDs hashed so order doesn't matter and the
+  // set itself is the input. Read first; if we have a fresh row
+  // (expiresAt > now) the founder gets the cached bullets
+  // instantly and we never touch Anthropic.
+  const projectsHash = createHash('sha256')
+    .update([...projectIds].sort().join(','))
+    .digest('hex')
+    .slice(0, 32);
+
+  const now = new Date();
+  const cached = await db
+    .select({
+      insights: analyticsInsightsCache.insights,
+      expiresAt: analyticsInsightsCache.expiresAt,
+    })
+    .from(analyticsInsightsCache)
+    .where(
+      and(
+        eq(analyticsInsightsCache.userId, user.id),
+        eq(analyticsInsightsCache.projectsHash, projectsHash),
+        gte(analyticsInsightsCache.expiresAt, now),
+      ),
+    )
+    .limit(1);
+
+  if (cached[0]) {
+    // Defensive: the column is jsonb so it round-trips as the
+    // same Insight[] shape, but treat it as unknown until we
+    // confirm.
+    const insights = Array.isArray(cached[0].insights)
+      ? (cached[0].insights as Insight[])
+      : [];
+    return NextResponse.json({ insights, cached: true });
   }
 
   const sevenDaysAgo = new Date(Date.now() - 7 * 86400000);
@@ -233,6 +276,42 @@ Return 2–3 insights now. JSON only.`;
       .map(asInsight)
       .filter((v): v is Insight => v !== null)
       .slice(0, 3);
+
+    // Persist the freshly generated insights with a 24h TTL.
+    // We upsert on (userId, projectsHash) so a re-generation
+    // overwrites the existing row rather than piling up history.
+    // Failures here are non-fatal: the founder gets their
+    // bullets back even if the cache write hiccups.
+    if (insights.length > 0) {
+      try {
+        const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+        await db
+          .insert(analyticsInsightsCache)
+          .values({
+            userId: user.id,
+            projectsHash,
+            insights,
+            generatedAt: now,
+            expiresAt,
+          })
+          .onConflictDoUpdate({
+            target: [
+              analyticsInsightsCache.userId,
+              analyticsInsightsCache.projectsHash,
+            ],
+            set: {
+              insights,
+              generatedAt: now,
+              expiresAt,
+            },
+          });
+      } catch (cacheErr) {
+        console.warn(
+          '[analytics-insights] cache write failed:',
+          cacheErr,
+        );
+      }
+    }
 
     return NextResponse.json({ insights });
   } catch (err) {

@@ -69,7 +69,7 @@ export function Sidebar({
             <line x1="3" y1="18" x2="21" y2="18" />
           </svg>
         </button>
-        <Link href="/analytics" className="flex items-center gap-2">
+        <Link href="/analytics" prefetch={false} className="flex items-center gap-2">
           <svg viewBox="0 0 32 32" className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={1.5}>
             <circle cx="16" cy="16" r="14" />
             <circle cx="16" cy="16" r="3" fill="var(--accent)" stroke="none" />
@@ -108,7 +108,7 @@ export function Sidebar({
         </button>
 
         <div className="p-4 border-b border-border">
-          <Link href="/analytics" className="flex items-center gap-2">
+          <Link href="/analytics" prefetch={false} className="flex items-center gap-2">
             <svg viewBox="0 0 32 32" className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={1.5}>
               <circle cx="16" cy="16" r="14" />
               <circle cx="16" cy="16" r="3" fill="var(--accent)" stroke="none" />
@@ -195,6 +195,14 @@ export function Sidebar({
           <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 px-3 mb-2">
             Workspace
           </div>
+          {/* Perf fix (Sprint 7.20) — prefetch={false} on every nav
+              link. Pre-fix, Next.js prefetched all 6+ targets when
+              they entered the viewport. Each prefetch hit the
+              middleware, which ran a Supabase auth check + an
+              onboarding DB SELECT — total ~7s of stacked latency
+              per dashboard render. With prefetch off the middleware
+              only runs on actual navigation, and the onboarding
+              cookie cache (see middleware.ts) absorbs the rest. */}
           {navItems.map((item) => {
             const Icon = item.icon;
             const active = pathname.startsWith(item.href);
@@ -202,6 +210,7 @@ export function Sidebar({
               <Link
                 key={item.href}
                 href={item.href}
+                prefetch={false}
                 className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
                   active
                     ? 'bg-accent-soft text-accent'
@@ -225,6 +234,7 @@ export function Sidebar({
               </div>
               <Link
                 href="/admin/inbox"
+                prefetch={false}
                 className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
                   pathname.startsWith('/admin/inbox')
                     ? 'bg-accent-soft text-accent'
@@ -236,6 +246,7 @@ export function Sidebar({
               </Link>
               <Link
                 href="/admin"
+                prefetch={false}
                 className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
                   pathname === '/admin'
                     ? 'bg-accent-soft text-accent'

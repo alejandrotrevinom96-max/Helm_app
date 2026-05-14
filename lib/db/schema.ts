@@ -1791,6 +1791,46 @@ export const metricDailySnapshots = pgTable(
   }),
 );
 
+// PR Sprint 7.20 — analytics insights cache.
+//
+// /api/analytics/insights calls Claude Haiku to summarize the
+// founder's weekly metrics. Pre-cache, the call ran on every
+// dashboard render (~9.5s wall-clock), so a tab-flip to
+// /analytics rebuilt the insight from scratch every time. We
+// cache by (userId, projectIdsHash) with a 24h TTL — long enough
+// to stop burning calls on repeated visits, short enough that
+// the insight reflects new daily snapshots within a day.
+//
+// Why (userId, hash) and not (userId, projectId): the insights
+// endpoint aggregates across ALL the founder's projects, so the
+// cache key has to encode the full set. We sort the IDs and
+// hash them (sha256 → hex slice) so adding/removing projects
+// invalidates the cache automatically.
+//
+// `insights` stores the rendered array [{type, text}, ...]
+// verbatim — same shape the endpoint returns. No re-derivation
+// on hit.
+export const analyticsInsightsCache = pgTable(
+  'analytics_insights_cache',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').notNull(),
+    // Hex digest of sha256(sortedProjectIds.join(',')). Stable
+    // across reorderings; changes when the project set changes.
+    projectsHash: text('projects_hash').notNull(),
+    insights: jsonb('insights').notNull(),
+    generatedAt: timestamp('generated_at').defaultNow().notNull(),
+    expiresAt: timestamp('expires_at').notNull(),
+  },
+  (t) => ({
+    // Upsert key — one cache row per (user, project set).
+    uniqIdx: uniqueIndex('analytics_insights_cache_uniq_idx').on(
+      t.userId,
+      t.projectsHash,
+    ),
+  }),
+);
+
 // ===== Type exports =====
 export type User = typeof users.$inferSelect;
 export type Project = typeof projects.$inferSelect;
@@ -1831,3 +1871,7 @@ export type ChatMessage = typeof chatMessages.$inferSelect;
 export type ChatConversation = typeof chatConversations.$inferSelect;
 export type ClientContextRow = typeof clientContexts.$inferSelect;
 export type VoiceEngineAuditEntry = typeof voiceEngineAuditLog.$inferSelect;
+export type AnalyticsInsightsCacheRow =
+  typeof analyticsInsightsCache.$inferSelect;
+export type NewAnalyticsInsightsCacheRow =
+  typeof analyticsInsightsCache.$inferInsert;

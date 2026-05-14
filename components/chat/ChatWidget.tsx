@@ -71,7 +71,14 @@ export function ChatWidget({ projectId }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
-  const [loading, setLoading] = useState(true);
+  // Perf fix (Sprint 7.20) — lazy conversation load. The widget
+  // pre-fix fetched /api/chat/conversation on mount (~6.8s
+  // background blocking on every dashboard render). Now we defer
+  // the fetch until the user actually opens the widget. `loading`
+  // starts false because we have nothing to load yet; flips to
+  // true the first time the panel opens and resets to false once
+  // the conversation hydrates.
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [unread, setUnread] = useState(0);
   const [switchingMode, setSwitchingMode] = useState(false);
@@ -94,8 +101,21 @@ export function ChatWidget({ projectId }: Props) {
     if (open) setUnread(0);
   }, [open]);
 
-  // Bootstrap: load or create the active conversation.
+  // Bootstrap: load or create the active conversation — but
+  // ONLY after the user opens the widget for the first time.
+  //
+  // Perf fix (Sprint 7.20): pre-fix this effect ran on mount and
+  // burned a ~6.8s network call in the background even when the
+  // founder never clicked the launcher. Gating on `open` means
+  // closed-widget renders cost nothing.
+  //
+  // The deps include `open` so the effect re-evaluates when it
+  // flips true. The `conversationId === null` check is what
+  // makes the body idempotent — we only fetch the first time
+  // open turns true (subsequent opens just show the cached
+  // history we already have in state).
   useEffect(() => {
+    if (!open || conversationId !== null) return;
     let cancelled = false;
     (async () => {
       setLoading(true);
@@ -132,7 +152,7 @@ export function ChatWidget({ projectId }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [projectId]);
+  }, [open, conversationId, projectId]);
 
   // Realtime subscription on the active conversation. Listens
   // for INSERTs on chat_messages filtered by conversation_id and

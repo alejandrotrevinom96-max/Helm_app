@@ -241,6 +241,20 @@ export async function middleware(request: NextRequest) {
   // set by /api/onboarding/wizard-state when the founder
   // finishes step 5 (first-content).
   //
+  // Perf fix (Sprint 7.20) — cached onboarding check.
+  //   Pre-fix this block fired a Supabase SELECT on every
+  //   protected request. Next.js prefetches sidebar Links in the
+  //   viewport, so each dashboard page load issued ~7 parallel
+  //   middleware invocations → ~7×1s of stacked DB latency.
+  //
+  //   Now: once the DB confirms `has_completed_onboarding=true`
+  //   we stamp a 1-hour HttpOnly cookie (`helm_onboarding_done`)
+  //   on the response. Subsequent requests skip the DB query
+  //   entirely. The cookie is short enough that a re-onboarded
+  //   account picks up the new state within an hour, and we
+  //   never cache the negative case (always re-query when the
+  //   flag is false) so a finished wizard reflects immediately.
+  //
   // RLS note: this query runs as the authenticated role via the
   // Supabase REST client and depends on the
   // "Users can read own row" policy (scripts/hotfix-users-rls-
@@ -259,16 +273,35 @@ export async function middleware(request: NextRequest) {
     !isApiRoute &&
     !pathname.startsWith('/onboarding')
   ) {
-    const { data: profile } = await supabase
-      .from('users')
-      .select('has_completed_onboarding')
-      .eq('id', user.id)
-      .single();
+    const cachedDone =
+      request.cookies.get('helm_onboarding_done')?.value === 'true';
 
-    if (profile && profile.has_completed_onboarding === false) {
-      const url = request.nextUrl.clone();
-      url.pathname = '/onboarding/welcome';
-      return applySecurityHeaders(NextResponse.redirect(url), nonce);
+    if (!cachedDone) {
+      const { data: profile } = await supabase
+        .from('users')
+        .select('has_completed_onboarding')
+        .eq('id', user.id)
+        .single();
+
+      if (profile && profile.has_completed_onboarding === false) {
+        const url = request.nextUrl.clone();
+        url.pathname = '/onboarding/welcome';
+        return applySecurityHeaders(NextResponse.redirect(url), nonce);
+      }
+
+      // Stamp the cache cookie on the outgoing response so the
+      // next request can skip the DB query. 1-hour TTL — long
+      // enough to absorb prefetch bursts, short enough that
+      // changes to the flag aren't sticky forever.
+      if (profile && profile.has_completed_onboarding === true) {
+        supabaseResponse.cookies.set('helm_onboarding_done', 'true', {
+          maxAge: 60 * 60,
+          httpOnly: true,
+          sameSite: 'lax',
+          secure: process.env.NODE_ENV === 'production',
+          path: '/',
+        });
+      }
     }
   }
 

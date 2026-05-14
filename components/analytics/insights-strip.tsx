@@ -38,33 +38,48 @@ export function InsightsStrip() {
     | { kind: 'error' }
   >({ kind: 'loading' });
 
+  // Perf fix (Sprint 7.20) — defer the fetch by 500ms.
+  //   The /analytics page renders 6+ widgets that all kick off
+  //   their own data fetches on mount. Firing the insights call
+  //   in the same tick steals connection slots + main-thread
+  //   time from the widgets the founder actually came here to
+  //   see. A small setTimeout lets the page paint, the widgets
+  //   start streaming, and THEN we ask Claude (or the cache) for
+  //   the bullets. The skeleton holds the slot so layout
+  //   doesn't jump on arrival.
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch('/api/analytics/insights', {
-          cache: 'no-store',
-        });
-        if (!res.ok) {
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const res = await fetch('/api/analytics/insights', {
+            cache: 'no-store',
+          });
+          if (!res.ok) {
+            if (!cancelled) setState({ kind: 'error' });
+            return;
+          }
+          const data = (await res.json()) as { insights?: Insight[] };
+          if (cancelled) return;
+          const insights = Array.isArray(data.insights) ? data.insights : [];
+          setState({ kind: 'ready', insights });
+        } catch {
           if (!cancelled) setState({ kind: 'error' });
-          return;
         }
-        const data = (await res.json()) as { insights?: Insight[] };
-        if (cancelled) return;
-        const insights = Array.isArray(data.insights) ? data.insights : [];
-        setState({ kind: 'ready', insights });
-      } catch {
-        if (!cancelled) setState({ kind: 'error' });
-      }
-    })();
+      })();
+    }, 500);
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
     };
   }, []);
 
-  // Skeleton — 2 rows of shimmer-ish bars at the height of an
-  // actual insight item, so the layout doesn't jump when data
-  // arrives.
+  // Skeleton — 3 shimmer-ish rows at the height of an actual
+  // insight item, so the layout doesn't jump when data arrives.
+  //
+  // Why 3 (was 2 pre-Sprint-7.20): the AI returns 2 or 3 bullets
+  // and most responses land at 3; reserving the taller slot
+  // avoids a 1-row jump on cache miss → AI fill.
   //
   // Hotfix: pre-fix the row background was `bg-bg-elev/40`,
   // which in dark mode resolved to oklch(18% 0 0) @ 40%
@@ -80,7 +95,7 @@ export function InsightsStrip() {
           This week
         </div>
         <div className="grid grid-cols-1 gap-2">
-          {[0, 1].map((i) => (
+          {[0, 1, 2].map((i) => (
             <div
               key={i}
               className="glass flex items-center gap-2 p-3 rounded-lg"
