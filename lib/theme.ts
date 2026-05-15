@@ -13,9 +13,16 @@ export async function getServerTheme(): Promise<Theme> {
   // is best-effort. The inline script in the layout is the real fallback.
   const headerStore = await headers();
   const prefer = headerStore.get('sec-ch-prefers-color-scheme');
-  if (prefer === 'dark') return 'dark';
+  if (prefer === 'light') return 'light';
 
-  return 'light';
+  // PR Sprint 7.25 Phase 1 — dark-first default for new visitors.
+  // The platform redesign is dark-first; defaulting unset visitors
+  // to dark surfaces the new visuals immediately. Existing users
+  // already have helm-theme=light on their cookie and stay on
+  // light until they actively toggle. Users with
+  // prefers-color-scheme: light still get light (explicit signal
+  // wins over the dark-first default).
+  return 'dark';
 }
 
 export const themeCookieName = COOKIE_NAME;

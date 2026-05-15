@@ -33,11 +33,47 @@ module.exports = {
           soft: 'var(--success-soft)',
         },
         danger: 'var(--danger)',
+        // PR Sprint 7.25 Phase 1 — per-page accent palette from the
+        // platform redesign. Each platform page in the design spec
+        // keys its glow + chips to one of these. Exposed as Tailwind
+        // colors so the migrated pages can use them as
+        // bg-d-blue / text-d-blue / border-d-blue / etc. The "2"
+        // variant is the lighter companion (e.g., for hover or
+        // light-on-dark text on a tinted background).
+        'd-blue': {
+          DEFAULT: 'var(--d-blue)',
+          2: 'var(--d-blue-2)',
+        },
+        'd-orange': {
+          DEFAULT: 'var(--d-orange)',
+          2: 'var(--d-orange-2)',
+        },
+        'd-purple': {
+          DEFAULT: 'var(--d-purple)',
+          2: 'var(--d-purple-2)',
+        },
+        'd-green': {
+          DEFAULT: 'var(--d-green)',
+          2: 'var(--d-green-2)',
+        },
+        'd-red': {
+          DEFAULT: 'var(--d-red)',
+          2: 'var(--d-red-2)',
+        },
       },
       fontFamily: {
         display: ['Fraunces', 'Georgia', 'serif'],
         sans: ['Geist', 'system-ui', 'sans-serif'],
         mono: ['JetBrains Mono', 'monospace'],
+        // PR Sprint 7.25 Phase 1 — platform redesign families.
+        // `instrument` is the heading serif used on every platform
+        // page's huge h1 (the 88px italic display text). `jakarta`
+        // is the platform body sans — slightly more geometric than
+        // Geist and used heavily in the platform shells (sidebar,
+        // cards). Existing pages keep using `display` (Fraunces)
+        // and `sans` (Geist) until migrated.
+        instrument: ['"Instrument Serif"', 'Georgia', 'serif'],
+        jakarta: ['"Plus Jakarta Sans"', '"Geist"', 'system-ui', 'sans-serif'],
       },
       fontSize: {
         'display-xl': [

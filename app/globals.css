@@ -25,27 +25,84 @@
   --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.04);
   --shadow-2: 0 4px 16px rgba(0, 0, 0, 0.06), 0 16px 48px rgba(0, 0, 0, 0.08);
   --shadow-glass: 0 1px 0 rgba(255, 255, 255, 0.8) inset, 0 8px 32px rgba(0, 0, 0, 0.06);
+  /* PR Sprint 7.25 Phase 1 — per-page accent palette. Surfaced in
+   * light theme too so cards / chips referencing the new tokens
+   * (var(--d-blue), etc.) don't render with an invalid color when
+   * a founder is on light mode. The light-theme values are darker
+   * mid-tones so they read on a pale background. */
+  --d-blue: #2563eb;
+  --d-blue-2: #3b82f6;
+  --d-orange: #ea580c;
+  --d-orange-2: #f97316;
+  --d-purple: #7c3aed;
+  --d-purple-2: #8b5cf6;
+  --d-green: #16a34a;
+  --d-green-2: #22c55e;
+  --d-red: #dc2626;
+  --d-red-2: #ef4444;
   --color-scheme: light;
 }
 
+/* PR Sprint 7.25 Phase 1 — dark theme aligned with the new
+ * "Platform" design system (5 redesigned platform pages share these
+ * tokens). The terracotta accent stays as one of two brand colors;
+ * vivid orange (#F97316) joins as the primary sidebar/glow accent
+ * because the platform pages lean on it heavily. Per-page accents
+ * (blue, purple, green, red) are also exposed as tokens so cards
+ * can opt into the right glow without inline styles.
+ *
+ * Names map:
+ *   --bg                ←  #07091A   (deep navy canvas)
+ *   --bg-elev           ←  #04050E   (deeper canvas for layered surfaces)
+ *   --surface-1         ←  rgba(15, 20, 36, 0.55)  (glass card)
+ *   --surface-2         ←  rgba(15, 20, 36, 0.85)  (modal / opaque glass)
+ *   --border            ←  rgba(255,255,255,0.08)  (default stroke)
+ *   --border-bright     ←  rgba(255,255,255,0.18)  (hover stroke)
+ *   --text-1            ←  #F5F7FF   (ink, primary text)
+ *   --text-2            ←  #A6B0C6   (secondary text)
+ *   --text-3            ←  #6B7491   (tertiary / mono)
+ *   --accent (terracotta) stays for the existing brand surfaces
+ *   --d-orange          ←  #F97316   (vivid orange — new primary
+ *                                     accent on platform pages)
+ *   --d-blue / purple / green / red expose the per-page glow palette
+ *
+ * Light theme is left untouched — founders on light keep the
+ * existing visuals until per-page migrations land in subsequent
+ * phases.
+ */
 [data-theme='dark'] {
-  --bg: oklch(15% 0 0);
-  --bg-elev: oklch(18% 0 0);
-  --surface-1: rgba(255, 255, 255, 0.04);
-  --surface-2: rgba(255, 255, 255, 0.08);
+  --bg: #07091A;
+  --bg-elev: #04050E;
+  --surface-1: rgba(15, 20, 36, 0.55);
+  --surface-2: rgba(15, 20, 36, 0.85);
   --border: rgba(255, 255, 255, 0.08);
   --border-bright: rgba(255, 255, 255, 0.18);
-  --text-1: oklch(98% 0 0);
-  --text-2: oklch(75% 0 0);
-  --text-3: oklch(50% 0 0);
-  --accent: #e8593f;
-  --accent-hover: #ff6b47;
-  --accent-soft: rgba(232, 89, 63, 0.08);
-  --accent-glow: rgba(232, 89, 63, 0.4);
-  --accent-grad: linear-gradient(135deg, #e8593f 0%, #ff8e53 100%);
-  --success: oklch(72% 0.18 145);
-  --success-soft: rgba(74, 222, 128, 0.1);
-  --danger: oklch(65% 0.22 25);
+  --text-1: #f5f7ff;
+  --text-2: #a6b0c6;
+  --text-3: #6b7491;
+  /* Terracotta — kept for existing brand surfaces (CTAs, share
+   * button, generation panel button). Slightly shifted hex to read
+   * cleaner on the navy canvas. */
+  --accent: #f97316;
+  --accent-hover: #fb923c;
+  --accent-soft: rgba(249, 115, 22, 0.10);
+  --accent-glow: rgba(249, 115, 22, 0.40);
+  --accent-grad: linear-gradient(135deg, #f97316 0%, #c2410c 100%);
+  /* Per-page accent palette. Each platform HTML in the design spec
+   * keys the page glow to one of these. */
+  --d-blue: #3b82f6;
+  --d-blue-2: #60a5fa;
+  --d-orange: #f97316;
+  --d-orange-2: #fb923c;
+  --d-purple: #8b5cf6;
+  --d-purple-2: #c4b5fd;
+  --d-green: #22c55e;
+  --d-green-2: #86efac;
+  --d-red: #ef4444;
+  --d-red-2: #fca5a5;
+  --success: #22c55e;
+  --success-soft: rgba(34, 197, 94, 0.10);
+  --danger: #ef4444;
   --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.4);
   --shadow-2: 0 4px 16px rgba(0, 0, 0, 0.4), 0 16px 48px rgba(0, 0, 0, 0.6);
   --shadow-glass: 0 1px 0 rgba(255, 255, 255, 0.05) inset,

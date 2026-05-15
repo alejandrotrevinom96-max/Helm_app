@@ -38,6 +38,11 @@ export const metadata: Metadata = {
   },
 };
 
+// PR Sprint 7.25 Phase 1 — dark-first default. New visitors land
+// on dark unless the cookie says light or the OS explicitly prefers
+// light (matches the server-side resolver in lib/theme.ts so the
+// SSR HTML's data-theme matches what the boot script computes,
+// avoiding a flash of the wrong theme).
 const themeBootScript = `
 (() => {
   try {
@@ -45,9 +50,10 @@ const themeBootScript = `
     const t = m && m[1];
     if (t === 'light' || t === 'dark') {
       document.documentElement.setAttribute('data-theme', t);
-    } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-      document.documentElement.setAttribute('data-theme', 'dark');
+      return;
     }
+    const prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+    document.documentElement.setAttribute('data-theme', prefersLight ? 'light' : 'dark');
   } catch (e) {}
 })();
 `;
@@ -99,8 +105,14 @@ export default async function RootLayout({
         />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
+        {/* PR Sprint 7.25 Phase 1 — design-system fonts. Plus Jakarta
+            Sans + Instrument Serif join the existing stack so the
+            redesigned platform pages can opt into them via the new
+            `font-instrument` and `font-jakarta` Tailwind families
+            without losing the existing Fraunces / Geist that the
+            marketing site + dashboard already use. */}
         <link
-          href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,300;1,9..144,400;1,9..144,500&family=JetBrains+Mono:wght@400;500;600&family=Geist:wght@300;400;500;600;700&display=swap"
+          href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,300;1,9..144,400;1,9..144,500&family=JetBrains+Mono:wght@400;500;600;700&family=Geist:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Instrument+Serif:ital@0;1&display=swap"
           rel="stylesheet"
         />
         <script
