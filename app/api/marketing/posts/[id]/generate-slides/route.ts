@@ -94,9 +94,59 @@ function buildSlidePainPoint(
   return `${slideText} (carousel about: ${carouselPainPoint})`.slice(0, 400);
 }
 
+// PR Sprint 7.25 Phase 11.9 — top-level try/catch so any throw
+// inside the slide loop (Flux SDK panic, fal CDN timeout, Supabase
+// storage failure, IR pipeline bug, DB transient) returns a JSON
+// payload instead of bubbling up to Vercel's default plain-text
+// "An error occurred" page. The client did `await res.json()`
+// without inspecting content-type, so a plain-text error surfaced
+// as `Unexpected token 'A', 'An error o'... is not valid JSON` —
+// useless for the founder, useless for debugging. Now: any
+// unhandled error renders as `{ error, hint }` with a 500 and the
+// real message goes to Vercel logs.
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    return await handle(request, params);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.error('[generate-slides] unhandled error:', message, e);
+    // Friendly mapping — same vocabulary the /api/visuals/generate
+    // route uses so the UI shows consistent copy across surfaces.
+    const lower = message.toLowerCase();
+    let userMessage = 'Slide generation hit an unexpected error.';
+    if (lower.includes('timeout') || lower.includes('timed out')) {
+      userMessage =
+        'Slide generation took too long. Try again — Flux occasionally lags.';
+    } else if (lower.includes('rate limit') || lower.includes('429')) {
+      userMessage =
+        'Too many image requests this hour. Wait a minute and retry.';
+    } else if (
+      lower.includes('content policy') ||
+      lower.includes('safety') ||
+      lower.includes('nsfw')
+    ) {
+      userMessage =
+        'One of the slide prompts tripped Flux’s safety filter. Try rephrasing the draft.';
+    }
+    return NextResponse.json(
+      {
+        success: false,
+        error: userMessage,
+        hint: 'Hit "↻ Regenerate" to try again.',
+        debug:
+          process.env.NODE_ENV === 'development' ? message : undefined,
+      },
+      { status: 500 },
+    );
+  }
+}
+
+async function handle(
+  request: Request,
+  params: Promise<{ id: string }>,
 ) {
   const supabase = await createClient();
   const {
@@ -236,26 +286,46 @@ export async function POST(
   for (let i = 0; i < slides.length; i++) {
     const slide = slides[i];
     const hint = buildSlidePromptHint(slide, i, slides.length);
-    // Feed the slide hint to generateVisual via the postContent
-    // field — that's already the surface the existing prompt
-    // builder reads + integrates with the brand bible.
-    const result = await generateVisual({
-      platform,
-      postContent: hint,
-      brandBible: bible,
-      style,
-      aspectRatio: 'square', // IG carousels = 1:1
-      // PR Sprint 7.24 — IR pipeline inputs. With these set, each
-      // slide goes through subject-extraction + brand-visual-
-      // language + platform-aesthetics composition instead of the
-      // lighter legacy template.
-      // PR Sprint 7.25 Phase 9 — per-slide painPoint instead of
-      // the shared carousel painPoint, so the IR subject extractor
-      // produces a different visual concept per slide. See
-      // buildSlidePainPoint for the merge strategy.
-      painPoint: buildSlidePainPoint(slide, draftPainPoint),
-      contentType: 'carousel',
-    });
+    // PR Sprint 7.25 Phase 11.9 — per-slide try/catch. Before
+    // this, a single Flux throw (timeout, content-policy hit,
+    // fal SDK panic) blew up the entire batch — the founder lost
+    // ALL 8 slides instead of 1. Now: each slide's failure is
+    // isolated. We push to `failures[]` (already the existing
+    // pattern for null results) and continue to the next slide.
+    // The bundle's final response still flags the batch as failed
+    // unless EVERY slide landed, but at least the founder sees
+    // which slide tripped + the others render normally.
+    let result: Awaited<ReturnType<typeof generateVisual>> | null = null;
+    try {
+      result = await generateVisual({
+        platform,
+        postContent: hint,
+        brandBible: bible,
+        style,
+        aspectRatio: 'square', // IG carousels = 1:1
+        // PR Sprint 7.24 — IR pipeline inputs. With these set, each
+        // slide goes through subject-extraction + brand-visual-
+        // language + platform-aesthetics composition instead of the
+        // lighter legacy template.
+        // PR Sprint 7.25 Phase 9 — per-slide painPoint instead of
+        // the shared carousel painPoint, so the IR subject extractor
+        // produces a different visual concept per slide. See
+        // buildSlidePainPoint for the merge strategy.
+        painPoint: buildSlidePainPoint(slide, draftPainPoint),
+        contentType: 'carousel',
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(
+        `[generate-slides] slide ${i + 1} threw:`,
+        msg.slice(0, 300),
+      );
+      failures.push({
+        slideIndex: i,
+        reason: `slide ${i + 1} threw: ${msg.slice(0, 200)}`,
+      });
+      continue;
+    }
     if (!result?.url) {
       failures.push({
         slideIndex: i,
@@ -272,16 +342,35 @@ export async function POST(
     // fall back to the fal.ai URL on failure (still fresh
     // during the current session, surfaced in failures[] for
     // diagnostics).
-    const uploaded = await uploadVisualFromUrl(
-      result.url,
-      user.id,
-      `${id}-slide-${i}`,
-    );
-    const permanentUrl = uploaded?.publicUrl ?? result.url;
-    if (!uploaded) {
+    // PR Sprint 7.25 Phase 11.9 — also wrap the rehost in
+    // try/catch so a Supabase Storage panic doesn't kill the
+    // batch. If rehost throws, fall back to the fal.ai URL with
+    // its 1-hour TTL (better than losing the whole slide).
+    let permanentUrl: string;
+    try {
+      const uploaded = await uploadVisualFromUrl(
+        result.url,
+        user.id,
+        `${id}-slide-${i}`,
+      );
+      permanentUrl = uploaded?.publicUrl ?? result.url;
+      if (!uploaded) {
+        failures.push({
+          slideIndex: i,
+          reason:
+            'rehost to Supabase failed; using transient fal.ai URL (will expire ~1h)',
+        });
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(
+        `[generate-slides] rehost slide ${i + 1} threw:`,
+        msg.slice(0, 300),
+      );
+      permanentUrl = result.url;
       failures.push({
         slideIndex: i,
-        reason: 'rehost to Supabase failed; using transient fal.ai URL (will expire ~1h)',
+        reason: `rehost threw: ${msg.slice(0, 150)} — using transient fal.ai URL`,
       });
     }
     successes.push({

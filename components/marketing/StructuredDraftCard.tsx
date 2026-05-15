@@ -306,7 +306,15 @@ export function StructuredDraftCard({
         `/api/marketing/posts/${draftId}/generate-slides${forceRegen ? '?regenerate=1' : ''}`,
         { method: 'POST' },
       );
-      const data = (await res.json()) as {
+      // PR Sprint 7.25 Phase 11.9 — defensive parse. The endpoint
+      // now always returns JSON (Phase-11.9 server-side try/catch),
+      // but if a deploy lag or a route-level Next crash gives us
+      // plain text, .json() throws and the founder used to see
+      // "Unexpected token 'A', 'An error o'… is not valid JSON".
+      // Parse via .text() + JSON.parse with a fallback so the user
+      // gets a real message even when the server misbehaves.
+      const rawText = await res.text();
+      let data: {
         success?: boolean;
         visualUrls?: (string | null)[];
         slidesGenerated?: number;
@@ -315,7 +323,23 @@ export function StructuredDraftCard({
         error?: string;
         hint?: string;
         failures?: { slideIndex: number; reason: string }[];
-      };
+      } = {};
+      try {
+        data = JSON.parse(rawText);
+      } catch {
+        // Plain-text Vercel error pages start with "An error
+        // occurred" — surface that as a friendly message instead
+        // of the JSON parse exception.
+        const looksLikeVercelErrorPage =
+          rawText.startsWith('An error') || rawText.startsWith('<!DOCTYPE');
+        data = {
+          success: false,
+          error: looksLikeVercelErrorPage
+            ? 'Server didn’t respond with JSON (deployment may still be warming up).'
+            : `Unexpected response: ${rawText.slice(0, 120)}`,
+          hint: 'Try again in a few seconds.',
+        };
+      }
       if (!res.ok || !data.success) {
         setSlides({
           kind: 'error',
