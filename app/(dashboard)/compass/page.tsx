@@ -34,7 +34,7 @@ import {
 } from '@/lib/db/schema';
 import { eq, and, gte, desc, asc, sql } from 'drizzle-orm';
 import { CompassLandingClient } from './landing-client';
-import { GlassCard } from '@/components/ui/glass-card';
+import { AmbientBackground } from '@/components/ui/ambient-background';
 
 export default async function CompassPage() {
   const supabase = await createClient();
@@ -46,20 +46,27 @@ export default async function CompassPage() {
   const project = await getActiveProject(user.id);
   if (!project) {
     return (
-      <div className="p-6 md:p-10 max-w-3xl">
-        <h1 className="font-display text-display-lg font-light tracking-tight mb-2">
-          Compass
-        </h1>
-        <p className="text-text-2 mb-8">
-          Strategic dashboard — Priority Matrix, Positioning Benchmark,
-          Strategic Timeline, Blind Spots, Decision Log.
-        </p>
-        <GlassCard className="p-8 text-center">
-          <p className="text-text-2">
-            Creá un proyecto primero para ver tu Compass dashboard.
-          </p>
-        </GlassCard>
-      </div>
+      <AmbientBackground accentTint="orange">
+        <main className="platform-main">
+          <header className="platform-page-head platform-reveal-1">
+            <span className="platform-eyebrow platform-eyebrow-orange">
+              live · strategic command
+            </span>
+            <h1>
+              Compass<span className="accent-fire-grad">.</span>
+            </h1>
+            <p className="sub">
+              Strategic dashboard — Priority Matrix, Positioning Benchmark,
+              Strategic Timeline, Blind Spots, Decision Log.
+            </p>
+          </header>
+          <section className="platform-card platform-card-glow-orange platform-reveal-2">
+            <p className="platform-desc" style={{ textAlign: 'center' }}>
+              Create a project first to see your Compass dashboard.
+            </p>
+          </section>
+        </main>
+      </AmbientBackground>
     );
   }
 

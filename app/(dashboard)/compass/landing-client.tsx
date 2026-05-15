@@ -2,29 +2,21 @@
 
 // PR #77 — Sprint 7.4: /compass landing.
 //
-// Replaces the VC-compass single-page reading (dial + bull/bear +
-// 5 dimensions) with a strategic dashboard that summarizes the
-// five deep-dive features built across Sprints 7.1A–7.1E:
-//   - Priority Matrix (compass_decisions … no, priority_items)
-//   - Positioning Benchmark (competitors + positioning_benchmarks)
-//   - Strategic Timeline (compass_tasks)
-//   - Blind Spots (compass_blind_spots)
-//   - Decision Log (compass_decisions)
+// Strategic dashboard for the five deep-dive features (Priority
+// Matrix, Positioning Benchmark, Strategic Timeline, Blind Spots,
+// Decision Log). Each card links to its deep-dive page; cards show
+// a one-glance summary so the founder can spot what needs attention
+// without clicking into every section.
 //
-// Each card is a `<Link>` to its deep-dive page; cards show a
-// one-glance summary (quadrant counts, top competitor name, most
-// recent decision alignment score, etc.) so the founder can spot
-// what needs attention without clicking into every section.
-//
-// The legacy VC-compass UI lives on disk at
-// app/(dashboard)/compass/{client.tsx, compass-dial.tsx,
-// dimension-breakdown.tsx, etc.} but is no longer rendered from
-// page.tsx. Revert = one server component file.
+// PR Sprint 7.25 Phase 5 — repainted on top of the platform redesign
+// (AmbientBackground wrapper, orange "live · strategic command"
+// eyebrow, fire-gradient italic h1 accent, 5 platform-feature-card
+// links with per-feature glow colors). Data fetching stays in
+// page.tsx; this client just renders.
 import Link from 'next/link';
-import { GlassCard } from '@/components/ui/glass-card';
+import { AmbientBackground } from '@/components/ui/ambient-background';
 import { CompassSubNav } from '@/components/compass/sub-nav';
 
-// ── Server-shaped data we receive from page.tsx ───────────────
 interface BenchmarkRow {
   id: string;
   marketGap: string | null;
@@ -36,7 +28,6 @@ interface BenchmarkRow {
 interface MatrixSummary {
   id: string;
   createdAt: string | null;
-  // Quadrant counts — computed server-side from priority_items.
   doNow: number;
   scheduled: number;
   fillers: number;
@@ -95,19 +86,18 @@ function formatDate(iso: string | null): string {
   });
 }
 
-function alignmentTone(score: number | null): string {
-  if (score === null) return 'text-text-3';
-  if (score >= 80) return 'text-emerald-500';
-  if (score >= 60) return 'text-amber-500';
-  if (score >= 40) return 'text-orange-500';
-  return 'text-danger';
+function alignmentClass(score: number | null): string {
+  if (score === null) return 'score score-mid';
+  if (score >= 80) return 'score score-high';
+  if (score >= 50) return 'score score-mid';
+  return 'score score-low';
 }
 
-const SEVERITY_DOT: Record<string, string> = {
-  critical: 'bg-danger',
-  high: 'bg-orange-500',
-  medium: 'bg-amber-500',
-  low: 'bg-blue-500',
+const SEVERITY_CLASS: Record<string, string> = {
+  critical: 'dot-severity-critical',
+  high: 'dot-severity-high',
+  medium: 'dot-severity-medium',
+  low: 'dot-severity-low',
 };
 
 export function CompassLandingClient({
@@ -120,306 +110,269 @@ export function CompassLandingClient({
   recentDecisions,
 }: Props) {
   return (
-    <div className="p-4 md:p-8 space-y-6 max-w-6xl mx-auto">
-      <header className="space-y-2">
+    <AmbientBackground accentTint="orange">
+      <main className="platform-main platform-main-wide">
         <CompassSubNav active="home" />
-        <div>
-          <h1 className="font-display text-display-md font-light tracking-tight">
-            Compass
-          </h1>
-          <p className="text-text-2 text-sm max-w-2xl">
-            Strategic dashboard for{' '}
-            <span className="text-text-1 font-medium">{project.name}</span>.
-            Click any feature for the deep dive.
-          </p>
-        </div>
-      </header>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Priority Matrix */}
-        <Link
-          href="/compass/priority"
-          className="group block focus:outline-none focus:ring-2 focus:ring-accent rounded-xl"
+        <header className="platform-page-head platform-reveal-1">
+          <span className="platform-eyebrow platform-eyebrow-orange">
+            live · strategic command
+          </span>
+          <h1>
+            Compass<span className="accent-fire-grad">.</span>
+          </h1>
+          <p className="sub">
+            Strategic dashboard for{' '}
+            <b style={{ color: 'var(--text-1)' }}>{project.name}</b>. Five
+            features keep your roadmap honest — click any card for the deep
+            dive.
+          </p>
+        </header>
+
+        <div
+          className="platform-metrics-grid platform-metrics-grid-2 platform-reveal-2"
+          style={{ marginBottom: '20px' }}
         >
-          <GlassCard className="p-5 hover:border-accent/40 transition-colors h-full">
-            <CardHeader
-              eyebrow="Priority Matrix"
-              title={
-                matrix
-                  ? `${matrix.total} items prioritized`
-                  : 'No matrix yet'
-              }
-              meta={
-                matrix?.createdAt
-                  ? `Generated ${formatDate(matrix.createdAt)}`
-                  : null
-              }
-            />
+          {/* Priority Matrix — green glow */}
+          <Link
+            href="/compass/priority"
+            className="platform-feature-card platform-card-glow-green"
+            style={{ ['--platform-glow' as string]: 'rgba(34, 197, 94, 0.22)' }}
+          >
+            <div className="platform-feature-head">
+              <div>
+                <div className="platform-feature-eyebrow">Priority Matrix</div>
+                <h2 className="platform-feature-title">
+                  {matrix
+                    ? `${matrix.total} items prioritized`
+                    : 'No matrix yet'}
+                </h2>
+                {matrix?.createdAt && (
+                  <div className="platform-feature-meta">
+                    Generated {formatDate(matrix.createdAt)}
+                  </div>
+                )}
+              </div>
+              <span className="platform-feature-arrow" aria-hidden>
+                →
+              </span>
+            </div>
             {matrix ? (
-              <div className="grid grid-cols-4 gap-2 mt-3">
-                <QuadrantStat
-                  label="Do now"
-                  count={matrix.doNow}
-                  tint="bg-emerald-500/15 text-emerald-500"
-                />
-                <QuadrantStat
-                  label="Scheduled"
-                  count={matrix.scheduled}
-                  tint="bg-blue-500/15 text-blue-500"
-                />
-                <QuadrantStat
-                  label="Fillers"
-                  count={matrix.fillers}
-                  tint="bg-amber-500/15 text-amber-500"
-                />
-                <QuadrantStat
-                  label="Avoid"
-                  count={matrix.avoid}
-                  tint="bg-text-3/15 text-text-3"
-                />
+              <div className="platform-quadrant-grid">
+                <div className="platform-quadrant-tile platform-quadrant-tile-now">
+                  <div className="count">{matrix.doNow}</div>
+                  <div className="label">Do now</div>
+                </div>
+                <div className="platform-quadrant-tile platform-quadrant-tile-scheduled">
+                  <div className="count">{matrix.scheduled}</div>
+                  <div className="label">Scheduled</div>
+                </div>
+                <div className="platform-quadrant-tile platform-quadrant-tile-fillers">
+                  <div className="count">{matrix.fillers}</div>
+                  <div className="label">Fillers</div>
+                </div>
+                <div className="platform-quadrant-tile platform-quadrant-tile-avoid">
+                  <div className="count">{matrix.avoid}</div>
+                  <div className="label">Avoid</div>
+                </div>
               </div>
             ) : (
-              <p className="text-sm text-text-3 mt-3">
+              <p className="platform-feature-body">
                 Generate your first Priority Matrix to see tasks by Impact ×
                 Effort.
               </p>
             )}
-          </GlassCard>
-        </Link>
+          </Link>
 
-        {/* Positioning Benchmark */}
-        <Link
-          href="/compass/competitors"
-          className="group block focus:outline-none focus:ring-2 focus:ring-accent rounded-xl"
-        >
-          <GlassCard className="p-5 hover:border-accent/40 transition-colors h-full">
-            <CardHeader
-              eyebrow="Positioning Benchmark"
-              title={
-                benchmark
-                  ? `${benchmark.competitorsAnalyzed ?? '—'} competitors analyzed`
-                  : 'No benchmark yet'
-              }
-              meta={
-                benchmark?.createdAt
-                  ? `Generated ${formatDate(benchmark.createdAt)}`
-                  : null
-              }
-            />
+          {/* Positioning Benchmark — blue glow */}
+          <Link
+            href="/compass/competitors"
+            className="platform-feature-card platform-card-glow-blue"
+            style={{ ['--platform-glow' as string]: 'rgba(96, 165, 250, 0.22)' }}
+          >
+            <div className="platform-feature-head">
+              <div>
+                <div className="platform-feature-eyebrow">
+                  Positioning Benchmark
+                </div>
+                <h2 className="platform-feature-title">
+                  {benchmark
+                    ? `${benchmark.competitorsAnalyzed ?? '—'} competitors analyzed`
+                    : 'No benchmark yet'}
+                </h2>
+                {benchmark?.createdAt && (
+                  <div className="platform-feature-meta">
+                    Generated {formatDate(benchmark.createdAt)}
+                  </div>
+                )}
+              </div>
+              <span className="platform-feature-arrow" aria-hidden>
+                →
+              </span>
+            </div>
             {benchmark ? (
-              <div className="mt-3 space-y-1.5">
+              <div style={{ marginTop: '12px' }}>
                 {topCompetitor?.name && (
-                  <div className="text-xs text-text-2">
-                    <span className="text-text-3">Top:</span>{' '}
-                    <span className="font-medium text-text-1">
+                  <div
+                    style={{
+                      fontSize: '13px',
+                      color: 'var(--text-2)',
+                      marginBottom: '6px',
+                    }}
+                  >
+                    <span style={{ color: 'var(--text-3)' }}>Top:</span>{' '}
+                    <b style={{ color: 'var(--text-1)' }}>
                       {topCompetitor.name}
-                    </span>
+                    </b>
                   </div>
                 )}
                 {benchmark.marketGap && (
-                  <p className="text-xs text-text-3 line-clamp-2 italic">
+                  <p
+                    style={{
+                      fontSize: '13px',
+                      color: 'var(--text-2)',
+                      fontStyle: 'italic',
+                      margin: 0,
+                      display: '-webkit-box',
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: 'vertical',
+                      overflow: 'hidden',
+                      lineHeight: 1.5,
+                    }}
+                  >
                     “{benchmark.marketGap}”
                   </p>
                 )}
               </div>
             ) : (
-              <p className="text-sm text-text-3 mt-3">
+              <p className="platform-feature-body">
                 Identify competitors + market gap in ~30 seconds.
               </p>
             )}
-          </GlassCard>
-        </Link>
+          </Link>
 
-        {/* Strategic Timeline */}
-        <Link
-          href="/compass/timeline"
-          className="group block focus:outline-none focus:ring-2 focus:ring-accent rounded-xl"
-        >
-          <GlassCard className="p-5 hover:border-accent/40 transition-colors h-full">
-            <CardHeader
-              eyebrow="Strategic Timeline"
-              title={
-                upcomingTasks.length > 0
-                  ? `${upcomingTasks.length} upcoming task${upcomingTasks.length === 1 ? '' : 's'}`
-                  : 'No tasks scheduled'
-              }
-              meta={null}
-            />
+          {/* Strategic Timeline — purple glow */}
+          <Link
+            href="/compass/timeline"
+            className="platform-feature-card platform-card-glow-purple"
+            style={{ ['--platform-glow' as string]: 'rgba(139, 92, 246, 0.22)' }}
+          >
+            <div className="platform-feature-head">
+              <div>
+                <div className="platform-feature-eyebrow">
+                  Strategic Timeline
+                </div>
+                <h2 className="platform-feature-title">
+                  {upcomingTasks.length > 0
+                    ? `${upcomingTasks.length} upcoming task${upcomingTasks.length === 1 ? '' : 's'}`
+                    : 'No tasks scheduled'}
+                </h2>
+              </div>
+              <span className="platform-feature-arrow" aria-hidden>
+                →
+              </span>
+            </div>
             {upcomingTasks.length > 0 ? (
-              <ul className="mt-3 space-y-1.5">
+              <ul className="platform-feature-list">
                 {upcomingTasks.slice(0, 3).map((t) => (
-                  <li key={t.id} className="text-xs flex items-baseline gap-2">
-                    <span className="text-text-3 font-mono shrink-0 w-12">
-                      {formatDate(t.scheduledFor)}
-                    </span>
-                    <span className="text-text-1 truncate">{t.title}</span>
+                  <li key={t.id}>
+                    <span className="stamp">{formatDate(t.scheduledFor)}</span>
+                    <span className="body">{t.title}</span>
                   </li>
                 ))}
               </ul>
             ) : (
-              <p className="text-sm text-text-3 mt-3">
+              <p className="platform-feature-body">
                 Auto-populate from Priority Matrix.
               </p>
             )}
-          </GlassCard>
-        </Link>
+          </Link>
 
-        {/* Blind Spots */}
-        <Link
-          href="/compass/blind-spots"
-          className="group block focus:outline-none focus:ring-2 focus:ring-accent rounded-xl"
-        >
-          <GlassCard className="p-5 hover:border-accent/40 transition-colors h-full">
-            <CardHeader
-              eyebrow="Blind Spots"
-              title={
-                openBlindSpots.length > 0
-                  ? `${openBlindSpots.length} open issues`
-                  : 'No open findings'
-              }
-              meta={null}
-            />
+          {/* Blind Spots — red glow */}
+          <Link
+            href="/compass/blind-spots"
+            className="platform-feature-card platform-card-glow-red"
+            style={{ ['--platform-glow' as string]: 'rgba(239, 68, 68, 0.22)' }}
+          >
+            <div className="platform-feature-head">
+              <div>
+                <div className="platform-feature-eyebrow">Blind Spots</div>
+                <h2 className="platform-feature-title">
+                  {openBlindSpots.length > 0
+                    ? `${openBlindSpots.length} open issue${openBlindSpots.length === 1 ? '' : 's'}`
+                    : 'No open findings'}
+                </h2>
+              </div>
+              <span className="platform-feature-arrow" aria-hidden>
+                →
+              </span>
+            </div>
             {openBlindSpots.length > 0 ? (
-              <ul className="mt-3 space-y-1.5">
+              <ul className="platform-feature-list">
                 {openBlindSpots.slice(0, 3).map((s) => (
-                  <li
-                    key={s.id}
-                    className="text-xs flex items-center gap-2 min-w-0"
-                  >
+                  <li key={s.id}>
                     <span
-                      className={`w-2 h-2 rounded-full shrink-0 ${
-                        SEVERITY_DOT[s.severity ?? ''] ?? 'bg-text-3'
+                      className={`dot-severity ${
+                        SEVERITY_CLASS[s.severity ?? ''] ??
+                        'dot-severity-unknown'
                       }`}
                       aria-label={s.severity ?? 'unknown severity'}
                     />
-                    <span className="text-text-1 truncate">{s.title}</span>
+                    <span className="body">{s.title}</span>
                   </li>
                 ))}
               </ul>
             ) : (
-              <p className="text-sm text-text-3 mt-3">
+              <p className="platform-feature-body">
                 6 frameworks scan credibility, pricing, audience, content
                 fit, platform scatter, and social proof.
               </p>
             )}
-          </GlassCard>
-        </Link>
+          </Link>
 
-        {/* Decision Log — full width */}
-        <Link
-          href="/compass/decisions"
-          className="group block focus:outline-none focus:ring-2 focus:ring-accent rounded-xl md:col-span-2"
-        >
-          <GlassCard className="p-5 hover:border-accent/40 transition-colors">
-            <CardHeader
-              eyebrow="Decision Log"
-              title={
-                recentDecisions.length > 0
-                  ? `${recentDecisions.length} recent decision${recentDecisions.length === 1 ? '' : 's'}`
-                  : 'Log your first strategic decision'
-              }
-              meta={null}
-            />
+          {/* Decision Log — orange glow, full width */}
+          <Link
+            href="/compass/decisions"
+            className="platform-feature-card platform-card-glow-orange"
+            style={{
+              ['--platform-glow' as string]: 'rgba(249, 115, 22, 0.22)',
+              gridColumn: '1 / -1',
+            }}
+          >
+            <div className="platform-feature-head">
+              <div>
+                <div className="platform-feature-eyebrow">Decision Log</div>
+                <h2 className="platform-feature-title">
+                  {recentDecisions.length > 0
+                    ? `${recentDecisions.length} recent decision${recentDecisions.length === 1 ? '' : 's'}`
+                    : 'Log your first strategic decision'}
+                </h2>
+              </div>
+              <span className="platform-feature-arrow" aria-hidden>
+                →
+              </span>
+            </div>
             {recentDecisions.length > 0 ? (
-              <ul className="mt-3 divide-y divide-border">
+              <ul className="platform-feature-list">
                 {recentDecisions.slice(0, 3).map((d) => (
-                  <li
-                    key={d.id}
-                    className="flex items-start justify-between gap-3 py-2"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium text-text-1 truncate">
-                        {d.title}
-                      </div>
-                      <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mt-0.5">
-                        {formatDate(d.decidedAt)}
-                        {d.category && (
-                          <>
-                            {' '}
-                            <span>·</span> {d.category}
-                          </>
-                        )}
-                        {d.status !== 'decided' && (
-                          <>
-                            {' '}
-                            <span>·</span> {d.status}
-                          </>
-                        )}
-                      </div>
-                    </div>
-                    <span
-                      className={`font-display text-2xl font-light shrink-0 ${alignmentTone(d.alignmentScore)}`}
-                    >
+                  <li key={d.id}>
+                    <span className="stamp">{formatDate(d.decidedAt)}</span>
+                    <span className="body">{d.title}</span>
+                    <span className={alignmentClass(d.alignmentScore)}>
                       {d.alignmentScore ?? '—'}
                     </span>
                   </li>
                 ))}
               </ul>
             ) : (
-              <p className="text-sm text-text-3 mt-3">
+              <p className="platform-feature-body">
                 Pre-decision alignment scoring + outcome tracking + pattern
                 detection over time.
               </p>
             )}
-          </GlassCard>
-        </Link>
-      </div>
-    </div>
-  );
-}
-
-// ── Local UI helpers (private to this component) ──────────────
-
-function CardHeader({
-  eyebrow,
-  title,
-  meta,
-}: {
-  eyebrow: string;
-  title: string;
-  meta: string | null;
-}) {
-  return (
-    <div className="flex items-start justify-between gap-3">
-      <div className="min-w-0">
-        <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3">
-          {eyebrow}
+          </Link>
         </div>
-        <h2 className="font-display text-lg font-light mt-0.5">{title}</h2>
-        {meta && (
-          <p className="text-[10px] font-mono text-text-3 mt-1">{meta}</p>
-        )}
-      </div>
-      <span
-        aria-hidden
-        className="text-text-3 text-lg group-hover:text-accent transition-colors shrink-0"
-      >
-        →
-      </span>
-    </div>
-  );
-}
-
-function QuadrantStat({
-  label,
-  count,
-  tint,
-}: {
-  label: string;
-  count: number;
-  tint: string;
-}) {
-  return (
-    <div
-      className={`rounded p-2 text-center ${tint}`}
-      title={`${label}: ${count}`}
-    >
-      <div className="font-display text-xl font-light leading-none">
-        {count}
-      </div>
-      <div className="text-[9px] font-mono uppercase tracking-[0.1em] mt-1">
-        {label}
-      </div>
-    </div>
+      </main>
+    </AmbientBackground>
   );
 }
