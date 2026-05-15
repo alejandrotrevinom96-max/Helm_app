@@ -88,6 +88,15 @@ export async function POST(request: Request) {
       // row. Optional so legacy callers (and any non-draft
       // visual flow) keep working.
       draftId,
+      // PR Sprint 7.24 — Prompt 2. The IR visual pipeline
+      // (lib/voice-engine/visuals/) needs painPoint + contentType
+      // to fire — without them generateVisual silently falls back
+      // to the lighter legacy prompt. Accept them on the request
+      // body; when missing, we hydrate from the draft row below
+      // (so existing UI callers that only know about postContent
+      // still benefit when a draftId is provided).
+      painPoint: bodyPainPoint,
+      contentType: bodyContentType,
     } = body as {
       projectId?: string;
       platform?: string;
@@ -95,6 +104,8 @@ export async function POST(request: Request) {
       style?: ImageStyle;
       aspectRatio?: AspectRatio;
       draftId?: string;
+      painPoint?: string;
+      contentType?: 'photo' | 'carousel' | 'ugc' | string;
     };
 
     if (!projectId || !platform || !postContent) {
@@ -131,6 +142,70 @@ export async function POST(request: Request) {
       );
     }
 
+    // PR Sprint 7.24 — Prompt 2. Hydrate IR-pipeline inputs from
+    // the draft row when the client passed a draftId. The IR
+    // pipeline (Sprint 7.19) produces a measurably richer Flux
+    // prompt (subject extraction + brand visual language + platform
+    // aesthetics + colors) than the legacy template, but it only
+    // fires when painPoint AND contentType are both present.
+    //
+    // Resolution order:
+    //   1. Use request body's painPoint/contentType if explicitly
+    //      passed by the client (lets the carousel slide endpoint
+    //      pass per-slide context that overrides the draft-row
+    //      defaults).
+    //   2. Otherwise, when draftId is provided, look up the draft's
+    //      `prompt` (= original user painPoint at generation time)
+    //      and `contentType` from generatedPosts.
+    //   3. Otherwise, leave undefined → generateVisual falls back to
+    //      the legacy path. Still uses the brand bible, just less
+    //      aggressively.
+    let painPoint: string | undefined = bodyPainPoint?.trim() || undefined;
+    let resolvedContentType: 'photo' | 'carousel' | 'ugc' | undefined;
+    const isValidContentType = (
+      v: string | undefined,
+    ): v is 'photo' | 'carousel' | 'ugc' =>
+      v === 'photo' || v === 'carousel' || v === 'ugc';
+    if (isValidContentType(bodyContentType)) {
+      resolvedContentType = bodyContentType;
+    }
+
+    if ((!painPoint || !resolvedContentType) && draftId) {
+      try {
+        const [draft] = await db
+          .select({
+            prompt: generatedPosts.prompt,
+            contentType: generatedPosts.contentType,
+          })
+          .from(generatedPosts)
+          .where(eq(generatedPosts.id, draftId))
+          .limit(1);
+        if (draft) {
+          if (!painPoint && draft.prompt) painPoint = draft.prompt;
+          if (!resolvedContentType) {
+            // Map the granular DB content_type to the IR pipeline's
+            // 3-bucket taxonomy. Anything that lands on photo or
+            // carousel uses Flux; ugc is mostly for HeyGen but the
+            // IR pipeline accepts it too for the rare UGC photo
+            // covers + thumbnails.
+            const dbType = draft.contentType ?? '';
+            if (dbType === 'photo' || dbType === 'single_image') {
+              resolvedContentType = 'photo';
+            } else if (dbType === 'carousel') {
+              resolvedContentType = 'carousel';
+            } else if (dbType === 'ugc' || dbType === 'reel') {
+              resolvedContentType = 'ugc';
+            }
+          }
+        }
+      } catch (err) {
+        console.warn(
+          '[visuals/generate] draft hydration for IR inputs failed (non-fatal):',
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
+
     const result = await generateVisual({
       platform: platform as
         | 'instagram'
@@ -143,6 +218,11 @@ export async function POST(request: Request) {
       brandBible: (project.brandContext as BrandBible | null) ?? null,
       style,
       aspectRatio,
+      // IR pipeline inputs. Both must be non-empty for the rich
+      // pipeline to fire — generateVisual falls back to legacy if
+      // either is missing.
+      painPoint,
+      contentType: resolvedContentType,
     });
 
     if (!result) {

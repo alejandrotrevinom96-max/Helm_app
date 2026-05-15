@@ -159,6 +159,18 @@ export async function POST(
   const style: ImageStyle =
     bible?.visual?.imageStyle ?? 'editorial';
 
+  // PR Sprint 7.24 — Prompt 2. Carry the draft's original painPoint
+  // through to generateVisual so the IR pipeline activates instead
+  // of falling back to the legacy prompt builder. The draft's
+  // `prompt` field captured what the founder asked for at
+  // generation time; that IS the painPoint the cover image and
+  // every slide are illustrating. Same painPoint shared across all
+  // slides in the carousel.
+  const draftPainPoint =
+    typeof row.post.prompt === 'string' && row.post.prompt.trim().length > 0
+      ? row.post.prompt.trim()
+      : undefined;
+
   // Sequential — keeps Flux's rate-limit happy and gives us
   // mid-batch failure observability. 6-8 images in 30-60s is fine.
   const successes: { slideIndex: number; url: string; prompt: string }[] = [];
@@ -175,6 +187,12 @@ export async function POST(
       brandBible: bible,
       style,
       aspectRatio: 'square', // IG carousels = 1:1
+      // PR Sprint 7.24 — IR pipeline inputs. With these set, each
+      // slide goes through subject-extraction + brand-visual-
+      // language + platform-aesthetics composition instead of the
+      // lighter legacy template.
+      painPoint: draftPainPoint,
+      contentType: 'carousel',
     });
     if (!result?.url) {
       failures.push({

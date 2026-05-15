@@ -91,12 +91,23 @@ const PLATFORM_DEFAULT_ASPECT: Record<
   tiktok: 'portrait',
 };
 
-/** Feature flag — when "true", route eligible visual jobs
- * through the new IR pipeline. Default OFF so production keeps
- * using the legacy prompt builder until the founder flips this.
+/** Feature flag — when "false", force the legacy prompt builder
+ * even when the IR pipeline inputs are present. Default is ON
+ * (PR Sprint 7.24 — Prompt 2): the IR pipeline produces visibly
+ * better Flux output (subject extraction, brand visual language,
+ * platform aesthetics) and was just a flag-flip away from being
+ * live. Set ENABLE_VISUAL_IR_PIPELINE=false to roll back.
+ *
+ * Note: even with the flag on, the IR path only runs when ALL of:
+ *   - painPoint provided
+ *   - contentType provided
+ *   - brandBible non-null
+ *   - platform !== 'reddit'
+ * are true. Anything missing falls back to the legacy path
+ * automatically (`canUseIR` in generateVisual).
  */
 function irPipelineEnabled(): boolean {
-  return process.env.ENABLE_VISUAL_IR_PIPELINE === 'true';
+  return process.env.ENABLE_VISUAL_IR_PIPELINE !== 'false';
 }
 
 /** Map the legacy 3-value aspect ratio to a fal image_size +
