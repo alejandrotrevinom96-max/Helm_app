@@ -3649,3 +3649,290 @@ details[open] .platform-payload-summary::before {
 .helm-loader-inline .helm-pulse-stack {
   flex: 0 0 auto;
 }
+
+/* =================================================================
+   PR Sprint 7.25 Phase 10 — landing demo bible-preview
+   -----------------------------------------------------------------
+   Inline brand-bible card the landing renders after the visitor
+   types a URL into "$ helm read <url>". Sits directly under the
+   terminal in the #demo section. Carries its own primary CTA so
+   the founder can save the bible by signing up after seeing it.
+   ================================================================= */
+
+.landing-demo-result {
+  max-width: 720px;
+  margin: 22px auto 0;
+}
+.landing-demo-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 36px 24px;
+  border-radius: 18px;
+  background: var(--surface-1);
+  border: 1px dashed var(--border);
+}
+
+.bible-preview-card {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  padding: 28px 30px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 24px 60px rgba(0, 0, 0, 0.35);
+  position: relative;
+  overflow: hidden;
+  /* Subtle gradient bloom behind the head so the preview reads as
+     "live" rather than static glass. Matches the platform-card
+     glow language without leaning on any single accent. */
+}
+.bible-preview-card::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  pointer-events: none;
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at 14% -10%, rgba(96, 165, 250, 0.18), transparent 55%),
+    radial-gradient(circle at 88% -10%, rgba(249, 115, 22, 0.16), transparent 55%);
+  opacity: 0.7;
+}
+.bible-preview-card > * {
+  position: relative;
+}
+
+.bible-preview-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+.bible-preview-eyebrow {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin-bottom: 6px;
+}
+.bible-preview-archetype {
+  font-family: 'Instrument Serif', Georgia, serif;
+  font-size: clamp(2rem, 4vw, 2.75rem);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  margin: 0;
+  color: var(--text-1);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.bible-preview-archetype-word {
+  font-style: italic;
+  background: linear-gradient(92deg, #c4b5fd 0%, #60a5fa 50%, #f97316 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+.bible-preview-archetype-sub {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-style: normal;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.bible-preview-reasoning {
+  margin: 12px 0 0;
+  font-style: italic;
+  color: var(--text-2);
+  font-size: 14px;
+  line-height: 1.55;
+  max-width: 56ch;
+}
+.bible-preview-confidence {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-weight: 700;
+  padding: 5px 10px;
+  border-radius: 9999px;
+  border: 1px solid;
+  flex: 0 0 auto;
+  align-self: flex-start;
+}
+
+.bible-preview-section {
+  margin-top: 22px;
+}
+.bible-preview-label {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.bible-preview-label::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, var(--border), transparent);
+}
+.bible-preview-body {
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-2);
+  margin: 0;
+}
+.bible-preview-tiny {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--text-3);
+  line-height: 1.55;
+  margin: 8px 0 0;
+}
+
+/* Voice axes */
+.bible-preview-voices {
+  display: grid;
+  gap: 14px;
+}
+.bible-voice-row {
+  display: grid;
+  grid-template-columns: 90px 1fr 90px;
+  align-items: center;
+  gap: 14px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.bible-voice-left {
+  text-align: right;
+}
+.bible-voice-right {
+  text-align: left;
+}
+.bible-voice-track {
+  position: relative;
+  height: 4px;
+  border-radius: 9999px;
+  background: linear-gradient(
+    90deg,
+    rgba(96, 165, 250, 0.25),
+    rgba(139, 92, 246, 0.25),
+    rgba(249, 115, 22, 0.25)
+  );
+}
+.bible-voice-dot {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 16px;
+  border-radius: 9999px;
+  background: var(--text-1);
+  box-shadow:
+    0 0 0 2px var(--bg),
+    0 0 12px rgba(255, 255, 255, 0.35);
+}
+@media (max-width: 540px) {
+  .bible-voice-row {
+    grid-template-columns: 70px 1fr 70px;
+    gap: 8px;
+  }
+}
+
+/* Pillars + audience grid */
+.bible-preview-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 22px;
+  margin-top: 8px;
+}
+@media (max-width: 720px) {
+  .bible-preview-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.bible-preview-pillars {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.bible-preview-pillar-chip {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  padding: 6px 12px;
+  border-radius: 9999px;
+  background: rgba(96, 165, 250, 0.08);
+  border: 1px solid rgba(96, 165, 250, 0.32);
+  color: var(--d-blue-2);
+}
+
+/* Quote vault */
+.bible-preview-quotes {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.bible-preview-quote {
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-1);
+  font-style: italic;
+  padding: 12px 14px;
+  border-left: 2px solid var(--d-orange);
+  background: rgba(249, 115, 22, 0.04);
+  border-radius: 0 10px 10px 0;
+}
+
+/* Footer CTA — aligned with the rest of the landing's primary
+   buttons (orange gradient + glow halo) so visitors get a single
+   consistent "this is the action" signal across the page. */
+.bible-preview-footer {
+  margin-top: 28px;
+  padding-top: 22px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+.bible-preview-cta-copy {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+.bible-preview-cta-eyebrow {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--d-orange-2);
+  margin-bottom: 4px;
+}
+.bible-preview-cta-copy p {
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-2);
+  margin: 0;
+  max-width: 52ch;
+}
+.bible-preview-cta-btn {
+  flex: 0 0 auto;
+}
