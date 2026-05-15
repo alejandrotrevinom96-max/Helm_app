@@ -15,6 +15,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { LibraryPost } from '@/app/api/marketing/library/route';
 import { ShareButton } from '@/components/share/share-button';
+import { ShipsWheelLoader, PulseMarkLoader } from '@/components/ui/loaders';
 import { ScheduleModal } from './schedule-modal';
 
 // PR #86 — Sprint 7.10: HeyGen video job lifecycle types. Mirrors
@@ -996,18 +997,29 @@ export function PostDetailModal({
                   ? 'Generate an AI image per slide.'
                   : 'Generate an AI image for this post.'}
               </p>
-              <button
-                type="button"
-                onClick={handleGenerateImage}
-                disabled={imageGenerating}
-                className="px-3 py-1.5 bg-accent text-white rounded-lg text-xs font-medium hover:opacity-90 disabled:opacity-50"
-              >
-                {imageGenerating
-                  ? '🎨 Generating…'
-                  : isCarouselFormat
+              {imageGenerating ? (
+                // PR Sprint 7.25 Phase 9 — Ship's Wheel replaces
+                // the "🎨 Generating…" plain-text state. Same
+                // semantic, the new loader is the app-wide signal
+                // for "Helm is making a picture for me".
+                <ShipsWheelLoader
+                  size={36}
+                  vertical={false}
+                  label={
+                    isCarouselFormat ? 'Charting slides' : 'Painting image'
+                  }
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleGenerateImage}
+                  className="px-3 py-1.5 bg-accent text-white rounded-lg text-xs font-medium hover:opacity-90"
+                >
+                  {isCarouselFormat
                     ? '🎨 Generate slides →'
                     : '🎨 Generate image →'}
-              </button>
+                </button>
+              )}
               {imageError && (
                 <div className="text-xs text-danger">{imageError}</div>
               )}
@@ -1088,19 +1100,25 @@ export function PostDetailModal({
             )}
 
             {heygenJob?.status === 'queued' && (
-              <div className="flex items-center gap-2 text-sm text-amber-500">
-                <span>⏱</span>
-                <span>Video queued — generation will start shortly.</span>
-              </div>
+              // PR Sprint 7.25 Phase 9 — Pulse Mark loader. The
+              // pulse rings communicate "Helm is actively
+              // listening / waiting" which is exactly what
+              // queued is (in line behind the HeyGen worker).
+              <PulseMarkLoader
+                size={48}
+                vertical={false}
+                label="Video queued"
+                subLabel="rendering starts shortly"
+              />
             )}
 
             {heygenJob?.status === 'processing' && (
-              <div className="flex items-center gap-2 text-sm text-amber-500">
-                <span className="inline-block w-3 h-3 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
-                <span>
-                  Generating… videos typically take 2 - 10 minutes.
-                </span>
-              </div>
+              <PulseMarkLoader
+                size={48}
+                vertical={false}
+                label="Rendering video"
+                subLabel="usually 2-10 minutes"
+              />
             )}
 
             {heygenJob?.status === 'completed' && heygenJob.videoUrl && (

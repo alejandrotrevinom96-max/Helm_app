@@ -3492,3 +3492,160 @@ details[open] .platform-payload-summary::before {
   flex-wrap: wrap;
   gap: 12px;
 }
+
+/* =================================================================
+   PR Sprint 7.25 Phase 9 — unified Helm loaders
+   -----------------------------------------------------------------
+   See components/ui/loaders.tsx. Two complementary loaders that
+   replace every ad-hoc "Generating…" text and Tailwind spinner in
+   the app:
+     - ShipsWheelLoader  — definite work (slide batch, single Flux,
+                          brand-bible build). Rotates clockwise.
+     - PulseMarkLoader   — indefinite listening (HeyGen video
+                          queued, research scan). Concentric rings
+                          pulse outward with a blue→purple→orange
+                          fade.
+   ================================================================= */
+
+.helm-loader {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+.helm-loader-vertical-1 {
+  flex-direction: column;
+  text-align: center;
+}
+.helm-loader-vertical-0 {
+  flex-direction: row;
+}
+.helm-loader-labels {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.helm-loader-label {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: var(--text-1);
+  font-weight: 600;
+}
+.helm-loader-sublabel {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--text-3);
+}
+
+/* ---- Ship's Wheel ---- */
+.helm-loader-wheel {
+  display: block;
+}
+/* The whole composition slowly rotates so the gradient arc + the
+   spokes feel like a working compass. CSS transforms on <svg>
+   roots work on every evergreen browser. */
+.helm-loader-wheel {
+  animation: helm-wheel-spin 4.5s linear infinite;
+  transform-origin: 50% 50%;
+}
+/* The arc has its own counter-rotation so it doesn't appear to
+   move WITH the spokes — it should look like a separate progress
+   indicator chasing the dial. */
+.helm-loader-wheel-arc {
+  transform-origin: 50% 50%;
+  animation: helm-wheel-arc 2.1s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+@keyframes helm-wheel-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes helm-wheel-arc {
+  0% { transform: rotate(0deg); opacity: 0.55; }
+  50% { opacity: 1; }
+  100% { transform: rotate(360deg); opacity: 0.55; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .helm-loader-wheel,
+  .helm-loader-wheel-arc {
+    animation: none;
+  }
+}
+
+/* ---- Pulse Mark ---- */
+.helm-pulse-stack {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.helm-pulse-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  border: 2px solid rgba(59, 130, 246, 0.6);
+  opacity: 0;
+  animation: helm-pulse 2.4s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+  pointer-events: none;
+}
+.helm-pulse-ring:nth-child(2) {
+  animation-delay: 0.8s;
+}
+.helm-pulse-ring:nth-child(3) {
+  animation-delay: 1.6s;
+}
+.helm-pulse-mark {
+  position: relative;
+  z-index: 1;
+  animation: helm-breathe 2.4s ease-in-out infinite;
+  filter: drop-shadow(0 0 12px rgba(96, 165, 250, 0.35));
+}
+@keyframes helm-pulse {
+  0% {
+    transform: scale(0.4);
+    opacity: 0;
+    border-color: rgba(59, 130, 246, 0.6);
+  }
+  15% {
+    opacity: 0.8;
+  }
+  60% {
+    border-color: rgba(139, 92, 246, 0.4);
+  }
+  100% {
+    transform: scale(1.4);
+    opacity: 0;
+    border-color: rgba(249, 115, 22, 0.2);
+  }
+}
+@keyframes helm-breathe {
+  0%, 100% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 14px rgba(59, 130, 246, 0.35));
+  }
+  50% {
+    transform: scale(1.06);
+    filter: drop-shadow(0 0 22px rgba(249, 115, 22, 0.4));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .helm-pulse-ring,
+  .helm-pulse-mark {
+    animation: none;
+  }
+  .helm-pulse-ring {
+    opacity: 0.4;
+  }
+}
+
+/* Inline variant — smaller, fits inside a button or chip. */
+.helm-loader-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  vertical-align: middle;
+}
+.helm-loader-inline .helm-loader-wheel,
+.helm-loader-inline .helm-pulse-stack {
+  flex: 0 0 auto;
+}

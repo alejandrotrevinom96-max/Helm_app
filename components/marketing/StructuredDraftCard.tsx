@@ -12,6 +12,7 @@
 // Haiku-pillar-variants flow stays untouched.
 import { useEffect, useRef, useState } from 'react';
 import { GlassCard } from '@/components/ui/glass-card';
+import { ShipsWheelLoader, PulseMarkLoader } from '@/components/ui/loaders';
 
 interface Props {
   platform: string;
@@ -138,6 +139,27 @@ export function StructuredDraftCard({
   // network noise off the developer console.
   const autoFiredSlidesRef = useRef(false);
   const autoFiredSingleRef = useRef(false);
+  // PR Sprint 7.25 Phase 9 — third auto-fire ref for HeyGen. The
+  // server-side generate-structured route inserts a heygen_jobs
+  // row with status='queued' for UGC/Reel drafts but doesn't
+  // actually call HeyGen — the founder previously had to open the
+  // Library detail modal and click "Generate video" to flip the
+  // job to processing. Now the card auto-fires the HeyGen call on
+  // mount so the queue actually moves. The endpoint itself is
+  // idempotent (refuses to re-fire when status !== 'queued') so
+  // re-mounts can't double-charge.
+  const autoFiredHeygenRef = useRef(false);
+  // Local mirror of heygenStatus so the badge flips from "queued"
+  // to "processing" the instant /api/heygen/generate-video accepts
+  // the call. Without this, the founder would see "queued" until
+  // they refresh — which is exactly the visibility gap they
+  // reported.
+  const [heygenStatusOverride, setHeygenStatusOverride] = useState<
+    'queued' | 'processing' | 'completed' | 'failed' | null
+  >(null);
+  const [heygenErrorMessage, setHeygenErrorMessage] = useState<string | null>(
+    null,
+  );
 
   const handleCopy = async () => {
     if (structuredContent == null) return;
@@ -377,16 +399,82 @@ export function StructuredDraftCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftId, projectId, contentType, payload]);
 
+  // PR Sprint 7.25 Phase 9 — auto-fire HeyGen for UGC/Reel drafts
+  // that already have a queued job row (created server-side by
+  // /api/ai/generate-structured). Without this, the queue sat
+  // there forever waiting for the founder to open Library and
+  // click "Generate video". /api/heygen/generate-video is
+  // idempotent (refuses re-fire when job.status !== 'queued') and
+  // returns errorKind='not_configured' when the project has no
+  // avatar configured — we surface that to the badge so the
+  // founder can fix it in Settings instead of staring at "queued"
+  // forever.
+  useEffect(() => {
+    if (autoFiredHeygenRef.current) return;
+    if (!payload) return;
+    const status =
+      typeof payload.heygenStatus === 'string' ? payload.heygenStatus : null;
+    const jobId =
+      typeof payload.heygenJobId === 'string' ? payload.heygenJobId : null;
+    if (status !== 'queued' || !jobId) return;
+    if (contentType !== 'ugc' && contentType !== 'reel') return;
+    autoFiredHeygenRef.current = true;
+    void (async () => {
+      try {
+        const res = await fetch('/api/heygen/generate-video', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jobId }),
+        });
+        const data = (await res.json().catch(() => ({}))) as {
+          success?: boolean;
+          error?: string;
+          hint?: string;
+          errorKind?: string;
+        };
+        if (!res.ok || !data.success) {
+          // not_configured = no avatar in Settings → actionable.
+          // feature_disabled = HEYGEN_ENABLED off in env → ops issue.
+          // invalid_state = already processing → benign, keep
+          // showing "queued" until the next refresh picks up the
+          // server-side status.
+          if (data.errorKind === 'invalid_state') return;
+          setHeygenStatusOverride('failed');
+          setHeygenErrorMessage(
+            data.hint ?? data.error ?? 'Video generation failed to start',
+          );
+          return;
+        }
+        // HeyGen accepted the call → server flipped status to
+        // 'processing'. Mirror that in local state so the badge
+        // flips immediately instead of waiting for a Library refresh.
+        setHeygenStatusOverride('processing');
+      } catch (e) {
+        setHeygenStatusOverride('failed');
+        setHeygenErrorMessage(
+          e instanceof Error ? e.message : 'Network error',
+        );
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contentType, payload]);
+
   // PR #76 — Sprint 7.3: HeyGen status badge. The server attaches
   // heygenJobId + heygenStatus to structuredContent for video-needing
   // types (reel, ugc). We surface it as a non-blocking badge so the
   // founder knows the script is ready but the rendered video is
   // pending. typeof guards because structuredContent is jsonb and
   // could legally be anything Opus returned.
-  const heygenStatus =
+  // PR Sprint 7.25 Phase 9 — the local override (set by the auto-
+  // fire useEffect once HeyGen accepts the call) wins over the
+  // server-stamped status from the payload. That keeps the badge
+  // accurate in this session even though we haven't refetched the
+  // draft row.
+  const payloadHeygenStatus =
     payload && typeof payload.heygenStatus === 'string'
       ? payload.heygenStatus
       : null;
+  const heygenStatus = heygenStatusOverride ?? payloadHeygenStatus;
   const heygenVideoUrl =
     payload && typeof payload.videoUrl === 'string'
       ? payload.videoUrl
@@ -436,15 +524,29 @@ export function StructuredDraftCard({
             )}
             {heygenStatus === 'queued' && (
               <span
-                className="text-[9px] font-mono uppercase tracking-[0.1em] px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-500 border border-purple-500/30"
-                title="The script is ready. Video rendering ships when the integration goes live."
+                className="helm-loader-inline"
+                title="The script is ready. Helm is rendering the video — usually 60-120s."
+                aria-label="Video queued"
               >
-                🎬 video queued
+                <PulseMarkLoader
+                  size={20}
+                  vertical={false}
+                  label="Video queued"
+                  // No subLabel — keeps the inline badge thin.
+                />
               </span>
             )}
             {heygenStatus === 'processing' && (
-              <span className="text-[9px] font-mono uppercase tracking-[0.1em] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-500 border border-amber-500/30">
-                🎬 video rendering
+              <span
+                className="helm-loader-inline"
+                title="Helm is rendering the video right now."
+                aria-label="Video rendering"
+              >
+                <PulseMarkLoader
+                  size={20}
+                  vertical={false}
+                  label="Rendering video"
+                />
               </span>
             )}
             {heygenStatus === 'completed' && heygenVideoUrl && (
@@ -458,7 +560,13 @@ export function StructuredDraftCard({
               </a>
             )}
             {heygenStatus === 'failed' && (
-              <span className="text-[9px] font-mono uppercase tracking-[0.1em] px-1.5 py-0.5 rounded bg-danger/15 text-danger border border-danger/30">
+              <span
+                className="text-[9px] font-mono uppercase tracking-[0.1em] px-1.5 py-0.5 rounded bg-danger/15 text-danger border border-danger/30"
+                title={
+                  heygenErrorMessage ??
+                  'Video generation failed. Open the Library to retry.'
+                }
+              >
                 🎬 video failed
               </span>
             )}
@@ -633,36 +741,37 @@ function CarouselSlideImagesBlock({
 }) {
   if (slideCount === 0) return null;
   const hasUrls = state.urls.length > 0;
+  const isGenerating = state.kind === 'generating';
   return (
     <div className="mb-4 p-3 border border-border rounded-lg bg-bg-elev/40">
-      <div className="flex items-center justify-between mb-2">
+      <div className="flex items-center justify-between mb-2 gap-3 flex-wrap">
         <div className="text-[10px] font-mono uppercase tracking-[0.1em] text-text-3">
           Slide images
-          {hasUrls && (
+          {hasUrls && state.kind === 'ready' && (
             <span className="ml-2 text-emerald-500">
               ✓ {state.urls.length}/{slideCount} ready
             </span>
           )}
         </div>
-        {state.kind !== 'ready' || state.urls.length < slideCount ? (
+        {isGenerating ? (
+          // PR Sprint 7.25 Phase 9 — inline Ship's Wheel replaces
+          // the "Generating N slides…" plain-text state. Same
+          // semantic (work in flight), much better visual signal.
+          <ShipsWheelLoader
+            size={32}
+            vertical={false}
+            label="Charting slides"
+            subLabel={`${slideCount} images`}
+          />
+        ) : state.kind !== 'ready' || state.urls.length < slideCount ? (
           <button
             type="button"
             onClick={onGenerate}
-            disabled={!canGenerate || state.kind === 'generating'}
+            disabled={!canGenerate}
             className="text-xs font-mono px-2 py-1 rounded bg-accent text-white hover:opacity-90 disabled:opacity-50"
-            // PR #80 — Sprint 7.5.2 (Bug #4): tooltip keeps the
-            // PR Sprint 7.19 — title tooltip used to surface
-            // model name + price; consumer-facing copy no
-            // longer shows internal tool names or per-image
-            // cost. Backend tracking (visual_generations.
-            // generationCostUsd) is unchanged.
             title={`Generates ${slideCount} AI images`}
           >
-            {state.kind === 'generating'
-              ? `Generating ${slideCount} slides…`
-              : hasUrls
-                ? '↻ Regenerate'
-                : `🎨 Generate ${slideCount} slides`}
+            {hasUrls ? '↻ Regenerate' : `🎨 Generate ${slideCount} slides`}
           </button>
         ) : null}
       </div>
@@ -710,26 +819,34 @@ function SinglePhotoImageBlock({
   canGenerate: boolean;
 }) {
   const ready = state.kind === 'ready' && state.url;
+  const isGenerating = state.kind === 'generating';
   return (
     <div className="mb-4 p-3 border border-border rounded-lg bg-bg-elev/40">
-      <div className="flex items-center justify-between mb-2">
+      <div className="flex items-center justify-between mb-2 gap-3 flex-wrap">
         <div className="text-[10px] font-mono uppercase tracking-[0.1em] text-text-3">
           Image
           {ready && <span className="ml-2 text-emerald-500">✓ ready</span>}
         </div>
-        <button
-          type="button"
-          onClick={onGenerate}
-          disabled={!canGenerate || state.kind === 'generating'}
-          className="text-xs font-mono px-2 py-1 rounded bg-accent text-white hover:opacity-90 disabled:opacity-50"
-          title="Generate AI image"
-        >
-          {state.kind === 'generating'
-            ? 'Generating…'
-            : ready
-              ? '↻ Regenerate'
-              : '🎨 Generate image'}
-        </button>
+        {isGenerating ? (
+          // Ship's Wheel inline — same loader used for carousel
+          // slides so the founder learns one visual language for
+          // "Helm is making a picture for me".
+          <ShipsWheelLoader
+            size={32}
+            vertical={false}
+            label="Painting image"
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={onGenerate}
+            disabled={!canGenerate}
+            className="text-xs font-mono px-2 py-1 rounded bg-accent text-white hover:opacity-90 disabled:opacity-50"
+            title="Generate AI image"
+          >
+            {ready ? '↻ Regenerate' : '🎨 Generate image'}
+          </button>
+        )}
       </div>
       {state.message && (
         <div

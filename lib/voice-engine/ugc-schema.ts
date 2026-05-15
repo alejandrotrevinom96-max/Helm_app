@@ -211,6 +211,217 @@ export const UGCBundleSchema = z
 export type UGCBundle = z.infer<typeof UGCBundleSchema>;
 
 // ============================================================
+// Resilient parse (PR Sprint 7.25 Phase 9)
+// ============================================================
+//
+// The strict schema rejects a lot of cosmetic drift Opus produces
+// in long-tail prompts — `cta` returned as a flat string, an
+// extra "notes" key on a section, a delivery value spelled
+// slightly off ("EXPLANATORY" → caps; "calm" → unmapped). Each of
+// those killed the whole generation with "Invalid input" even
+// though the rest of the bundle was sound.
+//
+// `repairUgcBundleInput` is a best-effort normaliser that runs
+// BEFORE strict validation:
+//   - sections returned as strings get wrapped into the canonical
+//     {text, duration_seconds, delivery} shape
+//   - delivery values are lower-cased + mapped to the closest
+//     enum member (everything unknown falls back to 'warm' for
+//     CTAs, 'explanatory' for body beats, 'punchy' for hooks)
+//   - duration_seconds out of range are clamped
+//   - body beats with missing `beat` numbers get sequential ones
+//   - hashtags lose stray '#' prefixes / whitespace
+//   - extra fields on sections are dropped (strict mode would
+//     reject; we silently shave instead)
+//
+// `parseUgcBundle(input)` returns:
+//   { kind: 'ok', bundle }                — strict parse succeeded
+//   { kind: 'repaired', bundle, issues }  — strict failed, repair worked
+//   { kind: 'failed', issues }            — both failed; surface upstream
+const ALLOWED_DELIVERY = new Set<string>(DELIVERY_STYLES);
+
+function pickDelivery(
+  raw: unknown,
+  fallback: (typeof DELIVERY_STYLES)[number],
+): (typeof DELIVERY_STYLES)[number] {
+  if (typeof raw !== 'string') return fallback;
+  const cleaned = raw.toLowerCase().trim();
+  if (ALLOWED_DELIVERY.has(cleaned)) {
+    return cleaned as (typeof DELIVERY_STYLES)[number];
+  }
+  // Soft mapping for common Opus variants.
+  if (/calm|informative/.test(cleaned)) return 'explanatory';
+  if (/friendly|warm/.test(cleaned)) return 'warm';
+  if (/intense|stress|emphas/.test(cleaned)) return 'emphatic';
+  if (/admit|honest|vulnerable/.test(cleaned)) return 'confessional';
+  if (/build|slow|tense/.test(cleaned)) return 'tension';
+  if (/payoff|punch|fast/.test(cleaned)) return 'punchy';
+  if (/reveal/.test(cleaned)) return 'reveal';
+  return fallback;
+}
+
+function clamp(n: number, lo: number, hi: number): number {
+  if (!Number.isFinite(n)) return lo;
+  return Math.min(hi, Math.max(lo, n));
+}
+
+function coerceNumber(raw: unknown, fallback: number): number {
+  if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
+  if (typeof raw === 'string') {
+    const parsed = parseFloat(raw);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return fallback;
+}
+
+function repairHook(raw: unknown): Record<string, unknown> | null {
+  if (typeof raw === 'string') {
+    return {
+      text: raw.trim().slice(0, 180),
+      duration_seconds: 2.5,
+      delivery: 'punchy',
+    };
+  }
+  if (!raw || typeof raw !== 'object') return null;
+  const o = raw as Record<string, unknown>;
+  const text = typeof o.text === 'string' ? o.text.trim() : '';
+  return {
+    text: text.slice(0, 180),
+    duration_seconds: clamp(coerceNumber(o.duration_seconds, 2.5), 1, 4),
+    delivery: pickDelivery(o.delivery, 'punchy'),
+  };
+}
+
+function repairCta(raw: unknown): Record<string, unknown> | null {
+  if (typeof raw === 'string') {
+    return {
+      text: raw.trim().slice(0, 200),
+      duration_seconds: 4,
+      delivery: 'warm',
+    };
+  }
+  if (!raw || typeof raw !== 'object') return null;
+  const o = raw as Record<string, unknown>;
+  const text = typeof o.text === 'string' ? o.text.trim() : '';
+  return {
+    text: text.slice(0, 200),
+    duration_seconds: clamp(coerceNumber(o.duration_seconds, 4), 2, 6),
+    delivery: pickDelivery(o.delivery, 'warm'),
+  };
+}
+
+function repairBody(raw: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((b): b is Record<string, unknown> => !!b && typeof b === 'object')
+    .slice(0, 5)
+    .map((b, i) => ({
+      beat: typeof b.beat === 'number' ? b.beat : i + 1,
+      text:
+        typeof b.text === 'string'
+          ? b.text.trim().slice(0, 400)
+          : String(b.text ?? '').slice(0, 400),
+      duration_seconds: clamp(coerceNumber(b.duration_seconds, 5), 2, 15),
+      delivery: pickDelivery(b.delivery, 'explanatory'),
+    }))
+    // Renumber sequentially in case the model skipped a beat number.
+    .map((b, i) => ({ ...b, beat: i + 1 }));
+}
+
+function repairOverlays(raw: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((o): o is Record<string, unknown> => !!o && typeof o === 'object')
+    .slice(0, 8)
+    .map((o) => ({
+      text:
+        typeof o.text === 'string'
+          ? o.text.trim().slice(0, 40)
+          : String(o.text ?? '').slice(0, 40),
+      trigger_at_seconds: Math.max(coerceNumber(o.trigger_at_seconds, 0), 0),
+      duration_seconds: clamp(coerceNumber(o.duration_seconds, 2), 0.5, 5),
+    }));
+}
+
+function repairHashtags(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((t) =>
+      typeof t === 'string'
+        ? t.replace(/^#+/, '').replace(/\s+/g, '').toLowerCase().trim()
+        : '',
+    )
+    .filter((t) => t.length > 0)
+    .slice(0, 5);
+}
+
+function repairMetadata(raw: unknown): Record<string, unknown> {
+  if (!raw || typeof raw !== 'object') {
+    return { platform: 'instagram', language: 'en', passes_swipe_test: true };
+  }
+  const o = raw as Record<string, unknown>;
+  return {
+    platform:
+      typeof o.platform === 'string' && o.platform.trim().length > 0
+        ? o.platform.trim().toLowerCase()
+        : 'instagram',
+    language:
+      typeof o.language === 'string' && o.language.trim().length >= 2
+        ? o.language.trim()
+        : 'en',
+    passes_swipe_test:
+      typeof o.passes_swipe_test === 'boolean'
+        ? o.passes_swipe_test
+        : true,
+  };
+}
+
+export function repairUgcBundleInput(input: unknown): Record<string, unknown> {
+  if (!input || typeof input !== 'object') return {};
+  const o = input as Record<string, unknown>;
+  return {
+    hook: repairHook(o.hook),
+    body: repairBody(o.body),
+    cta: repairCta(o.cta),
+    overlays: repairOverlays(o.overlays),
+    caption:
+      typeof o.caption === 'string'
+        ? o.caption.trim().slice(0, 500)
+        : String(o.caption ?? '').slice(0, 500),
+    hashtags: repairHashtags(o.hashtags),
+    metadata: repairMetadata(o.metadata),
+  };
+}
+
+export type UgcParseResult =
+  | { kind: 'ok'; bundle: UGCBundle }
+  | { kind: 'repaired'; bundle: UGCBundle; originalIssues: string }
+  | { kind: 'failed'; issues: string };
+
+export function parseUgcBundle(input: unknown): UgcParseResult {
+  const strict = UGCBundleSchema.safeParse(input);
+  if (strict.success) {
+    return { kind: 'ok', bundle: strict.data };
+  }
+  const originalIssues = strict.error.issues
+    .map((i) => `${i.path.join('.')}: ${i.message}`)
+    .join('; ');
+  // Try the repair path. The shape Opus returned might be salvageable
+  // with the heuristics above.
+  const repaired = UGCBundleSchema.safeParse(repairUgcBundleInput(input));
+  if (repaired.success) {
+    return { kind: 'repaired', bundle: repaired.data, originalIssues };
+  }
+  const repairedIssues = repaired.error.issues
+    .map((i) => `${i.path.join('.')}: ${i.message}`)
+    .join('; ');
+  return {
+    kind: 'failed',
+    issues: `Original: ${originalIssues}. After repair: ${repairedIssues}`,
+  };
+}
+
+// ============================================================
 // Helper getters (mirror the Python @property methods)
 // ============================================================
 

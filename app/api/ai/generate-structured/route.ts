@@ -89,6 +89,7 @@ import type {
 import { appendUgcSchemaToPrompt } from '@/lib/voice-engine/ugc-prompt';
 import {
   UGCBundleSchema,
+  parseUgcBundle,
   type UGCBundle,
 } from '@/lib/voice-engine/ugc-schema';
 import { validateUgcBundle } from '@/lib/voice-engine/ugc-validator';
@@ -892,14 +893,22 @@ Return STRICT JSON matching the schema. No markdown fences, no prose outside JSO
         // failure today shows up in the audit log as a
         // ugc_validation_failed entry per check.
         if (isUgcType && parsed) {
-          const zodResult = UGCBundleSchema.safeParse(parsed);
-          if (!zodResult.success) {
-            const issues = zodResult.error.issues
-              .map((i) => `${i.path.join('.')}: ${i.message}`)
-              .join('; ');
+          // PR Sprint 7.25 Phase 9 — resilient UGC parse. Strict
+          // validation first; if it fails, the repair pass coerces
+          // common Opus drift (cta returned as a string, delivery
+          // value capitalised wrong, duration_seconds out of
+          // range, missing beat numbers, etc.) into the canonical
+          // shape and re-validates. We log original issues either
+          // way so audit tells us which drift to fix at the prompt
+          // level, but the founder doesn't see a failed generation
+          // for repair-able shapes anymore.
+          const parseResult = parseUgcBundle(parsed);
+          if (parseResult.kind === 'failed') {
             console.warn(
-              `[generate-structured] UGC schema invalid for ${platform}/${template.type}:`,
-              issues,
+              `[generate-structured] UGC schema invalid for ${platform}/${template.type} (repair failed):`,
+              parseResult.issues,
+              '— actual payload preview:',
+              JSON.stringify(parsed).slice(0, 800),
             );
             if (voiceEngineCtx) {
               void logAudit({
@@ -907,19 +916,41 @@ Return STRICT JSON matching the schema. No markdown fences, no prose outside JSO
                 projectId,
                 action: 'ugc_schema_validation_failed',
                 platform: platformLower as VoiceEnginePlatform,
-                notes: issues.slice(0, 500),
+                notes: parseResult.issues.slice(0, 500),
               }).catch(() => {
                 /* non-fatal */
               });
             }
-            // Surface as a JSON kind failure so the wizard
-            // shows a retry CTA — same path the malformed-JSON
-            // branch uses.
             typeErrorKind = 'json';
-            typeErrorMsg = `UGC bundle failed Zod validation: ${issues.slice(0, 300)}`;
+            typeErrorMsg = `UGC bundle failed Zod validation: ${parseResult.issues.slice(0, 300)}`;
             parsed = null;
           } else {
-            const softFailures = validateUgcBundle(zodResult.data as UGCBundle);
+            if (parseResult.kind === 'repaired') {
+              // Strict failed but repair worked — log the original
+              // issues so we can iterate the prompt, but ship the
+              // bundle anyway. Founders should never see this; it's
+              // an observability signal for us.
+              console.warn(
+                `[generate-structured] UGC schema repaired for ${platform}/${template.type}. Original issues:`,
+                parseResult.originalIssues,
+              );
+              if (voiceEngineCtx) {
+                void logAudit({
+                  userId: user.id,
+                  projectId,
+                  action: 'ugc_schema_repaired',
+                  platform: platformLower as VoiceEnginePlatform,
+                  notes: parseResult.originalIssues.slice(0, 500),
+                }).catch(() => {
+                  /* non-fatal */
+                });
+              }
+              // Use the repaired bundle as `parsed` going forward
+              // so persistence + downstream consumers see the
+              // canonical shape, not the malformed original.
+              parsed = parseResult.bundle as unknown as Record<string, unknown>;
+            }
+            const softFailures = validateUgcBundle(parseResult.bundle);
             if (softFailures.length > 0) {
               console.warn(
                 `[generate-structured] UGC soft validation flagged ${softFailures.length} issues for ${platform}/${template.type}:`,

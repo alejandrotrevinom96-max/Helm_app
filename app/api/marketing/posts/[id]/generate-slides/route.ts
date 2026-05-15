@@ -63,12 +63,35 @@ function buildSlidePromptHint(
   const title = slide.title || '';
   const body = slide.body || '';
   if (role === 'cover') {
-    return `${slot} (COVER). Bold hero composition that stops scroll. Headline message: "${title}". ${body}`;
+    return `${slot} (COVER). Bold hero composition that stops scroll. THIS SLIDE'S MESSAGE: "${title}". ${body}`;
   }
   if (role === 'cta') {
-    return `${slot} (CTA). Clean composition that frames a clear action. Action message: "${title}". ${body}`;
+    return `${slot} (CTA). Clean composition framing a clear action. THIS SLIDE'S MESSAGE: "${title}". ${body}`;
   }
-  return `${slot} (VALUE). Editorial composition. Concept: "${title}". Supporting context: ${body}`;
+  return `${slot} (VALUE). Editorial composition. THIS SLIDE'S CONCEPT: "${title}". ${body}`;
+}
+
+// PR Sprint 7.25 Phase 9 — derive a per-slide painPoint so each
+// slide's image illustrates ITS OWN concept, not the carousel's
+// shared pain. The IR pipeline's subject extractor treats
+// painPoint as the primary lever; before this fix every slide
+// shared the same pain string, so the extractor produced eight
+// near-identical "tired founder at laptop" frames. Now: the
+// slide title + body define the slide's narrow pain, with the
+// carousel-level pain kept as background context.
+function buildSlidePainPoint(
+  slide: Slide,
+  carouselPainPoint: string | undefined,
+): string | undefined {
+  const slideText = [slide.title, slide.body].filter(Boolean).join(' — ');
+  if (!slideText && !carouselPainPoint) return undefined;
+  if (!slideText) return carouselPainPoint;
+  if (!carouselPainPoint) return slideText.slice(0, 300);
+  // Slide-level pain is the primary signal; carousel-level pain is
+  // appended so the extractor still feels the overall arc when the
+  // slide line is short ("Built Helm." → would otherwise produce a
+  // weak generic image).
+  return `${slideText} (carousel about: ${carouselPainPoint})`.slice(0, 400);
 }
 
 export async function POST(
@@ -226,7 +249,11 @@ export async function POST(
       // slide goes through subject-extraction + brand-visual-
       // language + platform-aesthetics composition instead of the
       // lighter legacy template.
-      painPoint: draftPainPoint,
+      // PR Sprint 7.25 Phase 9 — per-slide painPoint instead of
+      // the shared carousel painPoint, so the IR subject extractor
+      // produces a different visual concept per slide. See
+      // buildSlidePainPoint for the merge strategy.
+      painPoint: buildSlidePainPoint(slide, draftPainPoint),
       contentType: 'carousel',
     });
     if (!result?.url) {
