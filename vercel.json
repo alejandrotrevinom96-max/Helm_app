@@ -1,11 +1,23 @@
 {
   "crons": [
     {
-      "path": "/api/cron/sync-metrics",
-      "schedule": "0 0 * * *"
+      "path": "/api/cron/publish-scheduled",
+      "schedule": "* * * * *"
     },
     {
       "path": "/api/cron/poll-reels",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/notify-due",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/heygen-worker",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/sync-metrics",
       "schedule": "0 0 * * *"
     },
     {

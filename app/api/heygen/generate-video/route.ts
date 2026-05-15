@@ -31,100 +31,18 @@ import {
   isHeygenEnvConfigured,
   isHeygenReadyForProject,
 } from '@/lib/heygen/gate';
+// PR Sprint 7.25 Phase 11 — fire-once helper extracted into
+// lib/heygen/fire.ts so the cron worker shares the same dual-
+// API-call dance, voice-fallback recovery, and DB transitions.
+import { fireHeygenForJob } from '@/lib/heygen/fire';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-const HEYGEN_API = 'https://api.heygen.com';
-
-interface HeygenGenerateRequest {
-  video_inputs: Array<{
-    character:
-      | {
-          type: 'avatar';
-          avatar_id: string;
-          avatar_style: 'normal';
-        }
-      | {
-          type: 'talking_photo';
-          talking_photo_id: string;
-          use_avatar_iv_model: true;
-        };
-    voice: {
-      type: 'text';
-      input_text: string;
-      voice_id?: string;
-      speed: number;
-    };
-  }>;
-  dimension: { width: number; height: number };
-  callback_id: string;
-}
-
-interface HeygenGenerateResponse {
-  error: null | { code?: string; message?: string };
-  data?: { video_id?: string };
-  message?: string;
-}
-
-// PR Sprint 7.24 — voice-config error detector. HeyGen returns
-// failures related to voice configuration in several shapes:
-//   - "Invalid voice_id"
-//   - "Voice not found"
-//   - "VoiceConfiguration error"
-//   - 400 with "voice" in the body
-//   - "audio generation" failures when the voice_id doesn't match
-//     the avatar's required language pack
-// The check is intentionally permissive — false positives just mean
-// we retry without voice_id, which is harmless. False negatives let
-// the original generic 502 path through, which is the legacy
-// behavior, so this is purely additive defense.
-const VOICE_ERROR_KEYWORDS = [
-  'voice_id',
-  'voice id',
-  'voice configuration',
-  'voice not found',
-  'invalid voice',
-  'unsupported voice',
-  // The phrase "voice" alone is too broad and would catch
-  // "voiceover" / "voice-style" in unrelated errors. We require it
-  // adjacent to "config", "id", or "invalid/unsupported" above.
-];
-
-function isVoiceConfigError(message: string): boolean {
-  const lower = message.toLowerCase();
-  return VOICE_ERROR_KEYWORDS.some((kw) => lower.includes(kw));
-}
-
-async function callHeygenGenerate(
-  payload: HeygenGenerateRequest,
-): Promise<{ ok: true; videoId: string } | { ok: false; error: string }> {
-  try {
-    const res = await fetch(`${HEYGEN_API}/v2/video/generate`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': process.env.HEYGEN_API_KEY!,
-        accept: 'application/json',
-      },
-      body: JSON.stringify(payload),
-    });
-    const body = (await res.json().catch(() => ({}))) as HeygenGenerateResponse;
-    if (!res.ok || body.error || !body.data?.video_id) {
-      const msg =
-        body.error?.message ??
-        body.message ??
-        `HeyGen returned HTTP ${res.status}`;
-      return { ok: false, error: msg };
-    }
-    return { ok: true, videoId: body.data.video_id };
-  } catch (e) {
-    return {
-      ok: false,
-      error: e instanceof Error ? e.message : 'HeyGen request failed',
-    };
-  }
-}
+// PR Sprint 7.25 Phase 11 — the HeyGen payload build, voice-fallback
+// dance, and DB transitions moved to lib/heygen/fire.ts so the new
+// cron worker shares the same logic. The route below only handles
+// auth/ownership and shaping the user-facing response.
 
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -204,156 +122,31 @@ export async function POST(request: Request) {
     );
   }
 
-  // Build the HeyGen payload from the project's avatar config + the
-  // job's script. Default voice handling: when heygenVoiceId is
-  // null, we omit `voice_id` and HeyGen uses the avatar's bundled
-  // voice. Speed=1.0 across the board (cf. Sprint 7.3 design note).
-  const avatarType = project.heygenAvatarType ?? 'stock';
-  const character: HeygenGenerateRequest['video_inputs'][number]['character'] =
-    avatarType === 'photo'
-      ? {
-          type: 'talking_photo',
-          // PR #86 — Sprint 7.10: per the integration brief we pass
-          // the public photo URL directly as talking_photo_id with
-          // use_avatar_iv_model=true. HeyGen's Avatar IV pipeline
-          // accepts this shape; if a future API version requires
-          // the two-step photo registration flow (POST /v2/photo_
-          // avatar/photo/generate first), we'll add that here and
-          // cache the registered id on projects.
-          talking_photo_id: project.heygenPhotoUrl!,
-          use_avatar_iv_model: true,
-        }
-      : {
-          type: 'avatar',
-          avatar_id: project.heygenAvatarId!,
-          avatar_style: 'normal',
-        };
-
-  const voice: HeygenGenerateRequest['video_inputs'][number]['voice'] = {
-    type: 'text',
-    input_text: job.scriptText,
-    speed: 1.0,
-    ...(project.heygenVoiceId ? { voice_id: project.heygenVoiceId } : {}),
-  };
-
-  const payload: HeygenGenerateRequest = {
-    video_inputs: [{ character, voice }],
-    // 9:16 portrait for Reels / TikTok / Shorts. This is the only
-    // shape we generate today; if/when we add 16:9 explainers, the
-    // dimension would come from the job row, not be hardcoded.
-    dimension: { width: 1080, height: 1920 },
-    callback_id: job.id,
-  };
-
-  // PR Sprint 7.24 — voice error handling. HeyGen returns a 400 with
-  // a message containing "voice" / "voice_id" / "VoiceConfiguration"
-  // when the project's stored voice_id is no longer recognized
-  // (deprecated by HeyGen, mismatched with the new avatar, etc.).
-  // The legacy behavior surfaced the raw upstream string to the
-  // founder, which is opaque + unactionable. The fix:
-  //   1. Detect voice-related failures with a keyword regex.
-  //   2. If a voice_id was set on this call, retry ONCE without it
-  //      so HeyGen falls back to the avatar's bundled voice. Most
-  //      stock avatars have a default voice, so the retry usually
-  //      succeeds.
-  //   3. If the retry succeeds, mark the project's stale voice_id
-  //      for replacement (we surface a one-time warning back in the
-  //      response so the UI can prompt "your saved voice was
-  //      replaced — pick a new one if you want a different sound").
-  //   4. If the retry also fails (or there was no voice_id to drop)
-  //      return errorKind='voice_config' so the UI can route to
-  //      Settings → Video Avatar instead of showing a 502.
-  let result = await callHeygenGenerate(payload);
-  let voiceFallbackUsed = false;
-  if (
-    !result.ok &&
-    isVoiceConfigError(result.error) &&
-    project.heygenVoiceId
-  ) {
-    voiceFallbackUsed = true;
-    const fallbackPayload: HeygenGenerateRequest = {
-      ...payload,
-      video_inputs: payload.video_inputs.map((vi) => ({
-        ...vi,
-        voice: { type: vi.voice.type, input_text: vi.voice.input_text, speed: vi.voice.speed },
-      })),
-    };
-    result = await callHeygenGenerate(fallbackPayload);
-  }
-
-  if (!result.ok) {
-    // Voice-config errors after the fallback attempt → route the
-    // founder to Settings instead of showing a generic upstream
-    // failure. The friendly hint is what the founder will see; the
-    // raw `error` string is stored in the DB row for ops debugging
-    // but not surfaced verbatim in the response.
-    const isVoice = isVoiceConfigError(result.error);
-    const errorKind = isVoice ? 'voice_config' : 'upstream_error';
-    const userError = isVoice
-      ? 'Video generation failed: voice configuration issue.'
-      : result.error;
-    const hint = isVoice
-      ? 'Please update your avatar in Settings → Video Avatar.'
-      : undefined;
-
-    await db
-      .update(heygenJobs)
-      .set({
-        status: 'failed',
-        errorMessage: result.error.slice(0, 500),
-        errorKind,
-        completedAt: new Date(),
-      })
-      .where(eq(heygenJobs.id, job.id));
+  // PR Sprint 7.25 Phase 11 — payload build + voice fallback + DB
+  // transitions live in the shared fireHeygenForJob helper so the
+  // cron worker behaves identically. This route only owns the
+  // user-driven authentication, ownership, and response shape.
+  const fire = await fireHeygenForJob(job, project);
+  if (!fire.ok) {
+    const isVoice = fire.errorKind === 'voice_config';
     return NextResponse.json(
       {
         success: false,
-        error: userError,
-        errorKind,
-        retry: !isVoice, // voice errors are NOT user-retryable from this UI
-        ...(hint ? { hint } : {}),
+        error: isVoice
+          ? 'Video generation failed: voice configuration issue.'
+          : fire.error,
+        errorKind: fire.errorKind,
+        retry: fire.retry,
+        ...(isVoice
+          ? { hint: 'Please update your avatar in Settings → Video Avatar.' }
+          : {}),
       },
       { status: isVoice ? 400 : 502 },
     );
   }
-
-  // If we landed here via the voice fallback, the project's stored
-  // voice_id is stale. Null it out so future generations use the
-  // avatar's bundled voice by default — no more silent failures.
-  // The founder can pick a new voice from Settings whenever they
-  // want a different sound.
-  if (voiceFallbackUsed) {
-    await db
-      .update(projects)
-      .set({ heygenVoiceId: null })
-      .where(eq(projects.id, project.id))
-      .catch((err: unknown) => {
-        console.warn(
-          '[heygen/generate-video] failed to clear stale voice_id (non-fatal):',
-          err instanceof Error ? err.message : err,
-        );
-      });
-  }
-
-  // Success path — mark processing and stash HeyGen's video_id so
-  // the webhook can correlate. We use callback_id (= job.id) as the
-  // primary key for the webhook lookup; heygenJobId stays in sync
-  // for ops / debugging.
-  await db
-    .update(heygenJobs)
-    .set({
-      status: 'processing',
-      heygenJobId: result.videoId,
-      heygenStatus: 'processing',
-      processedAt: new Date(),
-      errorMessage: null,
-      errorKind: null,
-    })
-    .where(eq(heygenJobs.id, job.id));
-
   return NextResponse.json({
     success: true,
-    heygenVideoId: result.videoId,
+    heygenVideoId: fire.heygenVideoId,
     status: 'processing',
   });
 }

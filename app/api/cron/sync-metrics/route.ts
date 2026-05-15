@@ -3,11 +3,15 @@ import {
   projects,
   integrations,
   metricSnapshots,
-  scheduledPosts,
   researchConfig,
   users,
 } from '@/lib/db/schema';
-import { eq, and, lte, lt, isNull, or } from 'drizzle-orm';
+// `scheduledPosts` + `lte` are no longer used here (the due-post
+// webhook loop that referenced them moved to /api/cron/notify-due).
+// `isNull` stays because the weekly-insight regeneration block
+// below uses it to find configs with never-stamped
+// weeklyInsightAt.
+import { eq, and, lt, isNull, or } from 'drizzle-orm';
 import { decrypt } from '@/lib/crypto';
 import { getVercelAnalytics } from '@/lib/integrations/vercel';
 import { getTableCount } from '@/lib/integrations/supabase-mgmt';
@@ -15,7 +19,11 @@ import { getAdAccountInsights } from '@/lib/integrations/meta';
 import { generateWeeklyInsight } from '@/lib/research/generate-insight';
 import { generateAndSendBrief } from '@/lib/research/brief';
 import { cleanupExpiredCache } from '@/lib/research/cache';
-import { sendWebhook } from '@/lib/webhooks/send';
+// PR Sprint 7.25 Phase 11 — the webhook-fire-for-due-posts loop
+// moved out of this daily cron into /api/cron/notify-due (runs
+// every minute). Same daily cron used to mean a 10am post was
+// notified at 00:00 UTC the next day. `sendWebhook` is no longer
+// needed here.
 import { NextResponse } from 'next/server';
 
 export async function GET(request: Request) {
@@ -169,69 +177,10 @@ export async function GET(request: Request) {
     }
   }
 
-  // Mark scheduled posts that are due so the user knows it's time to post.
-  // If the user has a webhook configured, fire that too — fire-and-forget,
-  // so a slow/dead receiver doesn't block notification of other due posts.
-  // TODO: when Resend (or similar) is wired up, send an email here with the
-  // ready-to-paste content instead of just flipping the status flag.
-  const due = await db
-    .select()
-    .from(scheduledPosts)
-    .where(
-      and(
-        eq(scheduledPosts.status, 'scheduled'),
-        lte(scheduledPosts.scheduledFor, new Date())
-      )
-    );
-
-  // Cache webhook config per user so multiple due posts from the same user
-  // don't trigger redundant DB reads.
-  const webhookCache = new Map<
-    string,
-    { url: string | null; secret: string | null }
-  >();
-  let webhooksDelivered = 0;
-  let webhooksFailed = 0;
-
-  for (const post of due) {
-    let cfg = webhookCache.get(post.userId);
-    if (!cfg) {
-      const [row] = await db
-        .select({ url: users.webhookUrl, secret: users.webhookSecret })
-        .from(users)
-        .where(eq(users.id, post.userId))
-        .limit(1);
-      cfg = { url: row?.url ?? null, secret: row?.secret ?? null };
-      webhookCache.set(post.userId, cfg);
-    }
-
-    if (cfg.url) {
-      const result = await sendWebhook(cfg.url, cfg.secret, {
-        event: 'scheduled_post.due',
-        timestamp: new Date().toISOString(),
-        data: {
-          id: post.id,
-          platform: post.platform,
-          content: post.content,
-          scheduledFor: post.scheduledFor.toISOString(),
-        },
-      });
-      if (result.ok) {
-        webhooksDelivered++;
-      } else {
-        webhooksFailed++;
-        console.error(
-          `[CRON] webhook failed for user ${post.userId}:`,
-          result.error ?? `HTTP ${result.status}`
-        );
-      }
-    }
-
-    await db
-      .update(scheduledPosts)
-      .set({ status: 'notified', notifiedAt: new Date() })
-      .where(eq(scheduledPosts.id, post.id));
-  }
+  // PR Sprint 7.25 Phase 11 — due-post webhook firing extracted to
+  // /api/cron/notify-due (minute-level). This daily cron used to
+  // notify scheduled posts with up to 24h of latency; the new
+  // dedicated cron fires within ~60s of the scheduled minute.
 
   // Auto-regenerate weekly research insight for projects whose last insight
   // is older than 7 days (or has never run). Each call hits Claude Opus
@@ -338,9 +287,12 @@ export async function GET(request: Request) {
   return NextResponse.json({
     synced,
     projects: allProjects.length,
-    notifiedPosts: due.length,
-    webhooksDelivered,
-    webhooksFailed,
+    // Due-post webhook fires moved to /api/cron/notify-due. The
+    // legacy fields stay in the response (as zeros) so any external
+    // dashboard charting these doesn't error on missing keys.
+    notifiedPosts: 0,
+    webhooksDelivered: 0,
+    webhooksFailed: 0,
     insightsGenerated,
     insightsDeferred: Math.max(0, stale.length - MAX_INSIGHTS_PER_RUN),
     weeklyBrief: {
