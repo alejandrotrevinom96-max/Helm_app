@@ -30,8 +30,17 @@ Version: 1.0 (MVP Phase 1)
 from __future__ import annotations
 
 import re
+from typing import TYPE_CHECKING
 
 from client_context import ClientContext, ContentType, Platform
+
+# Phase 2 (Patch 2): the bridge matcher's LLMClient Protocol is only
+# referenced as a type annotation, not at runtime. Importing under
+# TYPE_CHECKING keeps prompt_builder runtime-light and avoids triggering
+# the matcher's pydantic import when the caller hasn't opted into the
+# bridge flow.
+if TYPE_CHECKING:
+    from product_bridge_matcher import LLMClient as BridgeMatcherClient
 
 # Import the static scaffold. Adjust the import path when you move the file
 # into your codebase.
@@ -48,7 +57,7 @@ from platform_tone_instructions import (
 # Public API
 # ============================================================================
 
-def build_generation_prompt(
+async def build_generation_prompt(
     *,
     platform: Platform,
     content_type: ContentType,
@@ -57,6 +66,7 @@ def build_generation_prompt(
     target_sub: str | None = None,
     include_examples: bool = True,
     inject_humanize: bool = True,
+    bridge_matcher_client: "BridgeMatcherClient | None" = None,
 ) -> str:
     """Compose the full generation prompt for the model.
 
@@ -64,20 +74,35 @@ def build_generation_prompt(
     PAIN_POINT, CONTENT_TYPE_RULES (+ optional examples), and PLATFORM_TONE,
     in the precedence order defined by PROMPT_COMPOSITION_RULES.
 
+    Async because the optional bridge matcher (Phase 2 / Patch 2) runs a
+    Haiku call when supplied. With bridge_matcher_client=None the call
+    does no I/O — async is still required so the signature stays stable
+    when the bridge flow is opted in.
+
     Args:
-        platform:         target platform
-        content_type:     target content type
-        client_context:   the ClientContext aggregate for this client
-        pain_point:       what this post is about (from research/insight pipeline)
-        target_sub:       for Reddit, the target subreddit (e.g., "r/SaaS")
-        include_examples: whether to inject CONTENT_TYPE_EXAMPLES. Default True.
-                          Toggle False in dev/test for shorter prompts and
-                          faster iteration. Quality drops measurably when off.
-        inject_humanize:  Phase 2 — F1 preventive humanize. When True (default),
-                          HUMANIZE_RULES are embedded directly in the prompt so
-                          the model never produces an AI tell to clean up.
-                          Toggle False to run the legacy generate-then-clean
-                          flow during A/B comparison.
+        platform:              target platform
+        content_type:          target content type
+        client_context:        the ClientContext aggregate for this client
+        pain_point:            what this post is about (from research/insight
+                               pipeline)
+        target_sub:            for Reddit, the target subreddit (e.g., "r/SaaS")
+        include_examples:      whether to inject CONTENT_TYPE_EXAMPLES. Default
+                               True. Toggle False in dev/test for shorter
+                               prompts and faster iteration. Quality drops
+                               measurably when off.
+        inject_humanize:       Phase 2 — F1 preventive humanize. When True
+                               (default), HUMANIZE_RULES are embedded directly
+                               in the prompt so the model never produces an AI
+                               tell to clean up. Toggle False to run the legacy
+                               generate-then-clean flow during A/B comparison.
+        bridge_matcher_client: Phase 2 (Patch 2). Optional LLMClient adapter
+                               used by product_bridge_matcher to pick the best
+                               pain → product bridge for this post. When
+                               provided AND the client has approved bridges,
+                               a PRODUCT_RELEVANCE section is injected between
+                               PAIN_POINT and CONTENT_TYPE_RULES. When None,
+                               the bridge flow is fully skipped (no I/O, no
+                               behavior change).
 
     Raises:
         ValueError if the (platform, content_type) combination isn't compatible
@@ -113,6 +138,28 @@ def build_generation_prompt(
 
     dynamic_context = _format_dynamic_context(client_context, platform)
 
+    # Phase 2 — Patch 2: product bridge matching. Optional async LLM call
+    # that picks the best pain → bridge match for this post and inserts a
+    # PRODUCT_RELEVANCE section between PAIN_POINT and CONTENT_TYPE_RULES.
+    # Skipped entirely when no client is supplied or the project has no
+    # approved bridges — the matcher itself filters out pending_review
+    # bridges, so an early empty-list check here just avoids the extra
+    # function call.
+    product_relevance_section = ""
+    if bridge_matcher_client is not None:
+        from product_bridge_matcher import (
+            format_bridge_for_prompt,
+            match_bridge_for_pain,
+        )
+        bridges = client_context.brand_bible.pain_to_product_bridges
+        if bridges:
+            match = await match_bridge_for_pain(
+                pain_point=pain_point,
+                available_bridges=bridges,
+                client=bridge_matcher_client,
+            )
+            product_relevance_section = format_bridge_for_prompt(match)
+
     content_rules = CONTENT_TYPE_RULES[content_type_key]
     platform_tone = PLATFORM_TONE_INSTRUCTIONS[platform_key]
     sub_line = (
@@ -141,7 +188,7 @@ CLIENT CONTEXT (apply strongly, this is the client-specific intelligence):
 
 PAIN_POINT (what this post is about):
 {pain_point}
-{sub_line}
+{sub_line}{product_relevance_section}
 CONTENT_TYPE_RULES for {content_type_key.upper()} (base format mechanics):
 {content_rules}
 {examples_section}

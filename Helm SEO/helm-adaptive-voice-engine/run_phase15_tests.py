@@ -324,12 +324,12 @@ def run() -> int:
             hedging_ratio=0.7,
             self_correction_count=2,
         )
-        prompt = build_generation_prompt(
+        prompt = asyncio.run(build_generation_prompt(
             platform=Platform.LINKEDIN,
             content_type=ContentType.TEXT,
             client_context=ctx,
             pain_point="founders waste hours on tool switching",
-        )
+        ))
         assert "WRITER VOICE PROFILE" in prompt, "voice profile section missing"
         assert "PUNCTUATION PATTERNS" in prompt
         report.record("E1 Test 7: Prompt builder integration", PASS)
@@ -358,13 +358,13 @@ def run() -> int:
     try:
         ctx = ClientContext(client_id=uuid4(), brand_bible=make_brand_bible())
         ctx.get_platform_slots(Platform.LINKEDIN).variety_config = VarietyConfig(enabled=False)
-        prompt_t = build_generation_prompt(
+        prompt_t = asyncio.run(build_generation_prompt(
             platform=Platform.LINKEDIN,
             content_type=ContentType.TEXT,
             client_context=ctx,
             pain_point="founders waste hours on tool switching",
             inject_humanize=True,
-        )
+        ))
         assert "ANTI-AI WRITING RULES" in prompt_t
         assert "Em dashes" in prompt_t
         report.record("F1 Test 2: inject_humanize=True embeds rules", PASS)
@@ -379,13 +379,13 @@ def run() -> int:
     try:
         ctx = ClientContext(client_id=uuid4(), brand_bible=make_brand_bible())
         ctx.get_platform_slots(Platform.LINKEDIN).variety_config = VarietyConfig(enabled=False)
-        prompt_f = build_generation_prompt(
+        prompt_f = asyncio.run(build_generation_prompt(
             platform=Platform.LINKEDIN,
             content_type=ContentType.TEXT,
             client_context=ctx,
             pain_point="...",
             inject_humanize=False,
-        )
+        ))
         # PROMPT_COMPOSITION_RULES now contains an "ANTI-AI WRITING RULES"
         # section that REFERENCES the injection. When inject_humanize=False,
         # we expect the embedded HUMANIZE_RULES block (which contains the
@@ -406,12 +406,12 @@ def run() -> int:
     try:
         ctx = ClientContext(client_id=uuid4(), brand_bible=make_brand_bible())
         ctx.get_platform_slots(Platform.LINKEDIN).variety_config = VarietyConfig(enabled=False)
-        prompt_default = build_generation_prompt(
+        prompt_default = asyncio.run(build_generation_prompt(
             platform=Platform.LINKEDIN,
             content_type=ContentType.TEXT,
             client_context=ctx,
             pain_point="...",
-        )
+        ))
         assert "ANTI-AI WRITING RULES" in prompt_default
         report.record("F1 Test 4: Default inject_humanize is True", PASS)
     except Exception as e:
@@ -439,12 +439,12 @@ def run() -> int:
     try:
         ctx = ClientContext(client_id=uuid4(), brand_bible=make_brand_bible())
         ctx.get_platform_slots(Platform.LINKEDIN).variety_config = VarietyConfig(enabled=False)
-        prompt = build_generation_prompt(
+        prompt = asyncio.run(build_generation_prompt(
             platform=Platform.LINKEDIN,
             content_type=ContentType.TEXT,
             client_context=ctx,
             pain_point="...",
-        )
+        ))
         # Rough token estimate: 4 chars per token. Budget is <8000 tokens.
         rough_tokens = len(prompt) // 4
         if rough_tokens < 8000:
@@ -606,12 +606,12 @@ def run() -> int:
         original_random = vi.random.random
         vi.random.random = lambda: 0.0  # type: ignore[assignment]
         try:
-            prompt = build_generation_prompt(
+            prompt = asyncio.run(build_generation_prompt(
                 platform=Platform.LINKEDIN,
                 content_type=ContentType.TEXT,
                 client_context=ctx,
                 pain_point="founders waste hours on tool switching",
-            )
+            ))
         finally:
             vi.random.random = original_random  # type: ignore[assignment]
         if "VARIETY MODE" in prompt:
