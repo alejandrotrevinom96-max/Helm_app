@@ -60,10 +60,19 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 # or digit. Mirrored in lib/voice-engine/ugc-schema.ts and
 # lib/voice-engine/ugc_schema.py.
 _LEXICAL_CHAR_RE = re.compile(r"[^\W_]", re.UNICODE)
+_SEGMENT_SPLIT_RE = re.compile(r"[.,!?;]\s*")
 
 
 def _count_lexical_words(text: str) -> int:
-    return sum(1 for token in text.split() if _LEXICAL_CHAR_RE.search(token))
+    # Count per segment, return the max. "7 TABS. 2 HOURS. 1 POST." is
+    # three 2-word units, not a 6-word sentence.
+    segments = [s.strip() for s in _SEGMENT_SPLIT_RE.split(text.strip()) if s.strip()]
+    if not segments:
+        return 0
+    return max(
+        sum(1 for token in seg.split() if _LEXICAL_CHAR_RE.search(token))
+        for seg in segments
+    )
 
 
 # ============================================================================

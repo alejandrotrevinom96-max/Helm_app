@@ -31,21 +31,42 @@ import { z } from 'zod';
 // one Unicode letter or number. Pictogram-only tokens (emoji,
 // dashes, bullets, arrows) don't increment the count.
 //
-//   "BUFFER ❌ NOTION ❌ FIGMA ❌"  → 3 (was 6)
-//   "I dropped Buffer last month"  → 5 (unchanged)
-//   "Stop. Now."                   → 2 (unchanged)
-//   "$1M in 6 months"              → 4 (unchanged — digits count)
-//   "❌"                            → 0 (was 1; pure pictograms aren't
-//                                       a word)
+// Second hotfix (Phase 11.6) — count per SEGMENT, not over the
+// whole string. An overlay like "7 TABS. 2 HOURS. 1 POST." renders
+// as three stacked compact lines on screen — each line is a fact,
+// and the on-screen "word count" the human reads is the longest
+// line, not the sum. Treating the whole string as one sentence
+// punished a deliberately good 3-fact callout pattern.
+//
+//   "BUFFER ❌ NOTION ❌ FIGMA ❌"  → 3 (one segment, 3 lexical words)
+//   "7 TABS. 2 HOURS. 1 POST."     → 2 (three segments, max length 2)
+//   "I dropped Buffer last month"  → 5 (one segment, 5 words)
+//   "Stop. Now."                   → 1 (two segments, max length 1)
+//   "$1M in 6 months"              → 4 (one segment, 4 lexical words)
+//   "I built Helm to ship faster"  → 6 (one segment, 6 words → fails 5-cap)
+//   "❌"                            → 0
 //
 // Same logic mirrored in lib/voice-engine/ugc_schema.py so the
 // Python and TS paths agree.
 function countLexicalWords(text: string): number {
-  return text
+  // Split on sentence-final punctuation. Each piece is one
+  // "stacked line" on the rendered overlay. Cap applies to the
+  // longest piece — a 3-fact overlay with 2 words per fact passes
+  // the same cap a single 5-word phrase does.
+  const segments = text
     .trim()
-    .split(/\s+/)
-    .filter((token) => token.length > 0 && /[\p{L}\p{N}]/u.test(token))
-    .length;
+    .split(/[.,!?;]\s*/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  if (segments.length === 0) return 0;
+  const perSegment = segments.map(
+    (seg) =>
+      seg
+        .split(/\s+/)
+        .filter((token) => token.length > 0 && /[\p{L}\p{N}]/u.test(token))
+        .length,
+  );
+  return Math.max(...perSegment);
 }
 
 // ============================================================

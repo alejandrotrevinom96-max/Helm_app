@@ -409,55 +409,76 @@ export function StructuredDraftCard({
   // avatar configured — we surface that to the badge so the
   // founder can fix it in Settings instead of staring at "queued"
   // forever.
+  // PR Sprint 7.25 Phase 11.6 — extracted into a callable handler
+  // so the new "↻ Retry video" button next to the failed badge can
+  // re-fire without relying on a re-mount of the card.
+  const fireHeygen = async (jobId: string) => {
+    setHeygenStatusOverride('queued');
+    setHeygenErrorMessage(null);
+    try {
+      const res = await fetch('/api/heygen/generate-video', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        success?: boolean;
+        error?: string;
+        hint?: string;
+        errorKind?: string;
+      };
+      if (!res.ok || !data.success) {
+        // not_configured = no avatar in Settings → actionable.
+        // feature_disabled = HEYGEN_ENABLED off in env → ops issue.
+        // invalid_state = already processing → benign, keep
+        // showing "queued" until the next refresh picks up the
+        // server-side status.
+        if (data.errorKind === 'invalid_state') return;
+        setHeygenStatusOverride('failed');
+        const friendly =
+          data.errorKind === 'not_configured'
+            ? 'No avatar set. Open Settings → Video Avatar to pick one.'
+            : data.errorKind === 'feature_disabled'
+              ? 'HeyGen integration is off on this deployment. Queue will process when it ships.'
+              : data.errorKind === 'voice_config'
+                ? 'Voice configuration issue. Update your avatar in Settings → Video Avatar.'
+                : (data.hint ?? data.error ?? 'Video generation failed to start');
+        setHeygenErrorMessage(friendly);
+        return;
+      }
+      // HeyGen accepted the call → server flipped status to
+      // 'processing'. Mirror that in local state so the badge
+      // flips immediately instead of waiting for a Library refresh.
+      setHeygenStatusOverride('processing');
+    } catch (e) {
+      setHeygenStatusOverride('failed');
+      setHeygenErrorMessage(
+        e instanceof Error ? e.message : 'Network error',
+      );
+    }
+  };
+
+  const heygenJobIdFromPayload =
+    payload && typeof payload.heygenJobId === 'string'
+      ? payload.heygenJobId
+      : null;
+
+  const handleRetryHeygen = () => {
+    if (!heygenJobIdFromPayload) return;
+    void fireHeygen(heygenJobIdFromPayload);
+  };
+
   useEffect(() => {
     if (autoFiredHeygenRef.current) return;
     if (!payload) return;
     const status =
       typeof payload.heygenStatus === 'string' ? payload.heygenStatus : null;
-    const jobId =
-      typeof payload.heygenJobId === 'string' ? payload.heygenJobId : null;
-    if (status !== 'queued' || !jobId) return;
+    if (status !== 'queued' || !heygenJobIdFromPayload) return;
     if (contentType !== 'ugc' && contentType !== 'reel') return;
     autoFiredHeygenRef.current = true;
-    void (async () => {
-      try {
-        const res = await fetch('/api/heygen/generate-video', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ jobId }),
-        });
-        const data = (await res.json().catch(() => ({}))) as {
-          success?: boolean;
-          error?: string;
-          hint?: string;
-          errorKind?: string;
-        };
-        if (!res.ok || !data.success) {
-          // not_configured = no avatar in Settings → actionable.
-          // feature_disabled = HEYGEN_ENABLED off in env → ops issue.
-          // invalid_state = already processing → benign, keep
-          // showing "queued" until the next refresh picks up the
-          // server-side status.
-          if (data.errorKind === 'invalid_state') return;
-          setHeygenStatusOverride('failed');
-          setHeygenErrorMessage(
-            data.hint ?? data.error ?? 'Video generation failed to start',
-          );
-          return;
-        }
-        // HeyGen accepted the call → server flipped status to
-        // 'processing'. Mirror that in local state so the badge
-        // flips immediately instead of waiting for a Library refresh.
-        setHeygenStatusOverride('processing');
-      } catch (e) {
-        setHeygenStatusOverride('failed');
-        setHeygenErrorMessage(
-          e instanceof Error ? e.message : 'Network error',
-        );
-      }
-    })();
+    void fireHeygen(heygenJobIdFromPayload);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [contentType, payload]);
+  }, [contentType, payload, heygenJobIdFromPayload]);
 
   // PR #76 — Sprint 7.3: HeyGen status badge. The server attaches
   // heygenJobId + heygenStatus to structuredContent for video-needing
@@ -560,15 +581,31 @@ export function StructuredDraftCard({
               </a>
             )}
             {heygenStatus === 'failed' && (
-              <span
-                className="text-[9px] font-mono uppercase tracking-[0.1em] px-1.5 py-0.5 rounded bg-danger/15 text-danger border border-danger/30"
-                title={
-                  heygenErrorMessage ??
-                  'Video generation failed. Open the Library to retry.'
-                }
-              >
-                🎬 video failed
-              </span>
+              // PR Sprint 7.25 Phase 11.6 — was a single chip with
+              // the error in a tooltip; the founder reported they
+              // couldn't tell WHY the video failed without hovering.
+              // Now: the chip stays for the at-a-glance status, but
+              // an explicit "↻ Retry" button sits beside it for one-
+              // click recovery. The full error message renders below
+              // the header in <HeygenFailureBlock />.
+              <>
+                <span
+                  className="text-[9px] font-mono uppercase tracking-[0.1em] px-1.5 py-0.5 rounded bg-danger/15 text-danger border border-danger/30"
+                  title={heygenErrorMessage ?? 'Video generation failed.'}
+                >
+                  🎬 video failed
+                </span>
+                {heygenJobIdFromPayload && (
+                  <button
+                    type="button"
+                    onClick={handleRetryHeygen}
+                    className="text-[9px] font-mono uppercase tracking-[0.1em] px-1.5 py-0.5 rounded bg-accent/15 text-accent border border-accent/30 hover:bg-accent/25"
+                    title="Re-queue the video. Server caps total tries at 3 — beyond that the worker stops auto-retrying."
+                  >
+                    ↻ retry
+                  </button>
+                )}
+              </>
             )}
           </div>
           <h3 className="font-display text-lg font-light">{displayName}</h3>
@@ -667,6 +704,29 @@ export function StructuredDraftCard({
       {schedule.kind === 'error' && (
         <div className="mb-4 p-3 border border-danger/30 bg-danger/10 rounded text-xs text-danger">
           {schedule.message}
+        </div>
+      )}
+
+      {/* PR Sprint 7.25 Phase 11.6 — surface HeyGen failure details
+          inline. Pre-fix the only signal was the small "🎬 video
+          failed" chip + a tooltip. Founders kept asking "why?" and
+          had to open the Library detail modal to find out. */}
+      {heygenStatus === 'failed' && heygenErrorMessage && (
+        <div className="mb-4 p-3 border border-danger/30 bg-danger/10 rounded text-xs text-danger flex items-start gap-2">
+          <span aria-hidden>🎬</span>
+          <div className="flex-1 min-w-0">
+            <div className="font-semibold mb-0.5">Video didn&apos;t start.</div>
+            <div className="text-danger/90">{heygenErrorMessage}</div>
+          </div>
+          {heygenJobIdFromPayload && (
+            <button
+              type="button"
+              onClick={handleRetryHeygen}
+              className="shrink-0 text-[10px] font-mono uppercase tracking-[0.1em] px-2 py-1 rounded bg-accent/20 text-accent border border-accent/40 hover:bg-accent/30"
+            >
+              ↻ Retry
+            </button>
+          )}
         </div>
       )}
 
