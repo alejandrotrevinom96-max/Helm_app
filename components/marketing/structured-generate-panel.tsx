@@ -107,6 +107,10 @@ interface Draft {
   errorKind?: string;
   errorHint?: string;
   errorRetry?: boolean;
+  // PR Sprint 7.24 — Prompt 3. Variant chip + group binding for
+  // the A/B pair shown side-by-side in the Library.
+  variantLabel?: 'A' | 'B' | null;
+  variantGroupId?: string | null;
 }
 
 type ErrorKind =
@@ -299,23 +303,59 @@ export function StructuredGeneratePanel({ projectId }: Props) {
 
   const hasVideoSelection = selected.some((t) => HEYGEN_TYPES.has(t));
 
+  // PR Sprint 7.24 — Prompt 3. For every (platform, contentType)
+  // the founder picks, fire TWO parallel generate-structured calls
+  // — one tagged variantLabel='A' (direct/factual hook style) and
+  // one tagged variantLabel='B' (story/question hook style). Both
+  // share a variantGroupId so the Library can render them as a
+  // side-by-side pair ("pick your favorite, delete the other").
+  //
+  // Helm absorbs the cost of doubling Opus calls on every generate
+  // run — margins justify it and the optionality is worth more
+  // than the extra ~$0.05 per generate.
+  //
+  // Parallel via Promise.all so total wall-clock matches a single
+  // run; the anthropic cached system prompt hits the cache on the
+  // second request anyway.
+  //
+  // After both responses land, auto-trigger image generation for
+  // every visual content type (carousel / photo / single_image)
+  // via /api/visuals/generate. Fire-and-forget — the founder no
+  // longer has to click "+ Add visual" on each card. The card
+  // shows a placeholder spinner until imageUrl populates via
+  // router.refresh after Library reload.
   const generate = async () => {
     if (selected.length === 0 || !prompt.trim()) return;
     setError(null);
     setGenerating(true);
     setDrafts([]);
     try {
-      const res = await fetch('/api/ai/generate-structured', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          projectId,
-          platform,
-          types: selected,
-          prompt: prompt.trim(),
+      const variantGroupId = crypto.randomUUID();
+      const baseBody = {
+        projectId,
+        platform,
+        types: selected,
+        prompt: prompt.trim(),
+        variantGroupId,
+      };
+
+      // Fire both variants in parallel. Each call returns its own
+      // response shape; we merge both `drafts` arrays into a single
+      // list of 2×N drafts.
+      const [resA, resB] = await Promise.all([
+        fetch('/api/ai/generate-structured', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...baseBody, variantLabel: 'A' }),
         }),
-      });
-      const data = (await res.json()) as {
+        fetch('/api/ai/generate-structured', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...baseBody, variantLabel: 'B' }),
+        }),
+      ]);
+
+      type Resp = {
         success?: boolean;
         drafts?: Draft[];
         error?: string;
@@ -323,17 +363,73 @@ export function StructuredGeneratePanel({ projectId }: Props) {
         hint?: string;
         retry?: boolean;
       };
-      if (!res.ok || !data.success) {
-        const kind: ErrorKind = data.errorKind ?? 'unknown';
+      const [dataA, dataB] = (await Promise.all([
+        resA.json().catch(() => ({})) as Promise<Resp>,
+        resB.json().catch(() => ({})) as Promise<Resp>,
+      ])) as [Resp, Resp];
+
+      const allOk =
+        resA.ok && dataA.success && resB.ok && dataB.success;
+      if (!allOk) {
+        // Pick the first failure to surface — both halves usually
+        // fail for the same reason (overload, rate limit) when
+        // they fail at all.
+        const failing = !resA.ok || !dataA.success ? dataA : dataB;
+        const kind: ErrorKind = failing.errorKind ?? 'unknown';
         setError({
           kind,
-          message: data.error ?? 'Could not generate drafts',
-          retry: data.retry ?? true,
-          hint: data.hint ?? ERROR_DISPLAY[kind].defaultHint,
+          message: failing.error ?? 'Could not generate drafts',
+          retry: failing.retry ?? true,
+          hint: failing.hint ?? ERROR_DISPLAY[kind].defaultHint,
         });
+        // Show whichever variant did succeed if any (degrade
+        // gracefully — the founder can still keep the working half).
+        const partial = [
+          ...((resA.ok && dataA.success ? dataA.drafts : []) ?? []),
+          ...((resB.ok && dataB.success ? dataB.drafts : []) ?? []),
+        ];
+        if (partial.length > 0) setDrafts(partial);
         return;
       }
-      setDrafts(data.drafts ?? []);
+
+      const merged: Draft[] = [
+        ...(dataA.drafts ?? []),
+        ...(dataB.drafts ?? []),
+      ];
+      setDrafts(merged);
+
+      // PR Sprint 7.24 — Prompt 3. Auto-generate images for visual
+      // content types (carousel / photo / single_image). The
+      // founder previously had to click "+ Add visual" on each
+      // card; that confirmation step is gone — Helm absorbs the
+      // ~$0.05 per image. Fire-and-forget: the request returns
+      // immediately, the imageUrl populates on the row in
+      // background, and the card surfaces it on the next refresh.
+      //
+      // We skip UGC + reel (HeyGen handles the video; the cover
+      // image is a future polish). Carousel slides are generated
+      // via the separate slide-generation endpoint as part of
+      // Calendar/Library flows, so we don't kick those off here.
+      const VISUAL_TYPES = new Set(['photo', 'single_image']);
+      for (const d of merged) {
+        if (!d.id) continue; // skip error drafts
+        if (!VISUAL_TYPES.has(d.contentType)) continue;
+        void fetch('/api/visuals/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectId,
+            platform,
+            postContent: prompt.trim(),
+            draftId: d.id,
+            painPoint: prompt.trim(),
+            contentType: 'photo',
+          }),
+        }).catch(() => {
+          /* fire-and-forget — surfaced when Library re-renders */
+        });
+      }
+
       // PR #76 — Sprint 7.3: server-side router.refresh so the
       // /marketing/library tab (when the founder navigates there)
       // picks up the new rows without a full reload.
@@ -351,13 +447,16 @@ export function StructuredGeneratePanel({ projectId }: Props) {
     }
   };
 
+  // PR Sprint 7.24 — Prompt 3. We now produce 2 drafts per content
+  // type (variants A + B) so the count surfaces as 2N.
+  const variantCount = selected.length * 2;
   const buttonLabel = useMemo(() => {
     if (generating) {
-      return `Generating ${selected.length} draft${selected.length === 1 ? '' : 's'}…`;
+      return `Generating ${variantCount} draft${variantCount === 1 ? '' : 's'}…`;
     }
     if (selected.length === 0) return 'Pick a type first';
-    return `Generate ${selected.length} structured draft${selected.length === 1 ? '' : 's'}`;
-  }, [generating, selected.length]);
+    return `Generate ${variantCount} structured draft${variantCount === 1 ? '' : 's'}`;
+  }, [generating, selected.length, variantCount]);
 
   const estimatedSeconds = 15 + selected.length * 10;
 
@@ -466,7 +565,7 @@ export function StructuredGeneratePanel({ projectId }: Props) {
           </div>
         )}
         <p className="text-xs text-text-3 mt-3">
-          1 structured draft per selected type.
+          2 variants per selected type — pick your favorite, delete the other.
         </p>
       </GlassCard>
 
@@ -587,6 +686,7 @@ export function StructuredGeneratePanel({ projectId }: Props) {
                     draftId={d.id || undefined}
                     consistencyScore={d.consistencyScore ?? null}
                     projectId={projectId}
+                    variantLabel={d.variantLabel ?? null}
                   />
                 </StructuredDraftErrorBoundary>
               );

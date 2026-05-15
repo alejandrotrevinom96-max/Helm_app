@@ -46,6 +46,10 @@ interface Props {
   // projectId in the body. The parent (StructuredGeneratePanel)
   // already knows it.
   projectId?: string;
+  // PR Sprint 7.24 — Prompt 3. Variant chip surfaces "Option A" /
+  // "Option B" on the card so founders can compare the pair at a
+  // glance. Null/undefined on legacy single-variant generations.
+  variantLabel?: 'A' | 'B' | null;
 }
 
 type VoteValue = 'liked' | 'disliked' | null;
@@ -73,6 +77,7 @@ export function StructuredDraftCard({
   initialVote = null,
   consistencyScore = null,
   projectId,
+  variantLabel = null,
 }: Props) {
   const [copied, setCopied] = useState(false);
   // PR #80 — Sprint 7.5.2: vote state. Optimistic toggle on click;
@@ -326,6 +331,18 @@ export function StructuredDraftCard({
             <span className="text-[10px] font-mono uppercase tracking-[0.1em] text-text-3">
               {contentType.replace(/_/g, ' ')}
             </span>
+            {/* PR Sprint 7.24 — Prompt 3. Variant chip. Soft
+                terracotta tint so it reads as "this is one of a pair"
+                not "this is an error/warning". Hover text spells out
+                the comparison framing. */}
+            {variantLabel && (
+              <span
+                className="text-[10px] font-mono uppercase tracking-[0.1em] font-bold px-2 py-0.5 rounded bg-accent/15 text-accent border border-accent/30"
+                title="Generated at the same time as the other variant — pick your favorite, delete the other."
+              >
+                Option {variantLabel}
+              </span>
+            )}
             {/* PR Sprint 7.13 hotfix v2 (BUG 2) — Brand fit badge.
                 Same pill style as the post-card so the founder
                 sees a consistent signal across Generator and

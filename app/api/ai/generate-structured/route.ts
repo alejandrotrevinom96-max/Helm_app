@@ -246,6 +246,11 @@ interface DraftPayload {
   errorKind?: ErrorKind;
   errorHint?: string;
   errorRetry?: boolean;
+  // PR Sprint 7.24 — Prompt 3. Set when the request was one half
+  // of an A/B pair. Cards in /marketing/generate + Library use it
+  // to render the "Variant A" / "Variant B" chip.
+  variantLabel?: 'A' | 'B' | null;
+  variantGroupId?: string | null;
 }
 
 function brandContextSummary(bible: BrandBible | null): string {
@@ -339,11 +344,22 @@ export async function POST(request: Request) {
     );
   }
 
+  // PR Sprint 7.24 — Prompt 3. variantLabel + variantGroupId are
+  // optional. When the new client passes both, the request is one
+  // half of an A/B pair fired in parallel from the panel; the
+  // userMessage gets a variant-specific hook hint and the inserted
+  // generated_posts row carries both fields so the Library can
+  // render the pair as a 2-up comparison. Legacy callers (onboarding
+  // wizard's first-content step) omit them and get the
+  // single-variant behavior.
+  type VariantLabel = 'A' | 'B';
   let body: {
     projectId?: string;
     platform?: string;
     prompt?: string;
     types?: string[];
+    variantLabel?: VariantLabel;
+    variantGroupId?: string;
   };
   try {
     body = (await request.json()) as {
@@ -351,12 +367,31 @@ export async function POST(request: Request) {
       platform?: string;
       prompt?: string;
       types?: string[];
+      variantLabel?: VariantLabel;
+      variantGroupId?: string;
     };
   } catch {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
   const { projectId, platform, prompt } = body;
+  const variantLabel: VariantLabel | null =
+    body.variantLabel === 'A' || body.variantLabel === 'B'
+      ? body.variantLabel
+      : null;
+  const variantGroupId: string | null =
+    typeof body.variantGroupId === 'string' && UUID_RE.test(body.variantGroupId)
+      ? body.variantGroupId
+      : null;
+  // Each variant nudges the model toward a different opening
+  // shape so the two drafts feel distinct without forcing different
+  // content. Empty when the call is single-variant (legacy).
+  const variantHint =
+    variantLabel === 'A'
+      ? `\n\nVARIANT INSTRUCTION (Variant A of an A/B pair): open this draft with a DIRECT, FACTUAL hook — a specific number, a tool name, a concrete confession verb ("I dropped...", "I spent..."). No story setup, no question opener.`
+      : variantLabel === 'B'
+        ? `\n\nVARIANT INSTRUCTION (Variant B of an A/B pair): open this draft with a STORY-BASED or QUESTION-BASED hook — start mid-action ("It was 2am. Tuesday."), pose a curious question, or set a brief scene. No leading number, no confession-verb pattern.`
+        : '';
   if (!projectId || !UUID_RE.test(projectId)) {
     return NextResponse.json({ error: 'Invalid projectId' }, { status: 400 });
   }
@@ -769,6 +804,13 @@ ${JSON.stringify(template.structureSchema, null, 2)}
 
 Return STRICT JSON matching the schema. No markdown fences, no prose outside JSON.`;
 
+    // PR Sprint 7.24 — Prompt 3. Append the variant hint to the
+    // userMessage (empty when single-variant). Keeping the hint at
+    // the END so it's the last thing the model reads before
+    // composing — recency bias makes the hook-style guidance
+    // stickier than if it were buried higher in the prompt.
+    const userMessageForVariant = `${userMessage}${variantHint}`;
+
     let parsed: unknown = null;
     let typeErrorKind: ErrorKind | null = null;
     let typeErrorMsg: string | null = null;
@@ -777,7 +819,7 @@ Return STRICT JSON matching the schema. No markdown fences, no prose outside JSO
         model: MODELS.OPUS,
         max_tokens: 2500,
         system: cachedSystem(systemPrompt),
-        messages: [{ role: 'user', content: userMessage }],
+        messages: [{ role: 'user', content: userMessageForVariant }],
       });
 
       await trackUsage({
@@ -1024,6 +1066,11 @@ Return STRICT JSON matching the schema. No markdown fences, no prose outside JSO
         structuredContent: parsed as object,
         consistencyScore,
         scoreBreakdown,
+        // PR Sprint 7.24 — Prompt 3. Both fields null on single-
+        // variant calls (legacy callers). Both set on A/B-pair
+        // calls so the Library can render the pair side-by-side.
+        variantLabel,
+        variantGroupId,
       })
       .returning({ id: generatedPosts.id });
 
@@ -1085,6 +1132,11 @@ Return STRICT JSON matching the schema. No markdown fences, no prose outside JSO
       displayName: template.displayName,
       structuredContent: outputContent,
       consistencyScore,
+      // PR Sprint 7.24 — Prompt 3. Surface to the client so the
+      // generate panel + Library card can render the variant chip
+      // immediately without a Library refetch.
+      variantLabel,
+      variantGroupId,
     });
   }
 

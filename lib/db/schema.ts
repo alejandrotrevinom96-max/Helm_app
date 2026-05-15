@@ -228,6 +228,17 @@ export const generatedPosts = pgTable('generated_posts', {
   // refreshed Library row carries its image.
   imageUrl: text('image_url'),
   imagePrompt: text('image_prompt'),
+  // PR Sprint 7.24 — Prompt 3. Per-content-type variants. For
+  // every (platform, contentType) the founder selects, the
+  // generator now produces TWO drafts: variant 'A' uses a direct/
+  // factual hook style, variant 'B' uses a story/question hook
+  // style. Both share the same variantGroupId so the Library /
+  // Calendar can render them as a 2-up comparison ("pick your
+  // favorite, delete the other"). Legacy rows pre-7.24 have
+  // variantLabel=null AND variantGroupId=null and render
+  // un-grouped — same as before.
+  variantLabel: text('variant_label'), // 'A' | 'B' | null
+  variantGroupId: uuid('variant_group_id'),
   // PR #51 — Sprint 6.8.2: performance rating ALSO on drafts.
   // Pre-PR-51 only scheduled_posts could be rated (post-publish
   // reality check). The founder QA asked for a single
