@@ -30,6 +30,17 @@ import {
   type ContentTypeTaxonomy,
   type Platform as ToneEnginePlatform,
 } from '@/lib/ai/platform-tone';
+// PR Sprint 7.22 Sprint C — Adaptive path inherits HUMANIZE_RULES too.
+// Before this splice, only buildGenerationPrompt (the Sprint 7.13
+// fallback in lib/ai/platform-tone.ts) embedded the rules in the
+// prompt. The adaptive path (buildAdaptivePrompt below) shipped the
+// PROMPT_COMPOSITION_RULES paragraph that REFERENCES the rules but
+// never injected the actual ~3.5KB body, so the model didn't have
+// the buzzword/structure constraints in scope when composing.
+// Adding the import + the same humanizeSection splice closes that
+// gap so the adaptive path produces output of equal quality to the
+// fallback.
+import { HUMANIZE_RULES } from '@/lib/voice-engine/humanize-rules';
 import {
   getPlatformSlots,
   getRecentLosingPatterns,
@@ -59,6 +70,13 @@ export interface BuildAdaptivePromptOpts {
   // empty-string otherwise. Mirrors the same arg on
   // buildGenerationPrompt (lib/ai/platform-tone.ts).
   productRelevanceSection?: string;
+  // PR Sprint 7.22 Sprint C — F1 preventive humanize for the
+  // adaptive path. Mirrors injectHumanize on buildGenerationPrompt.
+  // Default true; toggle false only for A/B comparison or token
+  // savings during dev iteration. Production callers should leave
+  // the default so the adaptive path produces output of equal
+  // quality to the fallback.
+  injectHumanize?: boolean;
 }
 
 export class VoiceEngineValidationError extends Error {
@@ -112,7 +130,15 @@ export function buildAdaptivePrompt(opts: BuildAdaptivePromptOpts): string {
   // framing. Pre-built upstream by the matcher; nothing async here.
   const productRelevance = opts.productRelevanceSection ?? '';
 
-  return `${PROMPT_COMPOSITION_RULES}
+  // PR Sprint 7.22 Sprint C — F1 preventive humanize. Same splice
+  // position as buildGenerationPrompt: right after
+  // PROMPT_COMPOSITION_RULES so the model sees the rules before any
+  // platform/content overrides land. Defaults to ON; toggled off
+  // only for A/B comparison or dev token savings.
+  const injectHumanize = opts.injectHumanize ?? true;
+  const humanizeSection = injectHumanize ? `\n\n${HUMANIZE_RULES}\n` : '';
+
+  return `${PROMPT_COMPOSITION_RULES}${humanizeSection}
 
 CLIENT CONTEXT (apply strongly, this is the client-specific intelligence):
 ${dynamicContext}

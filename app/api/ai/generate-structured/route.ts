@@ -111,6 +111,14 @@ import {
   formatBridgeForPrompt,
   matchBridgeForPain,
 } from '@/lib/voice-engine/product-bridge-matcher';
+// PR Sprint 7.22 Sprint C — F3 authenticity smell test. Fire-and-
+// forget final-pass Haiku scoring on the first successful draft of
+// each request so we collect telemetry without blocking the
+// response or paying for N parallel calls per generation.
+import {
+  smellTestAuthenticity,
+  type SmellTestResult,
+} from '@/lib/voice-engine/authenticity-smell-test';
 
 export const maxDuration = 60;
 
@@ -990,6 +998,61 @@ Return STRICT JSON matching the schema. No markdown fences, no prose outside JSO
       },
       { status: desc.status },
     );
+  }
+
+  // PR Sprint 7.22 Sprint C — F3 authenticity smell test (telemetry
+  // only). Fire-and-forget Haiku call that scores the FIRST
+  // successful draft 0-100 on authenticity and writes the result
+  // to the audit log. ~$0.001 + ~1s but doesn't block the response
+  // because we never await it. Picking only the first draft keeps
+  // the per-request smell-test cost flat regardless of batch size.
+  //
+  // Why this lives at the bottom of the function (not per content
+  // type in the loop): we want exactly ONE smell-test data point
+  // per request so the metric is comparable across founders who
+  // generate 1 vs 5 content types. The first successful draft is
+  // representative — the same brand + voice + bridge inputs drive
+  // every type in the batch.
+  //
+  // Once we have a week of base-rate scores in the audit log we
+  // can decide whether to (a) gate generation on smellTestPasses
+  // and regenerate failures, (b) expose the score to the UI as a
+  // brand-fit indicator, or (c) feed scores back into a per-
+  // platform calibration job. Today: telemetry only.
+  if (successful.length > 0) {
+    const firstSuccessful = successful[0];
+    if (firstSuccessful) {
+      const flatText = flattenStructuredContentForValidation(
+        firstSuccessful.structuredContent,
+      );
+      if (flatText.length > 20) {
+        void smellTestAuthenticity({
+          postText: flatText,
+          platform: platformLower,
+          contentType: firstSuccessful.contentType,
+        })
+          .then((result: SmellTestResult) => {
+            void logAudit({
+              userId: user.id,
+              projectId,
+              action: 'authenticity_smell_test',
+              platform: platformLower as VoiceEnginePlatform,
+              notes: `score=${result.score} verdict=${result.verdict} type=${firstSuccessful.contentType} issues=${result.primaryIssues.slice(0, 2).join('; ').slice(0, 300)}`.slice(
+                0,
+                500,
+              ),
+            }).catch(() => {
+              /* non-fatal */
+            });
+          })
+          .catch((err: unknown) => {
+            console.warn(
+              '[generate-structured] smell test failed (non-fatal):',
+              err instanceof Error ? err.message : err,
+            );
+          });
+      }
+    }
   }
 
   return NextResponse.json({
