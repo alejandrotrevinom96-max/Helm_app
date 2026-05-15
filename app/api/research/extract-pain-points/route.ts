@@ -30,6 +30,16 @@ import { anthropic, MODELS, cachedSystem } from '@/lib/ai/claude';
 import { trackUsage } from '@/lib/ai/usage-tracker';
 import { checkRateLimit } from '@/lib/rate-limit';
 import type { BrandBible } from '@/lib/types/brand';
+// PR Sprint 7.23 — anchored angle generation. The extraction prompt
+// no longer produces actionableAngle inline. After we have the
+// pain themes + quotes + platforms, we run a per-pain-point Haiku
+// call with the new anchoring template that consumes the brand
+// bible, verified facts (Patch 4 — empty for now), and approved
+// product bridges (Sprint B). The anchoring rules in that template
+// pick the verb based on whether the founder has direct experience,
+// so we stop emitting "Show frameworks for X" when no framework
+// exists.
+import { generateActionableAngle } from '@/lib/research/generate-actionable-angle';
 
 export const maxDuration = 60;
 
@@ -140,6 +150,14 @@ export async function POST(request: Request) {
     .filter((n): n is string => Boolean(n))
     .join(', ');
 
+  // PR Sprint 7.23 — actionableAngle was removed from this JSON
+  // schema. It used to be a one-shot string the model produced
+  // inline alongside the theme/quote/platform. Inline generation
+  // didn't have access to the founder's verified facts or product
+  // bridges, so it often emitted "Show how to X" directives that
+  // forced the post generator to fabricate specifics. The angle is
+  // now produced by a dedicated, anchored Haiku call PER pain point
+  // after this extraction completes (see generateActionableAngle).
   const systemPrompt = `You are a marketing intelligence analyst extracting audience pain points from raw community discussions.
 
 You must:
@@ -158,8 +176,7 @@ Return STRICT JSON, no markdown fences, no prose:
       "frequency": <integer, min 2>,
       "sampleQuote": "<verbatim quote, under 100 chars, escape inner quotes>",
       "platform": "<source platform>",
-      "isOnDomain": true,
-      "actionableAngle": "<one sentence on how a post could address this>"
+      "isOnDomain": true
     }
   ],
   "summary": "<2-3 sentence summary of what the audience discusses this week>",
@@ -212,8 +229,10 @@ Extract on-domain pain themes that repeat. JSON only.`;
     );
   }
 
-  // Normalize: drop off-domain rows, clamp frequency.
-  const cleanPainPoints: PainPoint[] = Array.isArray(parsed?.painPoints)
+  // Normalize: drop off-domain rows, clamp frequency. actionableAngle
+  // is empty here — we fill it below via a dedicated anchored Haiku
+  // call per pain point. PR Sprint 7.23.
+  const partialPainPoints: PainPoint[] = Array.isArray(parsed?.painPoints)
     ? parsed.painPoints
         .filter((p) => p && typeof p === 'object' && p.isOnDomain !== false)
         .map((p) => ({
@@ -222,10 +241,42 @@ Extract on-domain pain themes that repeat. JSON only.`;
           sampleQuote: String(p.sampleQuote ?? '').slice(0, 200),
           platform: String(p.platform ?? 'unknown'),
           isOnDomain: true,
-          actionableAngle: String(p.actionableAngle ?? '').slice(0, 280),
+          actionableAngle: '',
         }))
         .slice(0, 10)
     : [];
+
+  // PR Sprint 7.23 — anchored angle generation per pain point.
+  // Runs in parallel via Promise.all so wall-clock stays close to
+  // a single Haiku call (~1s) regardless of pain-point count.
+  // Failures degrade gracefully — generateActionableAngle returns ''
+  // on transient errors and the card renders without an angle.
+  //
+  // Inputs threaded into the anchoring prompt:
+  //   - pain_theme + sample_quote: from this extraction
+  //   - platform: per pain point (different findings can sit on
+  //     different platforms)
+  //   - brand_bible: the project's BrandBible jsonb
+  //   - verified_facts: Patch 4 territory; empty array until that
+  //     ships (the prompt switches to exploratory verbs when empty)
+  //   - pain_to_product_bridges: from BrandBible.painToProductBridges
+  //     (Sprint B). Pre-filtered to approved only inside the helper.
+  const approvedBridges = (bible?.painToProductBridges ?? []).filter(
+    (b) => !b.pendingReview,
+  );
+  const cleanPainPoints: PainPoint[] = await Promise.all(
+    partialPainPoints.map(async (p) => {
+      const angle = await generateActionableAngle({
+        painTheme: p.theme,
+        sampleQuote: p.sampleQuote,
+        platform: p.platform,
+        brandBible: bible,
+        verifiedFacts: [],
+        painToProductBridges: approvedBridges,
+      });
+      return { ...p, actionableAngle: angle };
+    }),
+  );
 
   // Track which connected sources contributed (by sourceId on the
   // findings rows that exist — older rows may have null sourceId).
