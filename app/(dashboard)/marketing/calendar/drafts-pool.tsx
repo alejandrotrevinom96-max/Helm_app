@@ -27,6 +27,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, Inbox } from 'lucide-react';
 import type { LibraryPost } from '@/app/api/marketing/library/route';
 import { getPlatformStyle } from '@/lib/platforms/colors';
+// PR Sprint 7.24 — Prompt 4. Shared content-type chip — same
+// component the Library cards + post detail modal use. Drafts in
+// the pool now surface their type at a glance ("🎥 Script" /
+// "🖼️ Carousel" / etc.) instead of just showing the raw text.
+import { ContentTypeBadge } from '@/components/marketing/ContentTypeBadge';
 
 interface Props {
   projectId: string;
@@ -292,9 +297,29 @@ function DraftChip({
       className="group p-3 bg-bg-elev rounded-lg cursor-move hover:bg-bg-elev/80 transition-colors border-l-4"
       style={{ borderLeftColor: accentColor }}
     >
-      <div className="flex items-center justify-end mb-1.5">
+      <div className="flex items-center justify-between gap-2 mb-1.5">
+        {/* PR Sprint 7.24 — Prompt 4. Content-type chip on every
+            draft card. Founders dragging from the pool now see
+            color-coded format at a glance — carousel-blue,
+            photo-green, ugc-amber, text-gray. */}
+        {draft.contentType ? (
+          <ContentTypeBadge contentType={draft.contentType} />
+        ) : (
+          <span />
+        )}
+        {/* Variant chip — when this draft is one half of an A/B
+            pair (Sprint 7.24 — Prompt 3). Mirrors the chip pattern
+            from the Library card. */}
+        {draft.variantLabel && (
+          <span
+            className="text-[9px] font-mono uppercase tracking-[0.1em] font-bold px-1.5 py-0.5 rounded bg-accent/15 text-accent border border-accent/30 shrink-0"
+            title="Generated as one of an A/B pair — pick your favorite, delete the other."
+          >
+            Option {draft.variantLabel}
+          </span>
+        )}
         <div
-          className="text-text-3 group-hover:text-accent text-xs"
+          className="text-text-3 group-hover:text-accent text-xs shrink-0"
           aria-hidden
         >
           ⋮⋮

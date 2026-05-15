@@ -17,6 +17,12 @@
 // fires for both.
 import type { CalendarPost } from '@/app/api/marketing/calendar/route';
 import { getPlatformStyle } from '@/lib/platforms/colors';
+// PR Sprint 7.24 — Prompt 4. Per-content-type colored dots used in
+// the month-view daily density indicator (one dot per post on a
+// day, colored by the post's content type). Same color palette
+// the Library + drafts pool use, so the visual language is
+// consistent across the whole Marketing surface.
+import { ContentTypeDot } from '@/components/marketing/ContentTypeBadge';
 
 // Minimal shape used for drags — supports both already-scheduled
 // CalendarPost rows and generated_posts drafts. The `source`
@@ -199,11 +205,17 @@ export function CalendarView({
               onDragLeave={(e) => handleDayDragLeave(e, k)}
               onDrop={(e) => handleDayDrop(e, day)}
               className={`
-                min-h-[200px] p-3 rounded-lg border transition-colors
+                min-h-[200px] p-3 rounded-lg border-2 transition-all
                 ${
+                  // PR Sprint 7.24 — Prompt 4. Enhanced drag
+                  // feedback. Pre-fix the highlight was a 1px
+                  // accent border + 10%-opacity tint — too
+                  // subtle on dark theme. Now: 2px solid border
+                  // + ring shadow + accent background, so the
+                  // founder can't miss where they're about to drop.
                   isOver
-                    ? 'border-accent bg-accent/10'
-                    : 'border-border bg-bg-elev/30'
+                    ? 'border-accent bg-accent/15 shadow-lg shadow-accent/20 cursor-copy'
+                    : 'border-transparent bg-bg-elev/30'
                 }
                 ${isToday ? 'ring-1 ring-accent ring-offset-2 ring-offset-bg' : ''}
               `}
@@ -318,8 +330,21 @@ export function CalendarView({
                   );
                 })}
                 {dayPosts.length === 0 && (
-                  <div className="text-[10px] text-text-3 italic">
-                    No posts
+                  <div
+                    className={`text-[10px] italic ${
+                      // PR Sprint 7.24 — Prompt 4. Invite when
+                      // dragging. The user reported they couldn't
+                      // tell where to drop because empty cells
+                      // looked identical to non-targets. Now an
+                      // active drag bumps the empty-state copy to
+                      // accent + a drop arrow so the affordance
+                      // is unambiguous.
+                      draggedItem
+                        ? 'text-accent font-medium not-italic'
+                        : 'text-text-3'
+                    }`}
+                  >
+                    {draggedItem ? '↓ Drop a draft here' : 'No posts'}
                   </div>
                 )}
               </div>
@@ -357,11 +382,16 @@ export function CalendarView({
               onDragLeave={(e) => handleDayDragLeave(e, k)}
               onDrop={(e) => handleDayDrop(e, day)}
               className={`
-                min-h-[100px] p-2 rounded border transition-colors
+                min-h-[100px] p-2 rounded border-2 transition-all
                 ${
+                  // PR Sprint 7.24 — Prompt 4. Same enhanced drag
+                  // feedback as week view: 2px solid + ring +
+                  // accent tint so the drop target is unambiguous
+                  // at month-view scale (cells are smaller and
+                  // the 1px border was easy to miss).
                   isOver
-                    ? 'border-accent bg-accent/10'
-                    : 'border-border'
+                    ? 'border-accent bg-accent/15 shadow-lg shadow-accent/20 cursor-copy'
+                    : 'border-transparent'
                 }
                 ${!isCurrentMonth ? 'opacity-40' : ''}
                 ${
@@ -371,10 +401,39 @@ export function CalendarView({
                 }
               `}
             >
-              <div
-                className={`text-sm mb-1 ${isToday ? 'text-accent font-medium' : 'text-text-2'}`}
-              >
-                {day.getDate()}
+              <div className="flex items-center justify-between gap-1 mb-1">
+                <div
+                  className={`text-sm ${isToday ? 'text-accent font-medium' : 'text-text-2'}`}
+                >
+                  {day.getDate()}
+                </div>
+                {/* PR Sprint 7.24 — Prompt 4. Per-content-type
+                    density dots. One dot per post, colored by the
+                    content type (carousel-blue / photo-green /
+                    ugc-amber / text-gray). Lets the founder skim
+                    the month and see at a glance which days are
+                    heavy + which formats dominate without
+                    expanding each cell. Cap at 6 to keep cells
+                    tidy; "+N" sits next to the row for overflow. */}
+                {dayPosts.length > 0 && (
+                  <div
+                    className="flex items-center gap-0.5 shrink-0"
+                    aria-label={`${dayPosts.length} post${dayPosts.length === 1 ? '' : 's'} on this day`}
+                  >
+                    {dayPosts.slice(0, 6).map((p) => (
+                      <ContentTypeDot
+                        key={p.id}
+                        contentType={p.contentType ?? null}
+                        size={5}
+                      />
+                    ))}
+                    {dayPosts.length > 6 && (
+                      <span className="text-[8px] font-mono text-text-3 ml-0.5">
+                        +{dayPosts.length - 6}
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
               <div className="space-y-1">
                 {dayPosts.slice(0, 3).map((post) => {

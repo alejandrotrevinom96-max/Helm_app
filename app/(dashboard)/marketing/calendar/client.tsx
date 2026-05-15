@@ -25,6 +25,15 @@ import { GoldenTimesModal } from './golden-times-modal';
 import { DraftsPool } from './drafts-pool';
 import { CalendarPostModal } from './calendar-post-modal';
 
+// PR Sprint 7.24 — Prompt 4. localStorage key for the V3 disclaimer
+// banner dismissal. We persist a boolean (not a timestamp) because
+// the message is operationally permanent until Meta App Review
+// unblocks auto-publish — there's no useful "show again after X
+// days" cadence here. Key is namespaced by feature, not user, so
+// dismissing it once in any browser session sticks for that
+// browser.
+const BANNER_DISMISS_KEY = 'helm.calendar.v3-banner.dismissed';
+
 type ViewMode = 'week' | 'month';
 
 // Compute the visible date range based on the anchor date + view.
@@ -99,6 +108,11 @@ export function CalendarClient({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState({ platform: '' });
+  // PR Sprint 7.24 — Prompt 4. Banner dismiss state. Defaults to
+  // shown; useEffect below hydrates from localStorage so the
+  // dismissal survives reloads. SSR-safe: window is only touched
+  // inside useEffect, not during initial render.
+  const [bannerDismissed, setBannerDismissed] = useState(false);
   const [pendingDrop, setPendingDrop] = useState<{
     item: DraggedItem;
     date: Date;
@@ -165,6 +179,21 @@ export function CalendarClient({
   useEffect(() => {
     fetchPosts();
   }, [fetchPosts]);
+
+  // PR Sprint 7.24 — Prompt 4. Hydrate the V3 banner dismissal from
+  // localStorage on mount. Runs once and doesn't subscribe to
+  // changes — the banner is dismiss-once-forever (per browser), so
+  // there's no useful re-sync after the initial read.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      if (window.localStorage.getItem(BANNER_DISMISS_KEY) === '1') {
+        setBannerDismissed(true);
+      }
+    } catch {
+      /* private mode or quota — banner stays visible, no harm. */
+    }
+  }, []);
 
   const handleDragStart = (item: DraggedItem) => {
     setDraggedItem(item);
@@ -281,24 +310,50 @@ export function CalendarClient({
           blocked. Until V3 ships, the calendar is a planning tool
           and the Share button on each post does the actual
           shipping. We surface that contract here so testers don't
-          schedule a post and then wonder why nothing got posted. */}
-      <div className="p-4 bg-accent/10 border border-accent/30 rounded-lg">
-        <div className="flex items-start gap-3">
-          <span className="text-xl shrink-0" aria-hidden>
-            🚀
-          </span>
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-medium mb-1">
-              Auto-post to Meta is coming in V3
+          schedule a post and then wonder why nothing got posted.
+
+          PR Sprint 7.24 — Prompt 4. Dismissable. Once the founder
+          has read it, the banner adds friction on every Calendar
+          visit. localStorage persists the dismissal so it stays
+          gone until they clear browser data. */}
+      {!bannerDismissed && (
+        <div className="p-4 bg-accent/10 border border-accent/30 rounded-lg">
+          <div className="flex items-start gap-3">
+            <span className="text-xl shrink-0" aria-hidden>
+              🚀
+            </span>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-medium mb-1">
+                Auto-post to Meta is coming in V3
+              </div>
+              <div className="text-xs text-text-2 leading-relaxed">
+                For now, schedule posts here as your editorial calendar — open
+                any post and tap <span className="font-medium">Share</span> to
+                publish to Instagram, Facebook, X, or anywhere in 1 tap.
+              </div>
             </div>
-            <div className="text-xs text-text-2 leading-relaxed">
-              For now, schedule posts here as your editorial calendar — open
-              any post and tap <span className="font-medium">Share</span> to
-              publish to Instagram, Facebook, X, or anywhere in 1 tap.
-            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setBannerDismissed(true);
+                if (typeof window !== 'undefined') {
+                  try {
+                    window.localStorage.setItem(BANNER_DISMISS_KEY, '1');
+                  } catch {
+                    /* localStorage disabled or quota exceeded —
+                       dismissal still applies for this session. */
+                  }
+                }
+              }}
+              className="shrink-0 text-text-3 hover:text-text-1 p-1 -m-1 leading-none text-lg"
+              aria-label="Dismiss banner"
+              title="Dismiss"
+            >
+              ×
+            </button>
           </div>
         </div>
-      </div>
+      )}
 
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <p className="text-sm text-text-2">
@@ -331,6 +386,14 @@ export function CalendarClient({
           aligned with the calendar grid. */}
       <div className="flex flex-col lg:flex-row gap-4 lg:items-stretch">
         <div className="flex-1 min-w-0 space-y-4">
+          {/* PR Sprint 7.24 — Prompt 4. Today button promoted out
+              of the filters area and into the navigation header.
+              Pre-fix it sat as a tiny underlined link under the
+              platform filter — founders couldn't find it. New
+              position: right side of the nav row next to "Next
+              →", so the spatial pattern matches every native
+              calendar app (← Today → with the period label
+              centered). */}
           <div className="flex items-center justify-between gap-3">
             <button
               type="button"
@@ -346,26 +409,29 @@ export function CalendarClient({
               {formatPeriod(currentDate, viewMode)}
             </h3>
 
-            <button
-              type="button"
-              onClick={() =>
-                setCurrentDate(navigate(currentDate, viewMode, 1))
-              }
-              className="px-3 py-2 text-sm text-text-2 hover:text-text-1 hover:bg-bg-elev rounded-lg transition-colors"
-            >
-              Next →
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() =>
+                  setCurrentDate(navigate(currentDate, viewMode, 1))
+                }
+                className="px-3 py-2 text-sm text-text-2 hover:text-text-1 hover:bg-bg-elev rounded-lg transition-colors"
+              >
+                Next →
+              </button>
+              <button
+                type="button"
+                onClick={() => setCurrentDate(new Date())}
+                className="px-3 py-2 text-sm font-medium text-accent hover:bg-accent/10 rounded-lg transition-colors"
+                title="Jump back to today's date"
+              >
+                Today
+              </button>
+            </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
             <CalendarFilters filters={filters} onChange={setFilters} />
-            <button
-              type="button"
-              onClick={() => setCurrentDate(new Date())}
-              className="text-xs text-text-3 hover:text-accent underline"
-            >
-              Jump to today
-            </button>
           </div>
 
           {error && (
