@@ -1120,6 +1120,15 @@ export interface BuildGenerationPromptArgs {
   // and empty-string otherwise. Pre-built (not awaited here) so this
   // function stays synchronous and easy to test.
   productRelevanceSection?: string;
+  // PR Sprint 7.22 Sprint E.1 — F4 variety injection. The endpoint
+  // runs shouldInjectVariety + selectVarietyArchetype upstream and
+  // passes the result as a pre-formatted VARIETY MODE block (or
+  // empty string when no variety fires). We append it at the END
+  // of the prompt so the override instruction is the last thing
+  // the model sees before composing — recency bias works in our
+  // favor. Decided ONCE per request (not per content type) so the
+  // archetype is consistent across a batch.
+  varietyInstructionSection?: string;
 }
 
 export function buildGenerationPrompt(
@@ -1176,6 +1185,14 @@ export function buildGenerationPrompt(
   // format mechanics override the framing.
   const productRelevance = args.productRelevanceSection ?? '';
 
+  // PR Sprint 7.22 Sprint E.1 — F4 variety injection. The selector
+  // ran upstream and returned a VARIETY MODE instruction (or empty
+  // string). When present it appends at the very END so the
+  // override sits closest to the model's "now write" cue.
+  const varietySection = args.varietyInstructionSection
+    ? `\n\n${args.varietyInstructionSection.trim()}\n`
+    : '';
+
   return `${PROMPT_COMPOSITION_RULES}${humanizeSection}
 
 BRAND_BIBLE:
@@ -1195,6 +1212,5 @@ ${platformTone}
 
 Now write the ${contentType} for ${platform}. After drafting, run BOTH scan checklists
 (the CONTENT_TYPE_RULES checklist and the PLATFORM_TONE checklist). If any item fails,
-regenerate. Return the final draft only.
-`;
+regenerate. Return the final draft only.${varietySection}`;
 }

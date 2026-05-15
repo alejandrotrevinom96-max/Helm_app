@@ -182,6 +182,110 @@ export interface ProductBridge {
   approvedBy: string | null; // "system:llm_intake_v1" for auto-approved
 }
 
+// === Voice engine: F4 — variety injection ===
+// PostArchetype enum: high-level "shape" the model should produce
+// for a given generation. Most generations are ESSAY (the structured
+// default the rest of the prompt already encodes). The variety
+// injector flips ~15% of generations to a different archetype so
+// the feed has range — shitposts, contrarian takes, vulnerable
+// confessions, data drops — instead of 100% structured essays.
+//
+// Stored on BrandBible because the per-platform config + sliding
+// window of recent archetypes is part of the project's voice state.
+// The actual VARIETY_MODE_INSTRUCTIONS string for each archetype
+// lives in lib/voice-engine/variety-injector.ts.
+export type PostArchetype =
+  | 'essay'
+  | 'shitpost'
+  | 'contrarian'
+  | 'vulnerable'
+  | 'observation'
+  | 'data_drop'
+  | 'story'
+  | 'question'
+  | 'meta';
+
+export interface ArchetypeUsage {
+  archetype: PostArchetype;
+  usedAt: string; // ISO-8601 UTC
+  // True when the variety injector PICKED this archetype (rather
+  // than it emerging organically from a default generation).
+  // Drives the cooldown check (don't fire variety again right after
+  // a forced injection) and lets future analytics distinguish
+  // "the system did this" from "the founder asked for this".
+  wasVarietyInjected: boolean;
+}
+
+export interface VarietyConfig {
+  enabled: boolean;
+  // Probability per generation to flip into variety mode (0..0.5).
+  // 0.15 = 15% of generations get a forced archetype.
+  injectionProbability: number;
+  // How many recent archetype usages to consider when picking the
+  // next variety mode. Capped at 30 to avoid stale signals.
+  slidingWindowSize: number;
+  // After a variety-injected generation, skip variety for this
+  // many subsequent generations so the feed doesn't oscillate.
+  cooldownAfterVariety: number;
+}
+
+export function defaultVarietyConfig(): VarietyConfig {
+  return {
+    enabled: true,
+    injectionProbability: 0.15,
+    slidingWindowSize: 10,
+    cooldownAfterVariety: 3,
+  };
+}
+
+// === Voice engine: E1 — voice idiosyncrasies ===
+// Statistical voice patterns extracted from a client's past posts on
+// a single platform. Injected into the generation prompt as concrete
+// rules (em-dash rate, fragment ratio, common openers, hedging
+// behavior, etc.) so the model can match the writer's voice as a
+// set of explicit constraints rather than imitating loose samples.
+//
+// Per-platform because voice differs across LinkedIn vs Twitter vs
+// Reddit. extractedAt drives the staleness check (re-extract every
+// 7 days to capture voice drift).
+export interface VoiceIdiosyncrasies {
+  sampleSize: number; // >= 10
+  extractedAt: string; // ISO-8601 UTC
+
+  // Punctuation patterns (per 1000 words to normalize across post
+  // lengths).
+  emDashPer1000Words: number;
+  ellipsisPer1000Words: number;
+  semicolonPer1000Words: number;
+  parentheticalAsidePer1000Words: number;
+
+  // Capitalization
+  lowercaseFirstLetterRatio: number; // 0..1
+
+  // Vocabulary
+  commonFillerWords: Record<string, number>; // word → % of posts
+  commonProfanity: string[];
+  profanityPer1000Words: number;
+
+  // Sentence structure
+  avgSentenceLengthWords: number;
+  fragmentRatio: number; // 0..1 — % of sentences <= 4 words
+
+  // Emoji patterns
+  emojiPerPost: number;
+  commonEmojis: string[];
+
+  // Greeting/sign-off patterns
+  commonOpeners: string[];
+  commonClosers: string[];
+
+  // Numbers
+  hedgingRatio: number; // 0..1 — % of numbers preceded by hedge marker
+
+  // Self-correction
+  selfCorrectionCount: number;
+}
+
 export interface BrandBible {
   identity: BrandIdentity;
   archetype: BrandArchetype;
@@ -199,6 +303,17 @@ export interface BrandBible {
   // means the matcher returns "no bridges available" and the
   // PRODUCT_RELEVANCE section is omitted from the prompt.
   painToProductBridges?: ProductBridge[];
+  // Voice engine F4 — variety injection.
+  // - varietyConfig: per-platform config. Absent → use defaults.
+  // - recentArchetypes: per-platform sliding window of recent posts'
+  //   archetypes (so we can pick non-recent ones for variety).
+  varietyConfig?: Partial<Record<string, VarietyConfig>>;
+  recentArchetypes?: Partial<Record<string, ArchetypeUsage[]>>;
+  // Voice engine E1 — voice idiosyncrasies, per-platform.
+  // Populated by the run-on-request refresher with a 7-day staleness
+  // window. Absent or stale → re-extracted from past posts on the
+  // next generation request that hits this project + platform.
+  voiceIdiosyncrasies?: Partial<Record<string, VoiceIdiosyncrasies>>;
   // Set by the migration script when upgrading from the PR #2 shape so the
   // original isn't lost. Optional going forward.
   _legacyOriginal?: Record<string, unknown>;

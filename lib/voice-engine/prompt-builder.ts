@@ -77,6 +77,9 @@ export interface BuildAdaptivePromptOpts {
   // the default so the adaptive path produces output of equal
   // quality to the fallback.
   injectHumanize?: boolean;
+  // PR Sprint 7.22 Sprint E.1 — F4 variety injection. Mirrors the
+  // same arg on buildGenerationPrompt. Append-at-the-end semantics.
+  varietyInstructionSection?: string;
 }
 
 export class VoiceEngineValidationError extends Error {
@@ -138,6 +141,13 @@ export function buildAdaptivePrompt(opts: BuildAdaptivePromptOpts): string {
   const injectHumanize = opts.injectHumanize ?? true;
   const humanizeSection = injectHumanize ? `\n\n${HUMANIZE_RULES}\n` : '';
 
+  // PR Sprint 7.22 Sprint E.1 — F4 variety injection. Selector ran
+  // upstream; we just splice the pre-formatted VARIETY MODE block
+  // at the END of the prompt (or empty when no variety fires).
+  const varietySection = opts.varietyInstructionSection
+    ? `\n\n${opts.varietyInstructionSection.trim()}\n`
+    : '';
+
   return `${PROMPT_COMPOSITION_RULES}${humanizeSection}
 
 CLIENT CONTEXT (apply strongly, this is the client-specific intelligence):
@@ -167,8 +177,7 @@ Include one line per override applied. Omit the entire tag block if no
 overrides were applied.
 
 Return: the final draft + (if any) the override_log block. No commentary,
-no preamble.
-`;
+no preamble.${varietySection}`;
 }
 
 // ============================================================

@@ -119,6 +119,17 @@ import {
   smellTestAuthenticity,
   type SmellTestResult,
 } from '@/lib/voice-engine/authenticity-smell-test';
+// PR Sprint 7.22 Sprint E.1 — F4 variety injection. Decides ONCE
+// per request whether to inject a variety mode override. Tracks
+// chosen archetypes in brandContext.recentArchetypes (per platform)
+// so we can rotate over time and respect the cooldown window.
+import {
+  getVarietyInstruction,
+  recordArchetypeUsage,
+  selectVarietyArchetype,
+  shouldInjectVariety,
+} from '@/lib/voice-engine/variety-injector';
+import type { ArchetypeUsage, PostArchetype } from '@/lib/types/brand';
 
 export const maxDuration = 60;
 
@@ -387,6 +398,58 @@ export async function POST(request: Request) {
   // Skipped entirely when the project has no approved bridges (no
   // Haiku call at all). On Haiku failure the matcher returns an
   // empty BridgeMatch — never throws, never blocks generation.
+  // PR Sprint 7.22 Sprint E.1 — F4 variety injection. ONE decision
+  // per request (shared across all content types in the batch). The
+  // archetype lives at brandContext.recentArchetypes[platform]; we
+  // pull the current sliding window, run shouldInjectVariety, and
+  // when it fires we pick a non-recent archetype + format the
+  // VARIETY MODE instruction. After the response goes out we write
+  // back the updated usage list so the next request sees this one.
+  //
+  // Note: the in-loop `platformLower` is recomputed per content type
+  // (line ~540), but it's a pure toLowerCase() of the request-level
+  // `platform` param so we compute the same value here once for the
+  // pre-loop variety + writeback work. Naming it
+  // `platformLowerForVariety` keeps the in-loop variable untouched.
+  const platformLowerForVariety = platform.toLowerCase();
+  const platformVarietyConfig =
+    bible?.varietyConfig?.[platformLowerForVariety] ?? undefined;
+  const recentArchetypesForPlatform: ArchetypeUsage[] =
+    bible?.recentArchetypes?.[platformLowerForVariety] ?? [];
+
+  let chosenArchetype: PostArchetype = 'essay';
+  let varietyInjectedThisRequest = false;
+  let varietyInstructionSection = '';
+  try {
+    if (
+      shouldInjectVariety({
+        recentArchetypes: recentArchetypesForPlatform,
+        config: platformVarietyConfig,
+      })
+    ) {
+      chosenArchetype = selectVarietyArchetype({
+        recentArchetypes: recentArchetypesForPlatform,
+        config: platformVarietyConfig,
+      });
+      varietyInjectedThisRequest = true;
+      varietyInstructionSection = getVarietyInstruction(chosenArchetype);
+      void logAudit({
+        userId: user.id,
+        projectId,
+        action: 'variety_archetype_injected',
+        platform: platformLowerForVariety as VoiceEnginePlatform,
+        notes: `archetype=${chosenArchetype}`,
+      }).catch(() => {
+        /* non-fatal */
+      });
+    }
+  } catch (err) {
+    console.warn(
+      '[generate-structured] variety selection threw — continuing with default essay:',
+      err instanceof Error ? err.message : err,
+    );
+  }
+
   let productRelevanceSection = '';
   const projectBridges = bible?.painToProductBridges ?? [];
   if (projectBridges.length > 0) {
@@ -563,6 +626,8 @@ ${LANGUAGE_INSTRUCTION_AUDIENCE}`;
               includeExamples: true,
               // PR Sprint 7.22 Sprint B — bridge match (or empty).
               productRelevanceSection,
+              // PR Sprint 7.22 Sprint E.1 — variety mode (or empty).
+              varietyInstructionSection,
             })
           : buildGenerationPrompt({
               platform: platformLower,
@@ -577,6 +642,8 @@ ${LANGUAGE_INSTRUCTION_AUDIENCE}`;
               includeExamples: true,
               // PR Sprint 7.22 Sprint B — bridge match (or empty).
               productRelevanceSection,
+              // PR Sprint 7.22 Sprint E.1 — variety mode (or empty).
+              varietyInstructionSection,
             })
         : null;
 
@@ -998,6 +1065,44 @@ Return STRICT JSON matching the schema. No markdown fences, no prose outside JSO
       },
       { status: desc.status },
     );
+  }
+
+  // PR Sprint 7.22 Sprint E.1 — F4 variety injection writeback.
+  // Only record archetype usage when at least one draft actually
+  // came out — a failed batch shouldn't pollute the sliding window
+  // with a usage that didn't ship. Fire-and-forget UPDATE on the
+  // projects row so the next request sees the new window.
+  if (successful.length > 0 && bible) {
+    try {
+      const nextRecentArchetypes = recordArchetypeUsage(
+        recentArchetypesForPlatform,
+        chosenArchetype,
+        varietyInjectedThisRequest,
+        platformVarietyConfig,
+      );
+      const nextBible: BrandBible = {
+        ...bible,
+        recentArchetypes: {
+          ...(bible.recentArchetypes ?? {}),
+          [platformLowerForVariety]: nextRecentArchetypes,
+        },
+      };
+      void db
+        .update(projects)
+        .set({ brandContext: nextBible })
+        .where(eq(projects.id, projectId))
+        .catch((err: unknown) => {
+          console.warn(
+            '[generate-structured] variety archetype writeback failed (non-fatal):',
+            err instanceof Error ? err.message : err,
+          );
+        });
+    } catch (err) {
+      console.warn(
+        '[generate-structured] variety archetype recording threw (non-fatal):',
+        err instanceof Error ? err.message : err,
+      );
+    }
   }
 
   // PR Sprint 7.22 Sprint C — F3 authenticity smell test (telemetry
