@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
-import { LandingPage } from './_landing/landing-page';
+import { LandingLiveOne } from './_landing/landing-live-one';
 
 // PR #34 — Sprint 6.2: metadata refresh.
 // Old copy framed Helm as a v1 dashboard product ("the c-c for indie
@@ -54,5 +54,9 @@ export default async function HomePage() {
 
   if (user) redirect('/analytics');
 
-  return <LandingPage />;
+  // PR Sprint 7.25 Phase 7 — landing redesign ("The Live One").
+  // The legacy multi-section LandingPage component stays on disk at
+  // ./_landing/landing-page.tsx for revert safety; a one-line swap
+  // here restores it if the new design regresses something.
+  return <LandingLiveOne />;
 }
