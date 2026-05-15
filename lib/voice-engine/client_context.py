@@ -284,8 +284,16 @@ class ProductBridge(BaseModel):
                         description="How the product fits the answer to this pain. "
                                     "1-2 sentences, woven-into-narrative ready.")
     pending_review: bool = Field(default=True,
-                                 description="True until operator approves. "
-                                             "Matcher ignores pending bridges.")
+                                 description="Kill-switch flag. Matcher ignores "
+                                             "bridges where this is True. Default "
+                                             "True is defensive: any bridge "
+                                             "constructed outside the intake's "
+                                             "quality gate is treated as un-vetted. "
+                                             "product_bridge_intake.py sets this "
+                                             "False after the gate passes. An "
+                                             "operator can also flip a specific "
+                                             "live bridge True from SQL/admin to "
+                                             "disable it without a redeploy.")
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     approved_at: datetime | None = Field(default=None)
     approved_by: str | None = Field(default=None)

@@ -194,7 +194,13 @@ def run() -> int:
             )
         )
         assert len(drafts) == 8, f"expected 8 drafts, got {len(drafts)}"
-        assert all(d.pending_review for d in drafts), "all drafts must be pending_review=True"
+        # Patch 2.1: bridges are auto-approved (no operator UI).
+        assert all(not d.pending_review for d in drafts), \
+            "all drafts should be auto-approved (pending_review=False)"
+        assert all(d.approved_by == "system:llm_intake_v1" for d in drafts), \
+            "all drafts should carry the auto-approver marker"
+        assert all(d.approved_at is not None for d in drafts), \
+            "all drafts should have approved_at set"
         assert all(d.pain and d.bridge for d in drafts), "every draft must have pain + bridge"
         report.record("Patch 2 Test 2: Intake end-to-end (mocked)", PASS)
     except Exception as e:
@@ -420,6 +426,77 @@ def run() -> int:
     except Exception as e:
         report.record(
             "Patch 2 Test 7: Project isolation",
+            FAIL,
+            f"{e}\n{traceback.format_exc()}",
+        )
+
+    # ==================================================================
+    # Test 8 (Patch 2.1) — Quality gate drops buzzwords + verbatim
+    # ==================================================================
+    # The intake LLM might slip a "leverage" or "seamlessly" past its
+    # own constraints, or echo the pain back as the bridge. The gate
+    # silently drops those so the client never sees them. We seed a
+    # mock payload with 4 candidates (2 dirty, 2 clean) and assert only
+    # the 2 clean ones come out.
+    try:
+        mixed_payload = {
+            "bridges": [
+                {
+                    # FAIL: contains "leverages" + "streamline" + "seamlessly"
+                    "pain": "Distribution is hard",
+                    "bridge": "Helm leverages AI to streamline your marketing workflow seamlessly.",
+                },
+                {
+                    # PASS: clean, concrete
+                    "pain": "Voice drift in AI tools",
+                    "bridge": "Helm keeps the founder's tone consistent across drafts by loading the voice fingerprint every time.",
+                },
+                {
+                    # FAIL: bridge repeats pain verbatim (lazy LLM)
+                    "pain": "Marketing feels overwhelming for solo founders",
+                    "bridge": "Marketing feels overwhelming for solo founders",
+                },
+                {
+                    # PASS: clean
+                    "pain": "Inconsistent shipping cadence",
+                    "bridge": "Helm's calendar shows the next 4 weeks of posts so the founder can plan a cadence and stick to it.",
+                },
+                {
+                    # FAIL: "unlock" + "empower" + "comprehensive"
+                    "pain": "Tool sprawl",
+                    "bridge": "Helm unlocks a comprehensive workspace that empowers founders.",
+                },
+            ]
+        }
+        drafts = asyncio.run(
+            generate_bridge_drafts(
+                product_description="Helm is a marketing OS for solo founders.",
+                audience_pains=["Distribution", "Voice", "Cadence"],
+                marketing_one_liner="One workspace for research, drafting, scheduling.",
+                client=_MockClient(payload=mixed_payload),
+            )
+        )
+        kept_pains = {d.pain for d in drafts}
+        if (
+            len(drafts) == 2
+            and "Voice drift in AI tools" in kept_pains
+            and "Inconsistent shipping cadence" in kept_pains
+            and all(not d.pending_review for d in drafts)
+        ):
+            report.record(
+                "Patch 2.1 Test 8: Quality gate drops buzzwords + verbatim",
+                PASS,
+                f"{len(drafts)} survived of 5 candidates",
+            )
+        else:
+            report.record(
+                "Patch 2.1 Test 8: Quality gate drops buzzwords + verbatim",
+                FAIL,
+                f"expected 2 specific drafts, got {len(drafts)} with pains {kept_pains}",
+            )
+    except Exception as e:
+        report.record(
+            "Patch 2.1 Test 8: Quality gate drops buzzwords + verbatim",
             FAIL,
             f"{e}\n{traceback.format_exc()}",
         )
