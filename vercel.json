@@ -17,6 +17,10 @@
       "schedule": "* * * * *"
     },
     {
+      "path": "/api/cron/research-scan",
+      "schedule": "0 2 * * *"
+    },
+    {
       "path": "/api/cron/sync-metrics",
       "schedule": "0 0 * * *"
     },

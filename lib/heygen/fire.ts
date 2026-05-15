@@ -25,7 +25,7 @@
 
 import { db } from '@/lib/db';
 import { heygenJobs, projects } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 
 const HEYGEN_API = 'https://api.heygen.com';
 
@@ -187,12 +187,19 @@ export async function fireHeygenForJob(
     const errorKind: 'voice_config' | 'upstream_error' = isVoice
       ? 'voice_config'
       : 'upstream_error';
+    // PR Sprint 7.25 Phase 11.5 — bump attempt_count on every
+    // HeyGen miss so the cron's retry-cap logic
+    // (MAX_HEYGEN_ATTEMPTS) sees progress. We use a SQL increment
+    // (attempt_count + 1) instead of reading-then-writing so
+    // concurrent fires from cron + user-driven endpoint can't lose
+    // a tick.
     await db
       .update(heygenJobs)
       .set({
         status: 'failed',
         errorMessage: result.error.slice(0, 500),
         errorKind,
+        attemptCount: sql`${heygenJobs.attemptCount} + 1`,
         completedAt: new Date(),
       })
       .where(eq(heygenJobs.id, job.id));
@@ -225,6 +232,11 @@ export async function fireHeygenForJob(
       status: 'processing',
       heygenJobId: result.videoId,
       heygenStatus: 'processing',
+      // Same SQL increment as the failure path so retries that
+      // eventually succeed still accumulate the attempt history.
+      // attemptCount becomes a "how many HeyGen requests did we
+      // burn for this video" counter, which is useful telemetry.
+      attemptCount: sql`${heygenJobs.attemptCount} + 1`,
       processedAt: new Date(),
       errorMessage: null,
       errorKind: null,

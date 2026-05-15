@@ -1422,6 +1422,14 @@ export const heygenJobs = pgTable('heygen_jobs', {
   errorMessage: text('error_message'),
   errorKind: text('error_kind'),
 
+  // PR Sprint 7.25 Phase 11.5 — retry counter consumed by the
+  // /api/cron/heygen-worker. Incremented every time the helper
+  // calls HeyGen for this row. The worker stops promoting
+  // failed→queued once attemptCount >= MAX_HEYGEN_ATTEMPTS so a
+  // hard upstream failure can't burn unlimited budget. Migration
+  // lives in scripts/add-heygen-attempt-count.ts.
+  attemptCount: integer('attempt_count').notNull().default(0),
+
   requestedAt: timestamp('requested_at').defaultNow().notNull(),
   processedAt: timestamp('processed_at'),
   completedAt: timestamp('completed_at'),

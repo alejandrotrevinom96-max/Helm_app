@@ -10,34 +10,40 @@
 // future automation) never got rendered.
 //
 // This cron drains the queue every minute on Vercel Pro:
-//   1. Pull the oldest N queued jobs.
+//   1. Pull the oldest N queued jobs PLUS failed rows that are
+//      eligible for retry (attemptCount < MAX_HEYGEN_ATTEMPTS AND
+//      errorKind suggests a transient upstream error, not a
+//      configuration error).
 //   2. For each, verify the project's HeyGen avatar is still
 //      configured. Skip silently if not — the next tick will
 //      re-try automatically once the founder picks an avatar in
 //      Settings (the row stays `status='queued'`).
 //   3. Fire the shared `fireHeygenForJob` helper. Each call hits
-//      HeyGen, captures the upstream video_id, and flips the row
-//      to status='processing'. HeyGen's own webhook
-//      (/api/heygen/webhook) lands the final 'completed' /
-//      'failed' transition asynchronously.
+//      HeyGen, captures the upstream video_id, increments
+//      attemptCount, and flips the row to status='processing'
+//      (or back to 'failed' if it errored again). HeyGen's own
+//      webhook (/api/heygen/webhook) lands the final 'completed'
+//      transition asynchronously.
 //
 // Batch sizing: 5 jobs per tick. HeyGen accepts the generate call
 // in <2s typically; we cap at 5 to stay well under Vercel's 60s
 // function ceiling even when an avatar lookup or DB round-trip is
 // slow.
 //
-// Failed rows: NOT handled by this cron. The fireHeygenForJob
-// helper flips them to status='failed' with an errorMessage, and
-// the Library detail modal already has a "🎬 Retry video" button
-// that re-queues them via the user-driven endpoint. Adding a retry-
-// count column to heygen_jobs would let us promote failed→queued
-// here too — left as a follow-up.
+// Retry policy (PR Sprint 7.25 Phase 11.5):
+//   - Transient errors (errorKind='upstream_error') → eligible
+//     for retry. These are HeyGen 5xx, network timeouts, etc.
+//   - Configuration errors (errorKind='voice_config') → NEVER
+//     auto-retried. Founder must fix the voice in Settings.
+//   - Hard retry cap at MAX_HEYGEN_ATTEMPTS (3). Past that we
+//     leave the row failed and surface the "🎬 Retry video"
+//     button in the Library detail modal for manual override.
 //
 // Idempotency: fireHeygenForJob updates the row to 'processing'
 // (or 'failed') before returning, so a concurrent tick that
 // happened to pick the same row would see status !== 'queued' on
 // its second pass and skip. Belt-and-suspenders: we also re-check
-// status inside the loop after the DB read.
+// status + attemptCount inside the loop after the DB read.
 //
 // Auth: same CRON_SECRET bearer pattern as every other cron in
 // this repo. Refuses if the env var is unset.
@@ -45,7 +51,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { heygenJobs, projects } from '@/lib/db/schema';
-import { eq, asc } from 'drizzle-orm';
+import { eq, and, or, asc, sql } from 'drizzle-orm';
 import {
   isHeygenEnvConfigured,
   isHeygenReadyForProject,
@@ -58,6 +64,12 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 const BATCH_LIMIT = 5;
+// Hard retry cap. Past this we leave the row failed and surface
+// the manual "🎬 Retry video" button in the Library modal.
+// Three tries × ~$0.10 per HeyGen call = $0.30 worst-case spend
+// per stuck video, which beats both silent failure and unbounded
+// retry loops.
+const MAX_HEYGEN_ATTEMPTS = 3;
 
 interface WorkerSummary {
   considered: number;
@@ -65,6 +77,7 @@ interface WorkerSummary {
   succeeded: number;
   failed: number;
   skippedNotConfigured: number;
+  retriedFailedRows: number;
   errors: Array<{ jobId: string; reason: string }>;
 }
 
@@ -94,17 +107,26 @@ export async function GET(request: Request) {
     });
   }
 
-  // Only process status='queued' rows. Failed jobs need manual
-  // retry from the Library detail modal — this keeps the cron's
-  // failure surface small and matches the existing UI contract
-  // (the "🎬 Retry video" button on a failed row already exists).
-  // If we ever add a retry-count column to heygen_jobs we can
-  // promote failed→queued from here too.
+  // Pull queued rows AND retry-eligible failed rows. Retry-eligible
+  // = errorKind='upstream_error' (transient HeyGen / network) AND
+  // attemptCount < MAX_HEYGEN_ATTEMPTS. We intentionally exclude
+  // errorKind='voice_config' from the retry sweep — those need a
+  // founder action in Settings, no amount of retrying changes the
+  // upstream's mind.
   const candidates = await db
     .select({ job: heygenJobs, project: projects })
     .from(heygenJobs)
     .innerJoin(projects, eq(projects.id, heygenJobs.projectId))
-    .where(eq(heygenJobs.status, 'queued'))
+    .where(
+      or(
+        eq(heygenJobs.status, 'queued'),
+        and(
+          eq(heygenJobs.status, 'failed'),
+          eq(heygenJobs.errorKind, 'upstream_error'),
+          sql`${heygenJobs.attemptCount} < ${MAX_HEYGEN_ATTEMPTS}`,
+        ),
+      ),
+    )
     .orderBy(asc(heygenJobs.requestedAt))
     .limit(BATCH_LIMIT);
 
@@ -114,19 +136,41 @@ export async function GET(request: Request) {
     succeeded: 0,
     failed: 0,
     skippedNotConfigured: 0,
+    retriedFailedRows: 0,
     errors: [],
   };
 
   for (const { job, project } of candidates) {
     // Belt-and-suspenders: a parallel tick may have already
     // claimed this row by flipping it to 'processing'. Re-read
-    // status before firing.
+    // status + attemptCount before firing.
     const [fresh] = await db
-      .select({ status: heygenJobs.status })
+      .select({
+        status: heygenJobs.status,
+        errorKind: heygenJobs.errorKind,
+        attemptCount: heygenJobs.attemptCount,
+      })
       .from(heygenJobs)
       .where(eq(heygenJobs.id, job.id))
       .limit(1);
-    if (!fresh || fresh.status !== 'queued') continue;
+    if (!fresh) continue;
+    const isQueued = fresh.status === 'queued';
+    const isRetryable =
+      fresh.status === 'failed' &&
+      fresh.errorKind === 'upstream_error' &&
+      (fresh.attemptCount ?? 0) < MAX_HEYGEN_ATTEMPTS;
+    if (!isQueued && !isRetryable) continue;
+    if (!isQueued && isRetryable) {
+      summary.retriedFailedRows += 1;
+      // Flip back to queued so fireHeygenForJob's idempotency
+      // check (status === 'queued' || 'failed') sees a clean
+      // starting state. attempt_count keeps climbing — fire bumps
+      // it on every miss.
+      await db
+        .update(heygenJobs)
+        .set({ status: 'queued', errorMessage: null, errorKind: null })
+        .where(eq(heygenJobs.id, job.id));
+    }
 
     // Project-level gate. Same rule as the user-driven endpoint:
     // skip projects that haven't configured an avatar yet. We do
