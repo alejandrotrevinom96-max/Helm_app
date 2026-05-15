@@ -25,7 +25,21 @@ import { generateVisual } from '@/lib/visuals/generate';
 import { uploadVisualFromUrl } from '@/lib/visuals/storage';
 import type { BrandBible, ImageStyle } from '@/lib/types/brand';
 
-export const maxDuration = 120; // 6-8 sequential Flux calls
+// PR Sprint 7.25 Phase 11.11 — bumped to Vercel Pro's 300s ceiling
+// because the pre-fix 120s budget couldn't fit 8 sequential slides
+// in worst case (Haiku subject extraction ~3s + Flux ~12s +
+// Supabase rehost ~2s = ~17s × 8 = 136s, blowing the 120s limit
+// and triggering Vercel's plaintext "An error occurred" page).
+// With concurrent chunking below the actual wall time is much
+// shorter, but 300s gives breathing room when fal is throttling.
+export const maxDuration = 300;
+
+// Concurrency cap for parallel slide generation. 4 in-flight is
+// enough to cut total time from ~140s sequential to ~35s on an
+// 8-slide carousel while staying friendly with fal.ai's rate
+// limits. Bumping past 4 occasionally triggers fal's per-second
+// quota and increases the chance of mid-batch throttling.
+const SLIDE_CONCURRENCY = 4;
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -279,22 +293,28 @@ async function handle(
       ? row.post.prompt.trim()
       : undefined;
 
-  // Sequential — keeps Flux's rate-limit happy and gives us
-  // mid-batch failure observability. 6-8 images in 30-60s is fine.
+  // PR Sprint 7.25 Phase 11.11 — chunked-parallel slide generation.
+  // Pre-fix: 8 slides × ~17s (IR + Flux + rehost) = ~140s sequential,
+  // blew past the 120s Vercel ceiling, killed the lambda mid-batch,
+  // Vercel returned its plaintext "An error occurred" page. Now: we
+  // process SLIDE_CONCURRENCY (=4) slides at a time. Each slide's
+  // pipeline stays sequential within itself (extract → generate →
+  // rehost) but multiple slides run in parallel. Total wall time
+  // drops to ~35-40s for an 8-slide carousel, well inside the
+  // 300s ceiling. fal.ai's per-second rate limit handles 4
+  // in-flight comfortably.
+  //
+  // Per-slide try/catch logic moved into `processSlide` so the
+  // chunked promise array can use Promise.allSettled. We still
+  // categorize failures the same way — slot index + reason — and
+  // populate the same successes / failures arrays as the original
+  // sequential version.
   const successes: { slideIndex: number; url: string; prompt: string }[] = [];
   const failures: { slideIndex: number; reason: string }[] = [];
-  for (let i = 0; i < slides.length; i++) {
+
+  const processSlide = async (i: number): Promise<void> => {
     const slide = slides[i];
     const hint = buildSlidePromptHint(slide, i, slides.length);
-    // PR Sprint 7.25 Phase 11.9 — per-slide try/catch. Before
-    // this, a single Flux throw (timeout, content-policy hit,
-    // fal SDK panic) blew up the entire batch — the founder lost
-    // ALL 8 slides instead of 1. Now: each slide's failure is
-    // isolated. We push to `failures[]` (already the existing
-    // pattern for null results) and continue to the next slide.
-    // The bundle's final response still flags the batch as failed
-    // unless EVERY slide landed, but at least the founder sees
-    // which slide tripped + the others render normally.
     let result: Awaited<ReturnType<typeof generateVisual>> | null = null;
     try {
       result = await generateVisual({
@@ -303,14 +323,8 @@ async function handle(
         brandBible: bible,
         style,
         aspectRatio: 'square', // IG carousels = 1:1
-        // PR Sprint 7.24 — IR pipeline inputs. With these set, each
-        // slide goes through subject-extraction + brand-visual-
-        // language + platform-aesthetics composition instead of the
-        // lighter legacy template.
-        // PR Sprint 7.25 Phase 9 — per-slide painPoint instead of
-        // the shared carousel painPoint, so the IR subject extractor
-        // produces a different visual concept per slide. See
-        // buildSlidePainPoint for the merge strategy.
+        // PR Sprint 7.24 IR inputs; PR Sprint 7.25 Phase 9 per-
+        // slide painPoint for varied subject extraction.
         painPoint: buildSlidePainPoint(slide, draftPainPoint),
         contentType: 'carousel',
       });
@@ -324,28 +338,22 @@ async function handle(
         slideIndex: i,
         reason: `slide ${i + 1} threw: ${msg.slice(0, 200)}`,
       });
-      continue;
+      return;
     }
     if (!result?.url) {
       failures.push({
         slideIndex: i,
         reason: 'fal.ai returned no image',
       });
-      continue;
+      return;
     }
-    // PR Sprint 7.13 (BUG 3) — rehost each slide image to
-    // Supabase Storage immediately. fal.ai's CDN URLs are
-    // signed with a ~1-hour TTL; persisting the raw URL meant
-    // every carousel scheduled more than an hour ahead lost
-    // its images by the time the publisher cron picked it up.
-    // We persist the Supabase URL when rehost succeeds and
-    // fall back to the fal.ai URL on failure (still fresh
-    // during the current session, surfaced in failures[] for
-    // diagnostics).
-    // PR Sprint 7.25 Phase 11.9 — also wrap the rehost in
-    // try/catch so a Supabase Storage panic doesn't kill the
-    // batch. If rehost throws, fall back to the fal.ai URL with
-    // its 1-hour TTL (better than losing the whole slide).
+    // Rehost to Supabase Storage. fal.ai CDN URLs are signed with
+    // a ~1-hour TTL; persisting the raw URL meant carousels
+    // scheduled past 1h lost their images by publish time. We
+    // persist the Supabase URL when rehost succeeds and fall back
+    // to the fal.ai URL on failure (still fresh during the
+    // current session). Inner try/catch so a Supabase Storage
+    // panic doesn't kill the slide.
     let permanentUrl: string;
     try {
       const uploaded = await uploadVisualFromUrl(
@@ -378,6 +386,16 @@ async function handle(
       url: permanentUrl,
       prompt: result.prompt,
     });
+  };
+
+  // Run slides in chunks of SLIDE_CONCURRENCY. Promise.allSettled
+  // so a single slide rejecting (it shouldn't — processSlide is
+  // exhaustively try/catch'd) never aborts the chunk.
+  for (let i = 0; i < slides.length; i += SLIDE_CONCURRENCY) {
+    const chunk = slides
+      .slice(i, i + SLIDE_CONCURRENCY)
+      .map((_, j) => i + j);
+    await Promise.allSettled(chunk.map((idx) => processSlide(idx)));
   }
 
   if (successes.length === 0) {
