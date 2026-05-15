@@ -1,27 +1,41 @@
+import { AmbientBackground } from '@/components/ui/ambient-background';
 import { MarketingSubNav } from './sub-nav';
 
 // Shell layout for /marketing/* — owns the page padding, h1, subtitle,
 // and sub-tab nav. Each child page (generate / calendar / library)
 // renders inside the {children} slot below.
+//
+// PR Sprint 7.25 Phase 6 — wrapped in <AmbientBackground accentTint=
+// "orange">, page header pivoted to the editorial 88px Instrument
+// Serif italic + orange "live · marketing OS" eyebrow used across
+// the redesigned platform pages. Because this layout is shared by
+// Generate / Calendar / Library, all three pages inherit the new
+// ambient frame in one place. Their inner content (generate
+// pipeline, calendar grid, library cards) is untouched.
 export default function MarketingLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
   return (
-    <div className="p-4 md:p-8 max-w-6xl">
-      <div className="mb-6 md:mb-8">
-        <h1 className="font-display text-display-md font-light tracking-tight">
-          Marketing
-        </h1>
-        <p className="text-text-2 mt-2 max-w-2xl text-sm">
-          Generate brand-aware posts, schedule them, track what works.
-        </p>
+    <AmbientBackground accentTint="orange">
+      <div className="platform-main platform-main-wide">
+        <header className="platform-page-head platform-reveal-1">
+          <span className="platform-eyebrow platform-eyebrow-orange">
+            live · marketing OS
+          </span>
+          <h1>
+            Marketing<span className="accent-fire-grad">.</span>
+          </h1>
+          <p className="sub">
+            Generate brand-aware posts, schedule them, track what works.
+          </p>
+        </header>
+
+        <MarketingSubNav />
+
+        <div style={{ marginTop: '20px' }}>{children}</div>
       </div>
-
-      <MarketingSubNav />
-
-      <div className="mt-6 md:mt-8">{children}</div>
-    </div>
+    </AmbientBackground>
   );
 }

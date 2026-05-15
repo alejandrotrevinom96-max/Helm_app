@@ -64,7 +64,7 @@ export default async function MarketingGeneratePage() {
   };
 
   return (
-    <div className="px-4 md:px-8 pb-12 max-w-6xl mx-auto space-y-6">
+    <div className="space-y-6 platform-reveal-2">
       {/* Voice Memory + Performance Memory — unchanged from the
           legacy flow, fetched via /api/marketing/insights. */}
       <PerformanceInsights projectId={project.id} />

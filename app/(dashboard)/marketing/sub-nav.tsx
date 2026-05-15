@@ -10,8 +10,6 @@ interface SubNavItem {
   comingSoon?: boolean;
 }
 
-// PR #24 — Sprint 2.3 shipped Calendar (drag-drop + golden times) and
-// Library went live in PR #23, so neither is "Soon" anymore.
 const SUB_NAV_ITEMS: SubNavItem[] = [
   {
     name: 'Generate',
@@ -33,11 +31,14 @@ const SUB_NAV_ITEMS: SubNavItem[] = [
 // Sub-tab nav rendered inside the Marketing layout. Active tab is
 // determined by the current pathname; /marketing (the bare URL) is
 // treated as Generate since it redirects there server-side.
+//
+// PR Sprint 7.25 Phase 6 — repainted on top of the platform redesign
+// (orange-underlined active tab matching the new editorial header).
 export function MarketingSubNav() {
   const pathname = usePathname();
 
   return (
-    <nav className="flex items-center gap-1 border-b border-border">
+    <nav className="platform-tab-row">
       {SUB_NAV_ITEMS.map((item) => {
         const isActive =
           pathname === item.href ||
@@ -47,18 +48,12 @@ export function MarketingSubNav() {
           <Link
             key={item.href}
             href={item.href}
-            className={`relative px-4 py-3 text-sm font-medium transition-colors ${
-              isActive
-                ? 'text-text-1 border-b-2 border-accent -mb-px'
-                : 'text-text-3 hover:text-text-1'
-            }`}
+            className={`platform-tab${isActive ? ' platform-tab-on' : ''}`}
           >
-            <span className="flex items-center gap-2">
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
               {item.name}
               {item.comingSoon && (
-                <span className="text-[9px] font-mono uppercase tracking-[0.1em] px-1.5 py-0.5 bg-bg-elev rounded text-text-3">
-                  Soon
-                </span>
+                <span className="platform-pill-soon">Soon</span>
               )}
             </span>
           </Link>
