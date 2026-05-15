@@ -92,6 +92,14 @@ import {
   type UGCBundle,
 } from '@/lib/voice-engine/ugc-schema';
 import { validateUgcBundle } from '@/lib/voice-engine/ugc-validator';
+// PR Sprint 7.22 Fase 2 — text-post validators (Sprint 1 + Patch 1).
+// Runs after a successful Opus generation for non-UGC content types;
+// failures land as audit rows but never block the draft (same
+// observability-only pattern UGC uses).
+import {
+  flattenStructuredContentForValidation,
+  validateTextPost,
+} from '@/lib/voice-engine/text-post-validator';
 
 export const maxDuration = 60;
 
@@ -708,6 +716,55 @@ Return STRICT JSON matching the schema. No markdown fences, no prose outside JSO
             }
             // parsed stays = parsed; Zod normalized field
             // defaults but identity is preserved.
+          }
+        }
+
+        // PR Sprint 7.22 Fase 2 — text-post validators for non-UGC
+        // content types. Runs after the structured JSON parsed
+        // successfully; failures go to the audit log per the same
+        // observability pattern UGC uses. Soft validators are
+        // intentionally non-blocking — at this stage we want
+        // telemetry on how often each check fires before we
+        // consider gating + regeneration.
+        //
+        // Why all non-UGC taxonomies: the validators are pure
+        // string heuristics (chiastic flip, blockquote, tricolon,
+        // header count, templated CTA, authenticity markers). A
+        // carousel slide's body or a photo caption is just as
+        // exposed to these AI tells as a pure text post; running
+        // the checks across the full structured payload catches
+        // tells wherever they land.
+        if (!isUgcType && parsed) {
+          const flat = flattenStructuredContentForValidation(parsed);
+          if (flat.length > 0) {
+            const textFailures = validateTextPost(flat, {
+              platform: platformLower,
+            });
+            if (textFailures.length > 0) {
+              console.warn(
+                `[generate-structured] text-post validators flagged ${textFailures.length} issues for ${platform}/${template.type}:`,
+                textFailures.join(' | '),
+              );
+              if (voiceEngineCtx) {
+                // One audit row per failure so individual rules
+                // (x_not_y, tricolon, templated_cta, etc.) keep
+                // their own grep query in the operator dashboard.
+                for (const msg of textFailures) {
+                  void logAudit({
+                    userId: user.id,
+                    projectId,
+                    action: 'text_post_soft_validation_warning',
+                    platform: platformLower as VoiceEnginePlatform,
+                    notes: msg.slice(0, 500),
+                  }).catch(() => {
+                    /* non-fatal */
+                  });
+                }
+              }
+              // Don't kill the draft — same posture as UGC soft
+              // validation. Telemetry first, gating after we see
+              // base rates from real production output.
+            }
           }
         }
       }
