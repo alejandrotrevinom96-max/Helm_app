@@ -27,6 +27,25 @@ import { db } from '@/lib/db';
 import { heygenJobs, projects } from '@/lib/db/schema';
 import { eq, sql } from 'drizzle-orm';
 
+// PR Sprint 7.25 Phase 11.12 — HeyGen's V2 API now requires a
+// `voice_id` for every type='text' voice payload. The previous
+// "omit voice_id and HeyGen uses the avatar's bundled voice"
+// behavior was deprecated. When the project hasn't picked a
+// voice (or its old voice_id was nulled by the voice-fallback
+// path), we fall back to this constant — a stable en-US voice
+// from HeyGen's public catalog that's compatible with every
+// stock avatar. The env override lets the founder swap the
+// default at deploy time if they prefer a different voice.
+//
+// Long-term the avatar save endpoint also captures `default_voice`
+// per avatar (PR Sprint 7.25 Phase 11.12 in /api/heygen/avatars)
+// so new avatar selections store the avatar's recommended voice
+// and don't fall back to this constant. The constant is the
+// safety net for legacy saves and for projects mid-migration.
+const DEFAULT_HEYGEN_VOICE_ID =
+  process.env.HEYGEN_DEFAULT_VOICE_ID ??
+  '2d5b0e6cf36f460aa7fc47e3eee4ba54';
+
 const HEYGEN_API = 'https://api.heygen.com';
 
 type HeygenJob = typeof heygenJobs.$inferSelect;
@@ -145,11 +164,19 @@ export async function fireHeygenForJob(
           avatar_style: 'normal',
         };
 
+  // PR Sprint 7.25 Phase 11.12 — voice_id is mandatory now. Order
+  // of preference:
+  //   1. project.heygenVoiceId (set by the avatar save endpoint
+  //      from HeyGen's per-avatar default_voice, or by a future
+  //      voice picker UI).
+  //   2. DEFAULT_HEYGEN_VOICE_ID (env-overridable hardcoded
+  //      fallback) — kicks in for legacy projects whose row was
+  //      saved before Phase 11.12 wired up the default capture.
   const voice: HeygenGenerateRequest['video_inputs'][number]['voice'] = {
     type: 'text',
     input_text: job.scriptText,
     speed: 1.0,
-    ...(project.heygenVoiceId ? { voice_id: project.heygenVoiceId } : {}),
+    voice_id: project.heygenVoiceId ?? DEFAULT_HEYGEN_VOICE_ID,
   };
 
   const payload: HeygenGenerateRequest = {
@@ -163,19 +190,28 @@ export async function fireHeygenForJob(
 
   let result = await callHeygenGenerate(payload);
   let voiceFallbackUsed = false;
-  // Voice-error fallback: if a voice_id was set + HeyGen complained
-  // about voice, retry once without it. Matches the original
-  // endpoint's recovery path.
-  if (!result.ok && isVoiceConfigError(result.error) && project.heygenVoiceId) {
+  // Voice-error fallback. PR Sprint 7.25 Phase 11.12: the previous
+  // fallback removed `voice_id` entirely; HeyGen V2 now rejects
+  // payloads without it ("video_inputs.0.voice.text.voice_id is
+  // invalid: Field required"). New fallback: if a voice_id was
+  // set + HeyGen complained, retry with DEFAULT_HEYGEN_VOICE_ID.
+  // The default is a stable en-US voice from HeyGen's catalog;
+  // a successful retry also clears the stale voice_id from the
+  // project so the next generation skips straight to the default.
+  if (
+    !result.ok &&
+    isVoiceConfigError(result.error) &&
+    project.heygenVoiceId &&
+    project.heygenVoiceId !== DEFAULT_HEYGEN_VOICE_ID
+  ) {
     voiceFallbackUsed = true;
     const fallbackPayload: HeygenGenerateRequest = {
       ...payload,
       video_inputs: payload.video_inputs.map((vi) => ({
         ...vi,
         voice: {
-          type: vi.voice.type,
-          input_text: vi.voice.input_text,
-          speed: vi.voice.speed,
+          ...vi.voice,
+          voice_id: DEFAULT_HEYGEN_VOICE_ID,
         },
       })),
     };

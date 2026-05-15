@@ -24,6 +24,12 @@ interface HeygenAvatarRaw {
   preview_url?: string;
   gender?: string;
   premium?: boolean;
+  // PR Sprint 7.25 Phase 11.12 — HeyGen exposes each avatar's
+  // recommended voice. We pass it through to the picker so the
+  // avatar-save endpoint can stamp the project with a working
+  // voice_id automatically (the V2 API now rejects payloads that
+  // omit voice_id).
+  default_voice?: string;
 }
 
 interface HeygenAvatarsResponse {
@@ -39,6 +45,10 @@ export interface AvatarOption {
   previewImageUrl: string | null;
   gender: string | null;
   premium: boolean;
+  // PR Sprint 7.25 Phase 11.12 — passes through to the picker UI
+  // so the avatar save can stamp project.heygenVoiceId with the
+  // avatar's recommended voice on selection.
+  defaultVoiceId: string | null;
 }
 
 // 10-minute cache — HeyGen's avatar catalog changes rarely; we
@@ -97,6 +107,7 @@ export async function GET() {
         previewImageUrl: a.preview_image_url ?? a.preview_url ?? null,
         gender: a.gender ?? null,
         premium: Boolean(a.premium),
+        defaultVoiceId: a.default_voice ?? null,
       }))
       .filter((a) => a.avatarId);
 

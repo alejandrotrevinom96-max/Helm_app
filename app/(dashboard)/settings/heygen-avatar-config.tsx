@@ -555,7 +555,18 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
           genderFilter={genderFilter}
           onGenderFilterChange={setGenderFilter}
           onSelect={(id) => {
-            setSettings((prev) => ({ ...prev, avatarId: id }));
+            // PR Sprint 7.25 Phase 11.12 — also stamp the avatar's
+            // recommended voice so the next HeyGen call has a
+            // valid voice_id. The /v2 API rejects payloads without
+            // one. AvatarOption.defaultVoiceId comes from HeyGen's
+            // own per-avatar default; falls back to null and the
+            // server then uses DEFAULT_HEYGEN_VOICE_ID.
+            const picked = avatars.find((a) => a.avatarId === id);
+            setSettings((prev) => ({
+              ...prev,
+              avatarId: id,
+              voiceId: picked?.defaultVoiceId ?? prev.voiceId,
+            }));
             setPickerOpen(false);
           }}
           onClose={() => setPickerOpen(false)}
