@@ -26,6 +26,19 @@
 //   - Added InvalidContentForPlatformError so the API route can
 //     surface a 400 with errorKind='wrong_content_type' instead
 //     of a generic crash.
+//
+// PR Sprint 7.22 — F1 preventive humanize wired in:
+//   - PROMPT_COMPOSITION_RULES gains an "ANTI-AI WRITING RULES"
+//     paragraph that references HUMANIZE_RULES.
+//   - All 6 platform strings (instagram/linkedin/x/threads/
+//     facebook/reddit) gained an AUTHENTICITY MARKERS section
+//     before their ANTI-PATTERNS list. Reddit also got an
+//     OVERRIDES TO CONTENT_TYPE_RULES["text"] subsection.
+//   - buildGenerationPrompt() accepts injectHumanize: boolean
+//     (default true) and embeds HUMANIZE_RULES right after
+//     PROMPT_COMPOSITION_RULES.
+
+import { HUMANIZE_RULES } from '@/lib/voice-engine/humanize-rules';
 
 export type Platform =
   | 'instagram'
@@ -102,6 +115,17 @@ If rejected, regenerate up to 2 times. If still failing, return:
   4. A confidence score (0 to 100) on whether the draft is salvageable manually vs needs a full rewrite.
 
 This gives the operator enough context to approve manually, steer the next attempt, or kill the draft.
+
+ANTI-AI WRITING RULES:
+  Apply the HUMANIZE_RULES (injected separately into the prompt) to all
+  generated output. These rules take precedence over content_type defaults
+  for stylistic choices but are subordinate to learned_overrides for any
+  given client.
+
+  When the HUMANIZE_RULES conflict with PLATFORM_TONE rules (e.g., LinkedIn
+  saying "use bold for impact" vs HUMANIZE saying "no mid-paragraph bolding"),
+  HUMANIZE wins by default unless learned_overrides for the client say
+  otherwise.
 `;
 
 export const CONTENT_TYPE_RULES: Record<ContentTypeTaxonomy, string> = {
@@ -497,6 +521,16 @@ FORMAT VARIANTS:
   Single photo: one strong caption, no carousel scaffolding.
   Story: bypasses this ruleset; use casual fragments and stickers (separate ruleset).
 
+AUTHENTICITY MARKERS (mandatory for Instagram captions):
+  - Caption should include at least one parenthetical aside or specific personal
+    detail (a date, a place, a name, a tool).
+  - Acceptable to use lowercase or mixed case throughout.
+  - Voice should feel like a story being told to one specific friend, not
+    narrated to an audience.
+  - Numbers should hedge or have specific context ("3 weeks ago", "about 200").
+  - Acceptable to break the caption with a line like "anyway" or "idk why
+    I'm sharing this but".
+
 ANTI-PATTERNS (reject and regenerate):
   - "Excited to share", "Thrilled to announce", "Humbled to"
   - Starting with brand name in corporate voice
@@ -553,6 +587,17 @@ FORMAT VARIANTS:
     Last slide has the CTA. 8 to 12 slides optimal.
   Pure text post: follow the rules above.
   Video post: native video, captions baked in, hook in first 3 seconds.
+
+AUTHENTICITY MARKERS (mandatory for LinkedIn):
+  - Include at least one specific personal detail: a real date, a real name,
+    a real city, a specific tool, a specific dollar amount with context.
+  - Acceptable to admit uncertainty ("I'm not sure if this is right but",
+    "honestly still figuring this out", "could be wrong").
+  - Numbers should be defensible: include source, context, or method
+    ("based on the last 30 posts", "I time-tracked it for 2 weeks").
+  - Maximum 2 headers per post (LinkedIn long-form rarely uses headers).
+  - Avoid pre-constructed quotable lines that are clearly designed for
+    screenshots. Insights should emerge from the story, not be bumper stickers.
 
 ANTI-PATTERNS (reject and regenerate):
   - "Excited to announce", "Thrilled to share", "I'm humbled to..."
@@ -624,6 +669,15 @@ LONG-FORM (Premium only):
   Hook in first 100 chars. White space between sections. No headers.
   Use only when content genuinely needs more than a thread (data drops, full essays, transcripts).
 
+AUTHENTICITY MARKERS (mandatory for X / Twitter):
+  - For threads, include at least one tweet that breaks the polished arc:
+    "wait, also", "actually", "hmm", or a short tangent.
+  - Lowercase first letter is acceptable and often signals authenticity on X.
+  - Acceptable to abandon a thought mid-tweet or end with "..." or "idk".
+  - For single tweets, fragments and incomplete sentences are encouraged.
+  - Replies and quote-tweets are conversational, never press releases.
+  - Numbers should hedge ("around X", "like 7 tools", "maybe 200 followers").
+
 ANTI-PATTERNS (reject and regenerate):
   - "Excited/thrilled/humbled" openers
   - Hashtag stacks (#marketing #growth #startup)
@@ -681,6 +735,14 @@ THREADING (chained replies):
   When a thought needs more than 500 chars, chain it. Each post 100 to 200 chars. 2 to 5 posts max.
   Each chained reply must read as a standalone observation, not "part 2 of 5".
 
+AUTHENTICITY MARKERS (mandatory for Threads):
+  - Lowercase or mixed case is acceptable and often signals authenticity.
+  - Acceptable to start with "ok so", "wait", "hot take:", or "thinking about".
+  - Fragments, ellipses, and incomplete sentences are encouraged.
+  - No need for grammatically complete sentences.
+  - Acceptable to end with "idk", "anyway", or just stop.
+  - Numbers should hedge.
+
 ANTI-PATTERNS (reject and regenerate):
   - Overly polished marketing copy (Threads readers smell it instantly)
   - Hashtag use
@@ -734,6 +796,12 @@ CTA:
   Community-response style. "Has this happened to you?", "What do you think?",
   "Drop your version in the comments."
   Group-specific CTAs work well. Example: "Tag someone running an agency below."
+
+AUTHENTICITY MARKERS (mandatory for Facebook):
+  - Include at least one specific personal detail (where, when, who).
+  - Conversational warmth over editorial polish.
+  - Acceptable to ramble slightly or include a side anecdote.
+  - Numbers should hedge ("about", "around", "I think").
 
 ANTI-PATTERNS (reject and regenerate):
   - Sharp X-style takes (feel out of place on Facebook)
@@ -804,6 +872,29 @@ CTA:
   Genuine. "Curious what others have seen", "Happy to share more if useful", "What am I missing?"
   Direct sales CTAs get the post removed. Never link to a product page without context. Linking to a blog post
   or open-source resource is acceptable in some subs.
+
+AUTHENTICITY MARKERS (mandatory for Reddit):
+  - Include at least one informal marker: "tbh", "ngl", "imo", "fwiw", "idk".
+    These signal real-human voice; their absence is a strong AI tell on Reddit.
+  - Include at least one parenthetical aside (like this) or self-correction
+    ("actually wait, that's not quite right").
+  - Numbers should hedge: "about 9 months", "maybe 7 tools", "I think around X",
+    "give or take". Real humans approximate; AI is unnaturally precise.
+  - Acceptable to end with "anyway", "idk", or to stop abruptly without a CTA.
+  - Acceptable to add an "edit:" line at the bottom (signals real engagement).
+  - Avoid pre-constructed quotable lines (especially in blockquotes). Reddit
+    explicitly downvotes posts that look like they were written for screenshots.
+  - Maximum 2 markdown headers in the entire post. Three or more headers
+    in parallel form ("What I X / What I Y / What I Z") is essay-shaped
+    and reads as AI.
+
+OVERRIDES TO CONTENT_TYPE_RULES["text"] (Reddit-specific):
+  - The QUOTABLE LINES guidance from CONTENT_TYPE_RULES["text"] does NOT apply
+    on Reddit. Do NOT include pre-constructed quotable lines designed for
+    screenshots. Insights should emerge from concrete data and confession,
+    not from crafted bumper stickers.
+  - The "punchy one-word emphasis sentences" guidance is suspended on Reddit.
+    Use 0 of these. They feel AI-coded in this context.
 
 ANTI-PATTERNS (reject and regenerate):
   - Exclamation points
@@ -1016,6 +1107,12 @@ export interface BuildGenerationPromptArgs {
   // iteration. Toggling off will measurably reduce output
   // quality, so only do it intentionally.
   includeExamples?: boolean;
+  // PR Sprint 7.22 — F1 preventive humanize. When true (default)
+  // HUMANIZE_RULES are embedded directly in the prompt so the
+  // model never produces an AI tell to clean up. Toggle false
+  // to A/B-compare against the legacy generate-then-clean flow,
+  // or to shave ~3.5KB of prompt tokens in dev iteration.
+  injectHumanize?: boolean;
 }
 
 export function buildGenerationPrompt(
@@ -1024,6 +1121,7 @@ export function buildGenerationPrompt(
   const platform = args.platform.toLowerCase() as Platform;
   const contentType = args.contentType.toLowerCase() as ContentTypeTaxonomy;
   const includeExamples = args.includeExamples ?? true;
+  const injectHumanize = args.injectHumanize ?? true;
 
   if (!(platform in PLATFORM_TONE_INSTRUCTIONS)) {
     throw new UnknownPlatformError(platform);
@@ -1056,7 +1154,14 @@ export function buildGenerationPrompt(
     }
   }
 
-  return `${PROMPT_COMPOSITION_RULES}
+  // PR Sprint 7.22 — F1 preventive humanize. The rules are
+  // injected right after PROMPT_COMPOSITION_RULES so the model
+  // sees them before any platform/content-specific overrides
+  // arrive. When toggled off (rare — A/B testing only), the
+  // resulting empty section keeps the surrounding spacing intact.
+  const humanizeSection = injectHumanize ? `\n\n${HUMANIZE_RULES}\n` : '';
+
+  return `${PROMPT_COMPOSITION_RULES}${humanizeSection}
 
 BRAND_BIBLE:
 ${args.brandBible}
