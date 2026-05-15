@@ -28,15 +28,24 @@ import { verifyState } from '@/lib/security/oauth-state';
 const STATE_TTL_MS = 10 * 60 * 1000; // 10 min
 const DEFAULT_LONG_LIVED_EXPIRES_S = 60 * 24 * 60 * 60; // 60 days
 
+// PR Sprint 7.25 Phase 11.7 — fix precedence bug. The previous
+// expression chained `??` and `?:` without parens; JS precedence
+// resolved it as `(NEXT_PUBLIC_APP_URL ?? VERCEL_URL?.startsWith)
+// ? VERCEL_URL : ...`, so a deploy with NEXT_PUBLIC_APP_URL set
+// returned the bare VERCEL_URL (no scheme). The Sentry error
+// "URL is malformed 'helm2-oqjyolcos-...vercel.app/integrations'"
+// is exactly that bug — a Preview deploy hit this codepath, got
+// the bare hostname back, and tried to construct a redirect from
+// it. Now an explicit if-chain so the precedence is obvious.
 function appOrigin(): string {
-  return (
-    process.env.NEXT_PUBLIC_APP_URL ??
-    process.env.VERCEL_URL?.startsWith('http')
-      ? (process.env.VERCEL_URL as string)
-      : process.env.VERCEL_URL
-        ? `https://${process.env.VERCEL_URL}`
-        : 'https://trythelm.com'
-  );
+  if (process.env.NEXT_PUBLIC_APP_URL) {
+    return process.env.NEXT_PUBLIC_APP_URL;
+  }
+  const vercelUrl = process.env.VERCEL_URL;
+  if (vercelUrl) {
+    return vercelUrl.startsWith('http') ? vercelUrl : `https://${vercelUrl}`;
+  }
+  return 'https://trythelm.com';
 }
 
 function redirectTo(qs: string): NextResponse {

@@ -80,7 +80,14 @@ function formatDate(iso: string | null): string {
   if (!iso) return '';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleDateString(undefined, {
+  // PR Sprint 7.25 Phase 11.7 — pin the locale to 'en-US' so SSR
+  // and CSR produce identical output. Pre-fix this used `undefined`
+  // which falls back to the runtime's default locale — Node picks
+  // en-US on Vercel, browsers pick the user's preferred locale, so
+  // a Spanish-locale visitor saw "5 ene" on first paint and "5
+  // Jan" after hydration. Sentry was logging "Hydration failed"
+  // 6 events / 2 users on /compass for this exact reason.
+  return d.toLocaleDateString('en-US', {
     day: 'numeric',
     month: 'short',
   });

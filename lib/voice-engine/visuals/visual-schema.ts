@@ -138,6 +138,24 @@ const SUBJECT_TEXT_INSTRUCTION_PHRASES = [
 // a concrete visual subject. This is the core innovation of the
 // pipeline — without it, the model receives the caption (which
 // describes the post, not the image) and has to guess.
+// PR Sprint 7.25 Phase 11.7 — char caps bumped to realistic Haiku
+// output sizes. The pre-fix caps (mood_descriptor 80, composition
+// 150, emotional_anchor 30) were tight enough that Haiku exceeded
+// them ~5-15% of the time, killing the whole IR pipeline and
+// falling back to the legacy prompt builder. Sentry was logging
+// `SubjectExtractionError: Failed after 3 attempts` and dozens of
+// `IR pipeline failed, falling back to legacy buildVisualPrompt`
+// warnings per day. The renderer (visual-renderer-flux.ts) doesn't
+// care about the bounds; it just concatenates these into the Flux
+// prompt — so the caps were guard-rails against runaway prose, not
+// a hard requirement. Bumped to numbers that fit Haiku's typical
+// output without giving it permission to write paragraphs:
+//   mood_descriptor: 80   → 200
+//   composition:     150  → 280
+//   emotional_anchor: 30  → 60
+//   setting:         200  → 280  (was already generous; bumped for symmetry)
+// `repairSubjectBlockInput` below provides a second safety net by
+// truncating any field that still exceeds its bound before parsing.
 export const SubjectBlockSchema = z
   .object({
     main_subject: z
@@ -147,16 +165,16 @@ export const SubjectBlockSchema = z
     composition: z
       .string()
       .min(5, 'composition must be at least 5 chars')
-      .max(150, 'composition must be at most 150 chars'),
+      .max(280, 'composition must be at most 280 chars'),
     setting: z
       .string()
       .min(5, 'setting must be at least 5 chars')
-      .max(200, 'setting must be at most 200 chars'),
+      .max(280, 'setting must be at most 280 chars'),
     mood_descriptor: z
       .string()
       .min(3, 'mood_descriptor must be at least 3 chars')
-      .max(80, 'mood_descriptor must be at most 80 chars'),
-    emotional_anchor: z.string().max(30).nullable().optional(),
+      .max(200, 'mood_descriptor must be at most 200 chars'),
+    emotional_anchor: z.string().max(60).nullable().optional(),
     visual_strategy: VisualStrategySchema,
     visual_metaphor: z.string().max(200).nullable().optional(),
   })
@@ -188,6 +206,58 @@ export const SubjectBlockSchema = z
   });
 export type SubjectBlock = z.infer<typeof SubjectBlockSchema>;
 
+// PR Sprint 7.25 Phase 11.7 — defensive truncation pass for
+// Haiku-extracted subject blocks. Even with the bumped char caps,
+// Haiku occasionally over-writes (especially when the brand_mood
+// input was itself long, which the prompt template echoes back).
+// This helper runs BEFORE SubjectBlockSchema.parse so the strict
+// validator never sees an over-bound string. The trade-off is a
+// clipped mood descriptor instead of a thrown error + total IR
+// pipeline failure — the latter cost us ~50 events/day in Sentry
+// before this fix.
+//
+// Pure transform: no model calls, no DB. Idempotent — running it
+// on already-valid input returns the same shape.
+export function repairSubjectBlockInput(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object') return raw;
+  const o = raw as Record<string, unknown>;
+  const truncStr = (v: unknown, max: number): unknown =>
+    typeof v === 'string' && v.length > max ? v.slice(0, max).trim() : v;
+  const truncNullable = (v: unknown, max: number): unknown => {
+    if (v === null || v === undefined) return v;
+    return truncStr(v, max);
+  };
+  return {
+    ...o,
+    main_subject: truncStr(o.main_subject, 300),
+    composition: truncStr(o.composition, 280),
+    setting: truncStr(o.setting, 280),
+    mood_descriptor: truncStr(o.mood_descriptor, 200),
+    emotional_anchor: truncNullable(o.emotional_anchor, 60),
+    visual_metaphor: truncNullable(o.visual_metaphor, 200),
+  };
+}
+
+// Same pattern for BrandBlock inputs — the source is brand bible
+// data (founder-edited or auto-generated), not Opus, so truncation
+// is the right answer when a field overflows.
+export function repairBrandBlockInput(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object') return raw;
+  const o = raw as Record<string, unknown>;
+  const truncStr = (v: unknown, max: number): unknown =>
+    typeof v === 'string' && v.length > max ? v.slice(0, max).trim() : v;
+  const truncNullable = (v: unknown, max: number): unknown => {
+    if (v === null || v === undefined) return v;
+    return truncStr(v, max);
+  };
+  return {
+    ...o,
+    archetype: truncStr(o.archetype, 80),
+    mood: truncStr(o.mood, 250),
+    voice_descriptor: truncNullable(o.voice_descriptor, 200),
+  };
+}
+
 // How the image is rendered: photography vs illustration,
 // camera, lighting.
 export const StyleBlockSchema = z
@@ -202,12 +272,19 @@ export const StyleBlockSchema = z
 export type StyleBlock = z.infer<typeof StyleBlockSchema>;
 
 // Brand-specific visual identity. Pulled from BrandBible.visual.
+// PR Sprint 7.25 Phase 11.7 — caps bumped to match real brand-
+// bible data. Founders' bibles legitimately had photography_mood
+// strings longer than 100 chars (mainstream onboarding writes
+// 150-200 char descriptors). The BrandBlockSchema.parse() in
+// visual-prompt-builder was rejecting them strictly, blowing up
+// the IR pipeline. Same renderer-doesn't-care logic as
+// SubjectBlock's bump.
 export const BrandBlockSchema = z
   .object({
-    archetype: z.string().min(2).max(50),
-    mood: z.string().min(3).max(100),
+    archetype: z.string().min(2).max(80),
+    mood: z.string().min(3).max(250),
     color_palette: z.array(z.string()).max(5).default([]),
-    voice_descriptor: z.string().max(100).nullable().optional(),
+    voice_descriptor: z.string().max(200).nullable().optional(),
   })
   .strict();
 export type BrandBlock = z.infer<typeof BrandBlockSchema>;

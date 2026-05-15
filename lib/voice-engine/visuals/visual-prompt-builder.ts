@@ -18,6 +18,7 @@ import {
   DEFAULT_NEGATIVE_TERMS,
   NegativeBlockSchema,
   PlatformBlockSchema,
+  repairBrandBlockInput,
   StyleBlockSchema,
   VisualPromptIRSchema,
   VisualPromptMetadataSchema,
@@ -288,13 +289,19 @@ export async function buildVisualPromptIR(
   //    defaults, with archetype defaults taking precedence.
   const style = buildStyleBlock(input.brand_bible, contentType);
 
-  // 3. BrandBlock — direct adapter.
-  const brand = BrandBlockSchema.parse({
-    archetype: input.brand_bible.archetype,
-    mood: input.brand_bible.photography_mood,
-    color_palette: input.brand_bible.colors ?? [],
-    voice_descriptor: input.brand_bible.voice_descriptor ?? null,
-  });
+  // 3. BrandBlock — direct adapter. PR Sprint 7.25 Phase 11.7
+  // wraps the input in repairBrandBlockInput so a long
+  // photography_mood from the brand bible (founders' bibles
+  // legitimately wrote 150-200 char descriptors) gets truncated
+  // instead of throwing and crashing the whole IR pipeline.
+  const brand = BrandBlockSchema.parse(
+    repairBrandBlockInput({
+      archetype: input.brand_bible.archetype,
+      mood: input.brand_bible.photography_mood,
+      color_palette: input.brand_bible.colors ?? [],
+      voice_descriptor: input.brand_bible.voice_descriptor ?? null,
+    }),
+  );
 
   // 4. PlatformBlock — lookup from PLATFORM_VISUAL_LANGUAGE.
   const visualLangSpec = getVisualLanguage(platform, contentType);

@@ -90,9 +90,18 @@ export async function GET(request: NextRequest) {
     .onConflictDoUpdate({
       target: users.id,
       set: {
-        // Only refresh the GitHub-specific fields when re-logging in
-        // via GitHub. Other providers shouldn't clobber a previously
-        // saved GitHub username with null.
+        // PR Sprint 7.25 Phase 11.7 — always include `name` so the
+        // set clause is never empty. Pre-fix: a non-GitHub re-login
+        // with no avatar_url in metadata produced
+        // `set: { avatarUrl: undefined }`; Drizzle filtered the
+        // undefined out and threw "No values to set" at the SQL
+        // compiler. Refreshing `name` on every login also matches
+        // the implicit contract that the founder's display name
+        // should track whatever the OAuth provider currently says.
+        name: displayName,
+        // Only refresh the GitHub-specific fields when re-logging
+        // in via GitHub. Other providers shouldn't clobber a
+        // previously saved GitHub username with null.
         ...(isGithub
           ? {
               githubUsername:

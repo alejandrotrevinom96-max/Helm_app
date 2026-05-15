@@ -15,6 +15,7 @@
 import { anthropic, MODELS } from '@/lib/ai/claude';
 import {
   SubjectBlockSchema,
+  repairSubjectBlockInput,
   type SubjectBlock,
 } from './visual-schema';
 
@@ -141,8 +142,15 @@ export async function extractSubjectBlock(
       const raw =
         textBlock?.type === 'text' ? textBlock.text.trim() : '';
       const payload = extractJsonObject(raw);
+      // PR Sprint 7.25 Phase 11.7 — truncate over-long string
+      // fields before strict parse. Haiku sometimes writes 200+
+      // char mood descriptors against an 80-char cap (was 80,
+      // bumped to 200; this still trims when the model goes
+      // really long). Without this safety net we'd retry 3 times
+      // and then crash the whole IR pipeline.
+      const prepared = repairSubjectBlockInput(payload);
       // Zod throws on validation failure; caught by the outer try.
-      const subject = SubjectBlockSchema.parse(payload);
+      const subject = SubjectBlockSchema.parse(prepared);
       return subject;
     } catch (e) {
       lastError = e;
