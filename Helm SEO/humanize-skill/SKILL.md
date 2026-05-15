@@ -7,6 +7,31 @@ description: Use this skill whenever the user asks to humanize text, remove AI s
 
 Most AI-generated prose has the same fingerprints. This skill finds them and rewrites them out while keeping the meaning, the numbers, and the writer's intent.
 
+## Status: post-process fallback (Phase 2+)
+
+As of Phase 2 of the Helm Adaptive Voice Engine, the rules in this skill
+have been duplicated into `humanize_rules.py` and are injected directly
+into generation prompts as `HUMANIZE_RULES`. The model is expected to comply
+during composition, eliminating the need for a post-process pass.
+
+This skill is now used as:
+  1. **Optional post-process fallback** when generated output still slips
+     past validators (rare in practice).
+  2. **Operator manual cleanup** when reviewing edge-case outputs.
+  3. **Reference documentation** for what the rules are and why.
+
+The hard rules (em dashes, banned words, banned constructions) are enforced
+preventively via HUMANIZE_RULES in the prompt. The soft rules (varied cadence,
+organic flow, voice nuance) remain in this skill for cases where post-process
+cleanup is needed.
+
+When invoking this skill on a draft:
+  - If the draft was generated with `inject_humanize=True`, expect minimal
+    cleanup needed. Most violations indicate prompt fatigue or model failure
+    to follow the embedded rules.
+  - If the draft was generated with `inject_humanize=False`, run the full
+    skill as before.
+
 ## When to use this skill
 
 Trigger this skill any time the user wants writing to sound like a person instead of a model. Common phrasings:

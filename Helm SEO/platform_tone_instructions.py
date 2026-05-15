@@ -109,6 +109,17 @@ If rejected, regenerate up to 2 times. If still failing, return:
   4. A confidence score (0 to 100) on whether the draft is salvageable manually vs needs a full rewrite.
 
 This gives the operator enough context to approve manually, steer the next attempt, or kill the draft.
+
+ANTI-AI WRITING RULES:
+  Apply the HUMANIZE_RULES (injected separately into the prompt) to all
+  generated output. These rules take precedence over content_type defaults
+  for stylistic choices but are subordinate to learned_overrides for any
+  given client.
+
+  When the HUMANIZE_RULES conflict with PLATFORM_TONE rules (e.g., LinkedIn
+  saying "use bold for impact" vs HUMANIZE saying "no mid-paragraph bolding"),
+  HUMANIZE wins by default unless learned_overrides for the client say
+  otherwise.
 """
 
 

@@ -56,6 +56,7 @@ def build_generation_prompt(
     pain_point: str,
     target_sub: str | None = None,
     include_examples: bool = True,
+    inject_humanize: bool = True,
 ) -> str:
     """Compose the full generation prompt for the model.
 
@@ -72,15 +73,43 @@ def build_generation_prompt(
         include_examples: whether to inject CONTENT_TYPE_EXAMPLES. Default True.
                           Toggle False in dev/test for shorter prompts and
                           faster iteration. Quality drops measurably when off.
+        inject_humanize:  Phase 2 — F1 preventive humanize. When True (default),
+                          HUMANIZE_RULES are embedded directly in the prompt so
+                          the model never produces an AI tell to clean up.
+                          Toggle False to run the legacy generate-then-clean
+                          flow during A/B comparison.
 
     Raises:
         ValueError if the (platform, content_type) combination isn't compatible
         or if either value is unknown.
     """
+    # Phase 2 — F1: prompt-time import of the humanize rules. Local import
+    # so the dependency is only loaded when injection is requested AND so
+    # platform_tone_instructions.py (which is imported at module load time)
+    # doesn't have to take a hard runtime dependency on humanize_rules.
+    from humanize_rules import HUMANIZE_RULES
+
+    # Phase 1.5 — F4: variety injection. Probabilistic override of the
+    # default content_type rules, chosen from PostArchetype rotation. The
+    # caller is responsible for calling record_archetype_usage() AFTER the
+    # post is actually published so we track shipped archetypes, not
+    # generated ones.
+    from variety_injector import (
+        get_variety_instruction,
+        select_variety_archetype,
+        should_inject_variety,
+    )
+
     platform_key = platform.value
     content_type_key = content_type.value
 
     _validate_combination(platform_key, content_type_key)
+
+    slots = client_context.get_platform_slots(platform)
+    variety_instruction = ""
+    if should_inject_variety(slots, slots.variety_config):
+        variety_archetype = select_variety_archetype(slots, slots.variety_config)
+        variety_instruction = get_variety_instruction(variety_archetype)
 
     dynamic_context = _format_dynamic_context(client_context, platform)
 
@@ -101,7 +130,11 @@ def build_generation_prompt(
                 f"(good vs bad pairs to pattern-match against):\n{examples}\n"
             )
 
-    return f"""{PROMPT_COMPOSITION_RULES}
+    humanize_section = ""
+    if inject_humanize:
+        humanize_section = f"\n\n{HUMANIZE_RULES}\n"
+
+    base_prompt = f"""{PROMPT_COMPOSITION_RULES}{humanize_section}
 
 CLIENT CONTEXT (apply strongly, this is the client-specific intelligence):
 {dynamic_context}
@@ -132,6 +165,16 @@ overrides were applied.
 Return: the final draft + (if any) the override_log block. No commentary,
 no preamble.
 """
+
+    # Phase 1.5 — F4: append the variety mode block (when fired) at the
+    # very end so it overrides the structural defaults the model just
+    # read. Placing it last guarantees recency-bias works in our favor —
+    # the variety instruction is the last thing the model sees before
+    # composing.
+    if variety_instruction:
+        base_prompt = f"{base_prompt}\n\n{variety_instruction}"
+
+    return base_prompt
 
 
 # ============================================================================
@@ -204,6 +247,7 @@ def _format_dynamic_context(context: ClientContext, platform: Platform) -> str:
     winning = context.get_recent_winning_patterns(platform, max_count=10)
     losing = context.get_recent_losing_patterns(platform, max_count=10)
     overrides = context.get_platform_slots(platform).learned_overrides
+    voice_idiosyncrasies = context.get_platform_slots(platform).voice_idiosyncrasies
 
     lines: list[str] = [
         "BRAND_BIBLE:",
@@ -213,9 +257,22 @@ def _format_dynamic_context(context: ClientContext, platform: Platform) -> str:
         f"  Pillars: {', '.join(bb.pillars) if bb.pillars else '[none]'}",
         f"  Banned phrases: {bb.banned_phrases or '[none]'}",
         f"  Mandatory signals: {bb.mandatory_signals or '[none]'}",
+    ]
+
+    # Phase 1.5 — E1: inject the extracted writer voice profile BEFORE the
+    # raw fingerprint samples so the model sees the structured rules first
+    # and uses the samples as illustration of those rules. Skipped when
+    # there are no idiosyncrasies extracted yet or when the cached profile
+    # is older than ~30 days (stale rules underperform fresh ones).
+    if voice_idiosyncrasies and not voice_idiosyncrasies.is_stale():
+        from voice_idiosyncrasy_extractor import format_idiosyncrasies_as_prompt_rules
+        lines.append("")
+        lines.append(format_idiosyncrasies_as_prompt_rules(voice_idiosyncrasies))
+
+    lines.extend([
         "",
         "VOICE_FINGERPRINT (writer's actual past output on this platform, sorted by weight):",
-    ]
+    ])
 
     if voice_samples:
         for i, sample in enumerate(voice_samples, 1):
