@@ -135,6 +135,46 @@ HASHTAG RULES
   - Stored WITHOUT the # prefix (e.g., "indiehacker" not "#indiehacker").
   - All lowercase. No spaces.
 
+FOUNDER VOICE EXAMPLES (study these, don't copy verbatim)
+=========================================================
+
+These show the RANGE of acceptable founder voices on UGC. The bundle should
+match the CLIENT'S specific voice from VOICE_FINGERPRINT in the CLIENT
+CONTEXT block, not default to one of these archetypes. They exist to show
+what "founder over coffee" sounds like in different registers.
+
+Technical / contrarian:
+  Hook: "I've been writing code for 12 years."
+  Body 1: "I still don't know what 'leverage' means."
+  Body 2: "Every product page uses it. Nobody can define it."
+  Body 3: "If you can't say it without 'leverage', you don't have a feature."
+  CTA: "What word does your team use too much?"
+
+Sales-y but not cringe:
+  Hook: "Just did the math on my last campaign."
+  Body 1: "We were leaving 40% of revenue on the table."
+  Body 2: "Same audience, same product. Just bad timing."
+  Body 3: "Switched the send time from 9am to 7am. Up 23%."
+  CTA: "What time do you send? I'm collecting data."
+
+Reflective / contrarian:
+  Hook: "Everyone says you need a niche."
+  Body 1: "I tried 4 of them last year."
+  Body 2: "None of them moved revenue."
+  Body 3: "Turns out my audience cared about the problem, not the niche."
+  CTA: "Anyone else find niche-talk overhyped?"
+
+Operational / direct:
+  Hook: "My week looks like this."
+  Body 1: "Open laptop. 7 tabs. 2 hours. One post."
+  Body 2: "Then I do it again Tuesday."
+  Body 3: "I'm rebuilding the whole stack this week."
+  CTA: "Drop your stack and I'll tell you what I'd cut."
+
+These are examples of the SHAPE of founder voice. The CLIENT CONTEXT at the
+top of this prompt has the SPECIFIC voice fingerprint to match. Match the
+client, not these archetypes.
+
 VALIDATION CHECKLIST (run before returning)
 ============================================
 
@@ -187,8 +227,12 @@ def append_ugc_schema_to_prompt(base_prompt: str, target_platform: str) -> str:
 The metadata.platform field MUST be set to "{target_platform}".
 
 IMPORTANT: The CLIENT CONTEXT (BRAND_BIBLE, VOICE_FINGERPRINT, LEARNED_OVERRIDES,
-WINNING_UGC_EXAMPLES and ANTI_SAMPLES) appears at the top of this prompt.
-Use them to override the defaults in this schema while staying within the hard
-limits (9-word hook, 5-word overlays, etc.).
+WINNING_PATTERNS, LOSING_PATTERNS, and ANTI_SAMPLES_BY_DIMENSION) appears at the
+top of this prompt. Use them to override the defaults in this schema while
+staying within the hard limits (9-word hook, 5-word overlays, etc.).
 The final bundle must sound like THIS specific founder, not generic UGC content.
+
+When applying LEARNED_OVERRIDES, voice dimensions (delivery_style, sentence_cadence,
+hook_length, banned_vocab) take priority over format dimensions (hashtag_count,
+emoji_usage, paragraph_length). UGC quality lives in the voice.
 """

@@ -19,23 +19,32 @@ Changes vs v1.0:
   - Spoken cadence rules in prompt: explicit contraction examples
   - "Founder over coffee" framing for voice
   - "Return ONLY this JSON" hardened
-  - 3 new weak openers in validator
+  - 7 weak openers added in validator (incl. quick tip, pro tip, fun fact, did you know, the truth is)
   - Reminder line in append_ugc_schema_to_prompt pointing back to CLIENT CONTEXT
+  - "I/you" mandatory, no "we"/"one" in cadence rules
+
+Changes vs v1.1 (this is v2.0):
+  - Hook specificity score validator (number / named_brand / confession_verb / vague_noun_penalty)
+  - Sales-disguised CTA detector (catches "check out", "click the link", "buy now", etc.)
+  - 4 founder voice example archetypes in prompt (technical, sales-y, reflective, operational)
+  - Voice-priority line in reminder (delivery_style, sentence_cadence > hashtag_count, emoji_usage)
+  - HookSection error message includes the actual hook text + "Trim it aggressively"
 
 Sections:
   1. Schema             enums, sections, UGCBundle aggregate
   2. Prompt             UGC_OUTPUT_SCHEMA_INSTRUCTION + helper
-  3. Validator          soft validation rules
+  3. Validator          soft validation rules (8 checks total)
   4. Extractor          downstream extraction utilities
 
 Dependencies:
   - pydantic >= 2.0
 
-Version: 1.1 (MVP Phase 1, hook tightened + cadence rules expanded)
+Version: 2.0 (MVP Phase 1, validator hardening + voice archetypes)
 """
 
 from __future__ import annotations
 
+import re
 from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -331,6 +340,46 @@ HASHTAG RULES
   - Stored WITHOUT the # prefix (e.g., "indiehacker" not "#indiehacker").
   - All lowercase. No spaces.
 
+FOUNDER VOICE EXAMPLES (study these, don't copy verbatim)
+=========================================================
+
+These show the RANGE of acceptable founder voices on UGC. The bundle should
+match the CLIENT'S specific voice from VOICE_FINGERPRINT in the CLIENT
+CONTEXT block, not default to one of these archetypes. They exist to show
+what "founder over coffee" sounds like in different registers.
+
+Technical / contrarian:
+  Hook: "I've been writing code for 12 years."
+  Body 1: "I still don't know what 'leverage' means."
+  Body 2: "Every product page uses it. Nobody can define it."
+  Body 3: "If you can't say it without 'leverage', you don't have a feature."
+  CTA: "What word does your team use too much?"
+
+Sales-y but not cringe:
+  Hook: "Just did the math on my last campaign."
+  Body 1: "We were leaving 40% of revenue on the table."
+  Body 2: "Same audience, same product. Just bad timing."
+  Body 3: "Switched the send time from 9am to 7am. Up 23%."
+  CTA: "What time do you send? I'm collecting data."
+
+Reflective / contrarian:
+  Hook: "Everyone says you need a niche."
+  Body 1: "I tried 4 of them last year."
+  Body 2: "None of them moved revenue."
+  Body 3: "Turns out my audience cared about the problem, not the niche."
+  CTA: "Anyone else find niche-talk overhyped?"
+
+Operational / direct:
+  Hook: "My week looks like this."
+  Body 1: "Open laptop. 7 tabs. 2 hours. One post."
+  Body 2: "Then I do it again Tuesday."
+  Body 3: "I'm rebuilding the whole stack this week."
+  CTA: "Drop your stack and I'll tell you what I'd cut."
+
+These are examples of the SHAPE of founder voice. The CLIENT CONTEXT at the
+top of this prompt has the SPECIFIC voice fingerprint to match. Match the
+client, not these archetypes.
+
 VALIDATION CHECKLIST (run before returning)
 ============================================
 
@@ -383,16 +432,59 @@ def append_ugc_schema_to_prompt(base_prompt: str, target_platform: str) -> str:
 The metadata.platform field MUST be set to "{target_platform}".
 
 IMPORTANT: The CLIENT CONTEXT (BRAND_BIBLE, VOICE_FINGERPRINT, LEARNED_OVERRIDES,
-WINNING_UGC_EXAMPLES and ANTI_SAMPLES) appears at the top of this prompt.
-Use them to override the defaults in this schema while staying within the hard
-limits (9-word hook, 5-word overlays, etc.).
+WINNING_PATTERNS, LOSING_PATTERNS, and ANTI_SAMPLES_BY_DIMENSION) appears at the
+top of this prompt. Use them to override the defaults in this schema while
+staying within the hard limits (9-word hook, 5-word overlays, etc.).
 The final bundle must sound like THIS specific founder, not generic UGC content.
+
+When applying LEARNED_OVERRIDES, voice dimensions (delivery_style, sentence_cadence,
+hook_length, banned_vocab) take priority over format dimensions (hashtag_count,
+emoji_usage, paragraph_length). UGC quality lives in the voice.
 """
 
 
 # ============================================================================
 # SECTION 3: VALIDATOR (originally ugc_validator.py)
 # ============================================================================
+
+
+# Constants for hook specificity scoring (v2 addition)
+NUMBER_PATTERN = re.compile(
+    r"\b\d+(?:[.,]\d+)?(?:k|m|hrs?|min|seconds?|secs?|years?|months?|weeks?|days?|x|%)?\b",
+    re.IGNORECASE,
+)
+DOLLAR_PATTERN = re.compile(r"\$\d+(?:[.,]\d+)?[km]?", re.IGNORECASE)
+
+CONFESSION_VERBS: set[str] = {
+    "used to", "dropped", "deleted", "spent", "wasted", "quit",
+    "stopped", "killed", "switched", "ditched", "fired", "tried",
+    "failed", "lost", "missed", "ignored", "regret", "burned",
+}
+
+NAMED_ENTITY_TOOLS: set[str] = {
+    "buffer", "hootsuite", "chatgpt", "claude", "gemini", "notion",
+    "reddit", "twitter", "linkedin", "tiktok", "instagram", "threads",
+    "facebook", "vercel", "supabase", "stripe", "canva", "figma",
+    "google", "youtube", "slack", "discord", "github", "intercom",
+    "hubspot", "salesforce", "airtable", "zapier", "make.com",
+    "n8n", "openai", "anthropic", "perplexity", "midjourney", "fal",
+    "heygen", "loom", "calendly", "shopify", "webflow", "framer",
+}
+
+VAGUE_NOUNS: set[str] = {
+    "thing", "things", "stuff", "something", "anything", "everything",
+    "nothing",
+}
+
+# Sales-disguised CTA constants (v2 addition)
+SALES_CTA_PHRASES: tuple[str, ...] = (
+    "check out", "learn more", "click the link", "click below",
+    "sign up", "subscribe", "purchase", "buy now", "get yours",
+    "limited time", "don't miss", "act now", "swipe up to",
+    "link in bio to buy", "link in bio to purchase", "visit our website",
+    "visit my site", "shop now", "use code", "discount code",
+    "promo code", "order now", "claim your", "grab yours",
+)
 
 
 def validate_ugc_bundle(bundle: UGCBundle) -> list[str]:
@@ -413,6 +505,8 @@ def validate_ugc_bundle(bundle: UGCBundle) -> list[str]:
     failures.extend(_check_overlay_not_verbatim_repeat(bundle))
     failures.extend(_check_caption_not_summary(bundle))
     failures.extend(_check_hook_quality(bundle))
+    failures.extend(_check_hook_specificity(bundle))
+    failures.extend(_check_cta_not_sales_disguised(bundle))
     failures.extend(_check_swipe_test_self_report(bundle))
 
     return failures
@@ -535,6 +629,70 @@ def _check_swipe_test_self_report(bundle: UGCBundle) -> list[str]:
     return []
 
 
+def _check_hook_specificity(bundle: UGCBundle) -> list[str]:
+    """Score the hook on specificity. Hooks below the threshold are rejected.
+
+    Scoring (v2):
+      +1 if contains a specific number (with or without unit)
+      +1 if mentions a named tool/brand the audience recognizes
+      +1 if uses a confession verb (used to, dropped, deleted, tried, etc.)
+      -1 if relies on vague nouns (something, things, stuff)
+
+    Threshold: score < 0 fails. Score 0 passes (neutral hook with no penalty).
+    Score >= 1 is the target.
+    """
+    text = bundle.hook.text
+    text_lower = text.lower()
+    score = 0
+    matched_signals: list[str] = []
+
+    if NUMBER_PATTERN.search(text) or DOLLAR_PATTERN.search(text):
+        score += 1
+        matched_signals.append("number")
+
+    if any(tool in text_lower for tool in NAMED_ENTITY_TOOLS):
+        score += 1
+        matched_signals.append("named_brand")
+
+    if any(verb in text_lower for verb in CONFESSION_VERBS):
+        score += 1
+        matched_signals.append("confession_verb")
+
+    cleaned_words = set(re.findall(r"\b\w+\b", text_lower))
+    vague_hits = cleaned_words & VAGUE_NOUNS
+    if vague_hits:
+        score -= 1
+        matched_signals.append(f"vague_noun_penalty:{','.join(sorted(vague_hits))}")
+
+    if score < 0:
+        return [
+            f"Hook specificity score is {score} (need >= 0, ideally >= 1). "
+            f"Signals: {matched_signals or 'none'}. Hook: '{text}'. "
+            f"Either add specifics (number, brand, confession verb) or remove "
+            f"vague nouns ({', '.join(sorted(vague_hits)) if vague_hits else 'n/a'})."
+        ]
+    return []
+
+
+def _check_cta_not_sales_disguised(bundle: UGCBundle) -> list[str]:
+    """CTAs disguised as sales pitches kill conversion on UGC.
+
+    Detects common sales-style CTA phrases that should be replaced with
+    conversational asks ("comment X if...", "save this for later",
+    "tag a founder who...").
+    """
+    cta_lower = bundle.cta.text.lower()
+    for phrase in SALES_CTA_PHRASES:
+        if phrase in cta_lower:
+            return [
+                f"CTA contains sales phrase '{phrase}'. UGC CTAs should be "
+                f"conversational, not transactional. Rewrite as a question or "
+                f"invitation. Examples: 'Comment X if you've been here', "
+                f"'Save this for next sprint', 'Tag a founder who needs this'."
+            ]
+    return []
+
+
 # ============================================================================
 # SECTION 4: EXTRACTOR (originally ugc_extractor.py)
 # ============================================================================
@@ -635,5 +793,5 @@ def extract_full_export(bundle: UGCBundle) -> dict:
 
 
 # ============================================================================
-# End of consolidated UGC module v1.1
+# End of consolidated UGC module v2.0
 # ============================================================================
