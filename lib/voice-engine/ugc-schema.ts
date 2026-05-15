@@ -13,6 +13,42 @@
 import { z } from 'zod';
 
 // ============================================================
+// Word-counting helper
+// ============================================================
+//
+// Hotfix — the original word counters did
+//   `text.trim().split(/\s+/).length`
+// which counts EVERY whitespace-separated token, including
+// standalone emoji like ❌ or ✅. That punished a deliberately
+// good overlay pattern ("BUFFER ❌ NOTION ❌ FIGMA ❌") — three
+// brand names plus three pictogram markers, the exact "brand-tool
+// callout" shape ugc_validator.py recommends. Splitting that on
+// whitespace gives 6 tokens, the schema rejected it as "6 words",
+// and video generation failed for any prompt that produced a
+// brand-vs-brand comparison overlay.
+//
+// `countLexicalWords` only counts tokens that contain at least
+// one Unicode letter or number. Pictogram-only tokens (emoji,
+// dashes, bullets, arrows) don't increment the count.
+//
+//   "BUFFER ❌ NOTION ❌ FIGMA ❌"  → 3 (was 6)
+//   "I dropped Buffer last month"  → 5 (unchanged)
+//   "Stop. Now."                   → 2 (unchanged)
+//   "$1M in 6 months"              → 4 (unchanged — digits count)
+//   "❌"                            → 0 (was 1; pure pictograms aren't
+//                                       a word)
+//
+// Same logic mirrored in lib/voice-engine/ugc_schema.py so the
+// Python and TS paths agree.
+function countLexicalWords(text: string): number {
+  return text
+    .trim()
+    .split(/\s+/)
+    .filter((token) => token.length > 0 && /[\p{L}\p{N}]/u.test(token))
+    .length;
+}
+
+// ============================================================
 // Enums
 // ============================================================
 
@@ -44,8 +80,10 @@ export const HookSectionSchema = z
   })
   .strict()
   .superRefine((hook, ctx) => {
-    // 9-word cap, same as the Pydantic field_validator.
-    const wordCount = hook.text.trim().split(/\s+/).length;
+    // 9-word cap, same as the Pydantic field_validator. Uses the
+    // lexical counter so a hook like "I quit 3 apps. ✋" is 4
+    // words, not 5.
+    const wordCount = countLexicalWords(hook.text);
     if (wordCount > 9) {
       ctx.addIssue({
         code: 'custom',
@@ -95,7 +133,11 @@ export const OverlaySchema = z
   })
   .strict()
   .superRefine((overlay, ctx) => {
-    const wordCount = overlay.text.trim().split(/\s+/).length;
+    // Lexical word count so emoji-only tokens (❌ ✅ → •) don't
+    // inflate the count. ugc_validator.py explicitly recommends
+    // the "BRAND ❌ BRAND ❌ BRAND ❌" shape — counting the ❌
+    // as words made that shape un-shippable.
+    const wordCount = countLexicalWords(overlay.text);
     if (wordCount > 5) {
       ctx.addIssue({
         code: 'custom',

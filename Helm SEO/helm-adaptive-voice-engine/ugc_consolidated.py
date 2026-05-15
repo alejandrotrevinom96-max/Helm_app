@@ -51,6 +51,22 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 # ============================================================================
+# Word-counting helper (hotfix — see ugc_schema.py for context)
+# ============================================================================
+#
+# `len(v.split())` counted pure-emoji tokens as words, rejecting the
+# deliberately good "BRAND ❌ BRAND ❌ BRAND ❌" overlay shape. The
+# lexical counter only counts tokens containing at least one letter
+# or digit. Mirrored in lib/voice-engine/ugc-schema.ts and
+# lib/voice-engine/ugc_schema.py.
+_LEXICAL_CHAR_RE = re.compile(r"[^\W_]", re.UNICODE)
+
+
+def _count_lexical_words(text: str) -> int:
+    return sum(1 for token in text.split() if _LEXICAL_CHAR_RE.search(token))
+
+
+# ============================================================================
 # SECTION 1: SCHEMA (originally ugc_schema.py)
 # ============================================================================
 
@@ -85,7 +101,7 @@ class HookSection(BaseModel):
     @field_validator("text")
     @classmethod
     def hook_word_count(cls, v: str) -> str:
-        word_count = len(v.split())
+        word_count = _count_lexical_words(v)
         if word_count > 9:
             raise ValueError(
                 f"Hook has {word_count} words. Maximum is 9 spoken words. "
@@ -133,9 +149,10 @@ class Overlay(BaseModel):
     @field_validator("text")
     @classmethod
     def overlay_word_count(cls, v: str) -> str:
-        if len(v.split()) > 5:
+        word_count = _count_lexical_words(v)
+        if word_count > 5:
             raise ValueError(
-                f"Overlay '{v}' has {len(v.split())} words; max is 5. "
+                f"Overlay '{v}' has {word_count} words; max is 5. "
                 f"Overlays longer than 5 words are an anti-pattern."
             )
         return v
