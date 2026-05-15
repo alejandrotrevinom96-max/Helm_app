@@ -865,8 +865,17 @@ export function PostDetailModal({
       <div className="bg-bg-elev border border-border rounded-xl p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
         <div className="flex items-start justify-between mb-4">
           <div>
+            {/* PR Sprint 7.24 — Prompt 4. Header surfaces the
+                content type alongside platform + status so the
+                founder knows at a glance whether they're looking
+                at a Carousel, Single Photo, UGC script, etc. The
+                contentType is humanized via the same labels the
+                shared ContentTypeBadge uses for the cards. */}
             <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-accent mb-1">
               {post.platform} · {post.status}
+              {post.contentType && (
+                <span> · {post.contentType.replace(/_/g, ' ')}</span>
+              )}
             </div>
             <h3 className="font-display text-2xl font-light">Post detail</h3>
           </div>
@@ -1575,29 +1584,17 @@ export function PostDetailModal({
             </button>
           </div>
 
+          {/* PR Sprint 7.24 — Prompt 4. Action buttons reordered
+              + visually grouped by frequency of use:
+                PRIMARY:   Schedule, Post now (terracotta-tinted)
+                SECONDARY: Clone & remix, Share (muted)
+              The vertical separator divider isolates the two
+              groups so the founder's eye lands on the schedule/
+              post actions first. Save feedback (rare path) sits
+              with the primaries because it's the closing action
+              when a feedback form is showing. */}
           <div className="flex flex-wrap items-center gap-2">
-            {/* PR #38 — Sprint 6.4: Share from the detail modal
-                covers both Library and Calendar (calendar opens
-                this same modal when wired). videoUrl rides along
-                so Reels share with the video on platforms that
-                accept it (mobile native share). */}
-            <ShareButton
-              caption={post.content}
-              imageUrl={post.visualUrl}
-              videoUrl={post.videoUrl}
-              variant="secondary"
-              label="Share"
-            />
-
-            <button
-              type="button"
-              onClick={handleClone}
-              disabled={cloning}
-              className="px-4 py-2 bg-bg border border-border rounded-lg text-sm hover:bg-bg-elev hover:border-border-bright transition-colors disabled:opacity-50"
-            >
-              {cloning ? 'Cloning…' : '🔄 Clone & remix'}
-            </button>
-
+            {/* --- PRIMARY group --- */}
             {/* PR #80 — Sprint 7.5.2: Schedule + Post now CTAs.
                 Only surface for drafts (scheduled rows already
                 live in the publisher's lane and would create
@@ -1610,7 +1607,7 @@ export function PostDetailModal({
                 type="button"
                 onClick={() => setShowSchedule(true)}
                 disabled={posting || deleting || cloning}
-                className="px-4 py-2 bg-bg border border-border rounded-lg text-sm hover:bg-bg-elev hover:border-border-bright transition-colors disabled:opacity-50"
+                className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
               >
                 📅 Schedule
               </button>
@@ -1626,12 +1623,11 @@ export function PostDetailModal({
                 type="button"
                 onClick={handlePostNow}
                 disabled={posting || deleting || cloning}
-                className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+                className="px-4 py-2 bg-bg border border-accent/40 text-accent rounded-lg text-sm font-medium hover:bg-accent/10 transition-colors disabled:opacity-50"
               >
                 {posting ? '🚀 Publishing…' : '🚀 Post now'}
               </button>
             )}
-
             {showFeedback && (
               <button
                 type="button"
@@ -1642,6 +1638,37 @@ export function PostDetailModal({
                 {saving ? 'Saving…' : 'Save feedback'}
               </button>
             )}
+
+            {/* --- Separator --- */}
+            {(isDraft || canPostNow || showFeedback) && (
+              <span
+                className="hidden md:inline-block h-6 w-px bg-border mx-1"
+                aria-hidden
+              />
+            )}
+
+            {/* --- SECONDARY group --- */}
+            <button
+              type="button"
+              onClick={handleClone}
+              disabled={cloning}
+              className="px-4 py-2 bg-bg border border-border rounded-lg text-sm text-text-2 hover:bg-bg-elev hover:border-border-bright hover:text-text-1 transition-colors disabled:opacity-50"
+            >
+              {cloning ? 'Cloning…' : '🔄 Clone & remix'}
+            </button>
+
+            {/* PR #38 — Sprint 6.4: Share from the detail modal
+                covers both Library and Calendar (calendar opens
+                this same modal when wired). videoUrl rides along
+                so Reels share with the video on platforms that
+                accept it (mobile native share). */}
+            <ShareButton
+              caption={post.content}
+              imageUrl={post.visualUrl}
+              videoUrl={post.videoUrl}
+              variant="secondary"
+              label="Share"
+            />
           </div>
         </div>
 

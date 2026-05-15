@@ -105,6 +105,14 @@ export interface LibraryPost {
   // "naked" post-detail card with the images apparently lost.
   // The bug was perceptual, not data loss.
   visualUrls: string[] | null;
+  // PR Sprint 7.24 — Prompt 3. Variant pair binding for drafts
+  // produced as A/B pairs. Always null for source='scheduled'
+  // (scheduled rows lose the pair-ness when they ship; we keep
+  // the chip ONLY on the unscheduled draft surface where the
+  // "pick your favorite" decision is still live). Null on legacy
+  // generated_posts rows pre-7.24.
+  variantLabel: 'A' | 'B' | null;
+  variantGroupId: string | null;
 }
 
 const VALID_STATUSES: LibraryStatus[] = [
@@ -290,6 +298,12 @@ export async function GET(request: Request) {
       structuredContent: r.structuredContent ?? null,
       // PR #80 — Sprint 7.5.2 (Bug #5): carousel slide URLs.
       visualUrls: (r.visualUrls as string[] | null) ?? null,
+      // PR Sprint 7.24 — Prompt 3 variant pair binding.
+      variantLabel:
+        r.variantLabel === 'A' || r.variantLabel === 'B'
+          ? r.variantLabel
+          : null,
+      variantGroupId: r.variantGroupId ?? null,
     }));
   }
 
@@ -404,6 +418,13 @@ export async function GET(request: Request) {
         // endpoint, PR #65). Null on pre-7.0.8 rows and on
         // non-carousel posts.
         visualUrls: (r.visualUrls as string[] | null) ?? null,
+        // PR Sprint 7.24 — Prompt 3. Variant binding intentionally
+        // does NOT travel to scheduled rows. The "pick your
+        // favorite, delete the other" decision happens before
+        // scheduling; once a draft ships into a scheduled slot
+        // the A/B framing is over. Both fields null here.
+        variantLabel: null,
+        variantGroupId: null,
       };
     });
   }

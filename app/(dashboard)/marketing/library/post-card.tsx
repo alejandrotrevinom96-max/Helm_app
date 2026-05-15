@@ -5,8 +5,26 @@
 // that opens the detail modal — we don't put inline edit affordances
 // here on purpose because the cards become noisy fast and the modal
 // already handles every action.
+//
+// PR Sprint 7.24 — Prompt 4 refresh:
+//   - Content-type chip moves to the shared ContentTypeBadge so
+//     colors are consistent across Library / Calendar / Modal.
+//   - UGC and Reel cards show the type chip (🎥 Script / 🎬 Reel)
+//     and use the structured-content's caption (when present) as
+//     the body preview instead of the raw script text — the
+//     script lives in the modal where it can render as a proper
+//     teleprompter (UgcBundleView, fix b2aa201).
+//   - Cards with no visualUrl show a tappable "+ Add visual"
+//     placeholder. For new drafts post-Prompt-3 the auto-image
+//     flow has usually already populated visualUrl by the time
+//     the card mounts; the placeholder is the fallback for
+//     legacy rows or for content types we don't auto-image
+//     (carousel goes through generate-slides separately).
+//   - Variant chip "Option A" / "Option B" surfaces when the row
+//     came out of the A/B pair flow (Sprint 7.24 — Prompt 3).
 import type { LibraryPost } from '@/app/api/marketing/library/route';
 import { ShareButton } from '@/components/share/share-button';
+import { ContentTypeBadge } from '@/components/marketing/ContentTypeBadge';
 
 interface Props {
   post: LibraryPost;
@@ -138,41 +156,86 @@ export function LibraryPostCard({ post, onClick }: Props) {
                 Reel error
               </span>
             )}
-          {/* PR #64 — Sprint 7.0.7: surface per-format chip from the
-              structured-drafts flow (Sprint 7.0.4). Skips formats
-              already badged separately (reel/story have their own
-              icons above) to avoid double-labelling. Always rendered
-              when contentType is set — works for both drafts AND
-              scheduled rows since Sprint 7.0.6 propagated the
-              column. */}
-          {post.contentType &&
-            post.contentType !== 'reel' &&
-            !post.isStory && (
-              <span
-                className="text-[10px] font-mono uppercase tracking-[0.1em] px-2 py-0.5 rounded bg-accent/15 text-accent"
-                title={`Content format: ${post.contentType}`}
-              >
-                {post.contentType.replace(/_/g, ' ')}
-              </span>
-            )}
+          {/* PR Sprint 7.24 — Prompt 4. Shared ContentTypeBadge.
+              Skips when isStory (story badge already lives above
+              with a pink tint) and when isReel (the reel badge
+              above already says 🎬 Reel). Renders for everything
+              else including the new UGC '🎥 Script' label. */}
+          {post.contentType && !post.isStory && !post.isReel && (
+            <ContentTypeBadge contentType={post.contentType} />
+          )}
+          {/* PR Sprint 7.24 — Prompt 3. Variant chip surfaces
+              "Option A" / "Option B" when the row was generated
+              as one half of an A/B pair. Soft terracotta to read
+              as informational. */}
+          {post.variantLabel && (
+            <span
+              className="text-[10px] font-mono uppercase tracking-[0.1em] font-bold px-2 py-0.5 rounded bg-accent/15 text-accent border border-accent/30"
+              title="Generated at the same time as the other variant — pick your favorite, delete the other."
+            >
+              Option {post.variantLabel}
+            </span>
+          )}
         </div>
         <span className="text-[10px] font-mono uppercase tracking-[0.1em] text-text-3">
           {post.platform}
         </span>
       </div>
 
-      {post.visualUrl && (
+      {/* PR Sprint 7.24 — Prompt 4. Visual / placeholder. When the
+          row has a generated image, render it; otherwise show a
+          dashed-border placeholder that hints "+ Add visual". The
+          placeholder is purely visual (not a click handler) so the
+          card-level onClick still opens the detail modal where the
+          founder can trigger generation. UGC and Reel skip the
+          placeholder entirely — they don't carry cover images on
+          the card surface, the script preview below is the focal
+          element. */}
+      {post.visualUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={post.visualUrl}
           alt=""
           className="w-full aspect-video object-cover rounded-lg mb-3 bg-bg-elev"
         />
-      )}
+      ) : post.contentType !== 'ugc' &&
+        post.contentType !== 'reel' &&
+        post.contentType !== 'self_post' &&
+        post.contentType !== 'text_post' &&
+        post.contentType !== 'community_post' ? (
+        <div className="w-full aspect-video rounded-lg mb-3 bg-bg-elev border border-dashed border-border flex items-center justify-center text-text-3">
+          <div className="text-center">
+            <div className="text-2xl mb-1 opacity-60" aria-hidden>
+              🖼️
+            </div>
+            <div className="text-[10px] font-mono uppercase tracking-[0.15em]">
+              + Add visual
+            </div>
+          </div>
+        </div>
+      ) : null}
 
-      <p className="text-sm text-text-1 line-clamp-3 mb-3 whitespace-pre-wrap">
-        {post.content}
-      </p>
+      {/* PR Sprint 7.24 — Prompt 4. UGC body preview. Pre-fix the
+          card showed the raw script with timecodes and director
+          notes — useful for the founder but visually identical to
+          a narrative post, defeating the point of distinguishing
+          UGC at a glance. Now UGC + Reel cards lead with a
+          one-line script-mode label; the detail modal still
+          renders the full UgcBundleView teleprompter. */}
+      {post.contentType === 'ugc' || post.contentType === 'reel' ? (
+        <div className="mb-3">
+          <div className="text-xs font-mono uppercase tracking-[0.15em] text-amber-500 mb-1">
+            🎥 Recordable script
+          </div>
+          <p className="text-sm text-text-1 line-clamp-2 whitespace-pre-wrap italic">
+            {post.content.slice(0, 140) || 'Script ready — open to view teleprompter.'}
+          </p>
+        </div>
+      ) : (
+        <p className="text-sm text-text-1 line-clamp-3 mb-3 whitespace-pre-wrap">
+          {post.content}
+        </p>
+      )}
 
       {/* PR #55 — Sprint 6.9: surface consistencyScore when set.
           Sprint 7.13 (BUG 2) — pre-fix this rendered as subtle
