@@ -1,45 +1,82 @@
-"""
-text_post_validator.py
-======================
+# Helm Adaptive Voice Engine — Patch 1: Loophole Fixes Round 2
 
-Universal validator for text posts (Reddit, LinkedIn text, X tweets, Threads,
-Facebook). Catches AI patterns that the platform-specific PLATFORM_TONE rules
-and the per-content-type CONTENT_TYPE_RULES don't currently cover.
+Patch posterior al CLAUDE_CODE_PROMPT.md inicial. Cierra 5 gaps específicos
+que se descubrieron después del primer Reddit post real generado con la
+nueva pipeline.
 
-Specifically catches:
-  - "X, not Y" constructions (chiastic AI rhythm)
-  - Blockquote pull-quotes used as crafted quotable lines
-  - Symmetric parallel headers (3+ in same form)
-  - Templated CTAs without personal context follow-up
+---
 
-Usage:
-    from text_post_validator import validate_text_post
+## Goal
 
-    failures = validate_text_post(text, platform="reddit")
-    if failures:
-        # Regenerate with failures sent back to model as context
-        ...
+El batch original cerró C1-C4 + B1 + A1-A6 + F3. En producción, un post real
+de Reddit todavía dejó pasar 5 patterns AI:
 
-Version: 1.0
-"""
+1. `"it's not a plan, it's a costume"` — chiastic flip con coma como separator
+   (el regex actual requiere período)
+2. `"Not a content calendar. Not a funnel diagram. You, writing..."` — tricolon
+   sin detector en código (solo en humanize SKILL.md)
+3. Cero "tbh/ngl/fwiw/imo" en un Reddit post — la regla AUTHENTICITY MARKERS
+   está en el prompt pero no enforced en validator
+4. 4 markdown headers en un Reddit post — la regla "max 2 headers" está en el
+   prompt pero no enforced en validator
+5. `"Specifically: did anyone..."` — variant de templated CTA no incluido en list
 
-from __future__ import annotations
+Este patch agrega 4 funciones nuevas y modifica 2 constantes en
+`text_post_validator.py`. Sin nuevos archivos. Sin schema changes.
 
-import re
-from collections import Counter
+## Scope
 
+**En scope:**
+- Fix #1: Regex de check_x_not_y acepta coma como separator chiastic
+- Fix #2: Nueva función `check_tricolon` (3+ frases consecutivas paralelas)
+- Fix #3: Nueva función `check_authenticity_markers` (Reddit requiere ≥1 marker)
+- Fix #4: Nueva función `check_max_headers` (per-platform max)
+- Fix #5: Expandir TEMPLATED_CTAS + nueva función `check_cta_specifically_opener`
 
-# ============================================================================
-# C1: "X, not Y" pattern detection
-# ============================================================================
+**Out of scope:**
+- Detección de parallelism subtle ("X feels like Y, A feels like B"). El smell
+  test (F3) cubre esto mejor que regex.
+- Per-platform variants de las nuevas funciones. Empezar con defaults sensatos.
 
+---
+
+## Files to MODIFY
+
+| Archivo | Cambios |
+|---|---|
+| `text_post_validator.py` | 4 funciones nuevas, 2 constantes nuevas, 1 regex actualizado, validate_text_post() expandido |
+
+Solo un archivo modificado. Sin archivos nuevos.
+
+---
+
+## Detailed Changes
+
+### Fix #1: check_x_not_y regex acepta coma
+
+**Find** la lista `X_NOT_Y_PATTERNS` (cerca del inicio de `text_post_validator.py`):
+
+```python
+X_NOT_Y_PATTERNS: list[re.Pattern] = [
+    # ", not X" appositive (e.g., "build, not buy", "specific decisions, not generic lessons")
+    re.compile(r"[,;]\s+not\s+\w+", re.IGNORECASE),
+    # "It's not X. It's Y." chiastic flip (most common AI rhythm)
+    re.compile(r"\bit'?s?\s+not\s+[\w\s,'-]{2,60}[.!]\s*it'?s?\s+", re.IGNORECASE),
+    # "isn't X. It's Y" / "isn't X. That's Y" / "isn't X. The Y"
+    re.compile(r"\bisn'?t\s+[\w\s,'-]{2,60}[.!]\s*(it'?s|that'?s|the)\s+", re.IGNORECASE),
+    # "X is the opposite of Y" (rare but distinctive)
+    re.compile(r"\bis\s+(almost\s+)?the\s+opposite\s+of\s+\w+", re.IGNORECASE),
+]
+```
+
+**Replace** with:
+
+```python
 X_NOT_Y_PATTERNS: list[re.Pattern] = [
     # ", not X" appositive (e.g., "build, not buy", "specific decisions, not generic lessons")
     re.compile(r"[,;]\s+not\s+\w+", re.IGNORECASE),
     # "It's not X. It's Y." OR "It's not X, it's Y." chiastic flip
     # (PATCH 1: now accepts comma as separator, was previously only [.!])
-    # The inner character class drops the comma to avoid catastrophic
-    # backtracking — comma is now reserved for the separator position.
     re.compile(r"\bit'?s?\s+not\s+[\w\s'-]{2,60}[.!,]\s*it'?s?\s+", re.IGNORECASE),
     # "isn't X. It's Y" / "isn't X, It's Y" / "isn't X. That's Y"
     # (PATCH 1: same fix as above, now accepts comma)
@@ -47,30 +84,21 @@ X_NOT_Y_PATTERNS: list[re.Pattern] = [
     # "X is the opposite of Y" (rare but distinctive)
     re.compile(r"\bis\s+(almost\s+)?the\s+opposite\s+of\s+\w+", re.IGNORECASE),
 ]
+```
 
+Note: I also removed the comma `,` from the inner character class `[\w\s,'-]`
+to avoid catastrophic backtracking. The comma is now reserved for the separator
+position only.
 
-def count_x_not_y_patterns(text: str) -> int:
-    """Count likely 'X, not Y' constructions across all known patterns."""
-    return sum(len(p.findall(text)) for p in X_NOT_Y_PATTERNS)
+### Fix #2: Add check_tricolon function
 
+**Find** the line that says `# C2: Blockquote detection` (or wherever the C2
+section starts).
 
-def check_x_not_y(text: str, *, max_allowed: int = 0) -> list[str]:
-    """Reject text with too many 'X, not Y' constructions.
+**Insert immediately BEFORE** that section (so check_tricolon lives between C1
+and C2):
 
-    Default max_allowed=0 (zero tolerance for AI-coded chiasm). Override per
-    platform if needed.
-    """
-    count = count_x_not_y_patterns(text)
-    if count > max_allowed:
-        return [
-            f"Text contains {count} 'X, not Y' constructions (max allowed: {max_allowed}). "
-            f"This is one of the most distinctive AI rhythms. Rewrite without "
-            f"chiastic flips. Examples to avoid: 'specific decisions, not generic lessons', "
-            f"'It's not a problem. It's a system.', 'X is the opposite of Y'."
-        ]
-    return []
-
-
+```python
 # ============================================================================
 # C5 (Patch 1): Tricolon detection
 # ============================================================================
@@ -141,75 +169,15 @@ def check_tricolon(text: str) -> list[str]:
                 ]
 
     return []
+```
 
+### Fix #3: Add check_authenticity_markers function
 
-# ============================================================================
-# C2: Blockquote detection (Reddit-specific)
-# ============================================================================
+**Find** the section header for `C4: Templated CTA detector`.
 
-BLOCKQUOTE_PATTERN = re.compile(r"^>\s+", re.MULTILINE)
+**Insert immediately BEFORE** that section:
 
-
-def check_no_blockquote(text: str) -> list[str]:
-    """Reject text containing blockquote (>) lines.
-
-    On Reddit, blockquotes are typically used by AI-generated posts to create
-    pre-constructed quotable lines. Real Reddit users use blockquotes only to
-    quote someone else (which doesn't apply to original posts).
-    """
-    if BLOCKQUOTE_PATTERN.search(text):
-        return [
-            "Text contains blockquote (>) lines. On Reddit, blockquotes signal "
-            "a pre-constructed quotable line, which is an AI tell. Remove the "
-            "blockquote and either delete the line or fold its content into "
-            "the surrounding paragraph as plain prose."
-        ]
-    return []
-
-
-# ============================================================================
-# C3: Symmetric headers detector
-# ============================================================================
-
-HEADER_PATTERN = re.compile(r"^#+\s+(.+)$", re.MULTILINE)
-
-
-def check_symmetric_headers(text: str, *, threshold: int = 3) -> list[str]:
-    """Detect 3+ headers in parallel form (same starting word OR same length).
-
-    Symmetric headers signal essay-style structure transplanted from a doc
-    template, which reads as AI-shaped on social platforms.
-    """
-    headers = HEADER_PATTERN.findall(text)
-    if len(headers) < threshold:
-        return []
-
-    # Check 1: Same starting word
-    starting_words = [h.lower().strip().split()[0] for h in headers if h.strip()]
-    starting_counts = Counter(starting_words)
-    if any(c >= threshold for c in starting_counts.values()):
-        repeated_word = next(w for w, c in starting_counts.items() if c >= threshold)
-        return [
-            f"Text has {threshold}+ headers all starting with '{repeated_word}'. "
-            f"Symmetric parallel headers ('What X / What Y / What Z') signal "
-            f"essay-style structure that reads as AI-shaped. Rewrite headers "
-            f"with varied syntactic patterns or remove some headers entirely."
-        ]
-
-    # Check 2: Same word count
-    word_lens = [len(h.split()) for h in headers]
-    len_counts = Counter(word_lens)
-    if any(c >= threshold for c in len_counts.values()):
-        repeated_len = next(l for l, c in len_counts.items() if c >= threshold)
-        return [
-            f"Text has {threshold}+ headers all exactly {repeated_len} words long. "
-            f"Headers in matched parallel structure signal templated essay form. "
-            f"Vary header lengths and structures, or remove some entirely."
-        ]
-
-    return []
-
-
+```python
 # ============================================================================
 # C6 (Patch 1): Authenticity markers per platform
 # ============================================================================
@@ -249,8 +217,14 @@ def check_authenticity_markers(text: str, platform: str | None = None) -> list[s
             f"markers. Add at least one naturally to the post."
         ]
     return []
+```
 
+### Fix #4: Add check_max_headers function
 
+**Insert immediately BEFORE** the `# C4: Templated CTA detector` section
+(after check_authenticity_markers from Fix #3):
+
+```python
 # ============================================================================
 # C7 (Patch 1): Max headers per platform
 # ============================================================================
@@ -297,12 +271,15 @@ def check_max_headers(
             f"Convert excess headers to paragraph breaks or remove."
         ]
     return []
+```
 
+### Fix #5: Expand TEMPLATED_CTAS + add check_cta_specifically_opener
 
-# ============================================================================
-# C4: Templated CTA detector
-# ============================================================================
+**Find** the `TEMPLATED_CTAS` constant.
 
+**Replace** with:
+
+```python
 TEMPLATED_CTAS: tuple[str, ...] = (
     "what's your take",
     "whats your take",
@@ -321,31 +298,13 @@ TEMPLATED_CTAS: tuple[str, ...] = (
     "what's your experience",
     "have you seen this",
 )
+```
 
+**Find** the `check_templated_cta` function.
 
-def check_templated_cta(text: str) -> list[str]:
-    """Detect AI-templated CTA closures with no personal context follow-up.
+**Insert immediately AFTER** that function:
 
-    Real CTAs from humans usually have a follow-up clause that adds personal
-    context ("What worked for you? I'm trying X next" or "What do you think?
-    Genuinely asking, building this for myself"). AI templates end clean.
-    """
-    last_para = text.strip().split("\n\n")[-1].strip().lower()
-    # Strip common trailing markdown like links
-    last_para_clean = re.sub(r"\[.*?\]\(.*?\)", "", last_para).strip()
-
-    for cta in TEMPLATED_CTAS:
-        # Templated CTA at the very end with no follow-up
-        if last_para_clean.endswith(cta + "?") or last_para_clean.endswith(cta + "."):
-            return [
-                f"Text ends with templated CTA '{cta}' with no personal context "
-                f"follow-up. Real CTAs from humans add 1 personal clause after "
-                f"(reason, vulnerability, specific ask). Either add a follow-up "
-                f"sentence or rewrite the CTA in the writer's specific voice."
-            ]
-    return []
-
-
+```python
 def check_cta_specifically_opener(text: str) -> list[str]:
     """Detect 'Specifically:' style transitional openers in the final paragraph.
 
@@ -373,12 +332,15 @@ def check_cta_specifically_opener(text: str) -> list[str]:
             "without the 'specifically' bridge."
         ]
     return []
+```
 
+### Update validate_text_post to call all new checks
 
-# ============================================================================
-# Public API
-# ============================================================================
+**Find** the `validate_text_post` function.
 
+**Replace** with:
+
+```python
 def validate_text_post(
     text: str,
     *,
@@ -455,3 +417,177 @@ def validate_text_post(
         failures.extend(check_authenticity_markers(text, platform=platform))
 
     return failures
+```
+
+---
+
+## Test plan
+
+### Test 1: Comma-separated chiastic flip
+
+```python
+text = "If your distribution plan requires you to become a different person to execute it, it's not a plan, it's a costume."
+failures = check_x_not_y(text)
+assert len(failures) >= 1
+assert "X, not Y" in failures[0] or "constructions" in failures[0]
+```
+
+### Test 2: Tricolon detection
+
+```python
+# Same first word
+text = "Not a content calendar. Not a funnel diagram. Not a buyer persona."
+failures = check_tricolon(text)
+assert len(failures) >= 1
+assert "tricolon" in failures[0].lower()
+
+# Short parallel
+text = "Build. Ship. Scale."
+failures = check_tricolon(text)
+assert len(failures) >= 1
+
+# Single sentence (no tricolon)
+text = "Build it."
+failures = check_tricolon(text)
+assert failures == []
+
+# 2 parallel sentences (not tricolon)
+text = "Build it. Ship it."
+failures = check_tricolon(text)
+assert failures == []
+```
+
+### Test 3: Authenticity markers required
+
+```python
+# Reddit post with no markers
+text = "Spent 14 months building. Distribution is harder than I thought. Numbers below."
+failures = check_authenticity_markers(text, platform="reddit")
+assert len(failures) >= 1
+assert "tbh" in failures[0]
+
+# Reddit post with marker
+text = "Spent 14 months building. Distribution is harder than I thought tbh."
+failures = check_authenticity_markers(text, platform="reddit")
+assert failures == []
+
+# LinkedIn (no requirement)
+text = "Some clean LinkedIn copy without tbh."
+failures = check_authenticity_markers(text, platform="linkedin")
+assert failures == []
+```
+
+### Test 4: Max headers per platform
+
+```python
+text = """
+## What flopped
+content
+## What worked
+content
+## The lesson
+content
+"""
+
+# Reddit caps at 2, this has 3
+failures = check_max_headers(text, platform="reddit")
+assert len(failures) >= 1
+
+# Same text on LinkedIn caps at 2, also fails
+failures = check_max_headers(text, platform="linkedin")
+assert len(failures) >= 1
+
+# Same text with no platform default cap = 5, passes
+failures = check_max_headers(text)
+assert failures == []
+
+# Override
+failures = check_max_headers(text, max_override=10)
+assert failures == []
+```
+
+### Test 5: Specifically opener detection
+
+```python
+# Bad: Specifically: as transitional
+text = "What worked for you? Specifically: did anyone crack a channel?"
+failures = check_cta_specifically_opener(text)
+assert len(failures) >= 1
+
+# Bad: specifically curious
+text = "Curious about distribution. Specifically curious about cold DMs."
+failures = check_cta_specifically_opener(text)
+assert len(failures) >= 1
+
+# Good: direct question
+text = "What worked for you? Did anyone crack a channel?"
+failures = check_cta_specifically_opener(text)
+assert failures == []
+```
+
+### Test 6: End-to-end on the failed Reddit post
+
+Take the actual Reddit post that slipped through (from the conversation that
+prompted this patch). Run `validate_text_post(text, platform="reddit")`.
+Verify failures detected:
+
+- 1+ X-not-Y failure (catches "it's not a plan, it's a costume")
+- 1+ tricolon failure (catches "Not X. Not Y. You...")
+- 1+ authenticity marker failure (no tbh/ngl/etc.)
+- 1+ max headers failure (4 headers, max is 2)
+- 1+ specifically opener failure (Specifically: did anyone)
+
+Expected: 5+ failures total. After regeneration with feedback, post should
+pass cleanly.
+
+### Test 7: Existing tests still pass
+
+Run all 7 tests from the original CLAUDE_CODE_PROMPT.md test plan. They should
+still pass. The new checks are additive and use new functions; existing
+behavior is unchanged.
+
+---
+
+## Validation criteria
+
+- [ ] text_post_validator.py compiles without errors
+- [ ] All 5 new functions exist: check_tricolon, check_authenticity_markers,
+      check_max_headers, check_cta_specifically_opener (and the modified
+      check_x_not_y still works)
+- [ ] X_NOT_Y_PATTERNS regex now matches comma-separated chiasm
+- [ ] TEMPLATED_CTAS contains the new "specifically curious" and
+      "specifically asking" entries
+- [ ] validate_text_post accepts the 4 new flag parameters with correct
+      defaults
+- [ ] Tests 1-6 pass
+- [ ] Test 7 (regression on original test plan) passes
+
+## Rollout
+
+1. Ship the patch to production.
+2. Run for 1 week. Monitor:
+   - Tasa de regeneraciones por failure de cada nuevo check
+   - Falsos positivos reportados (operator marca un check como too strict)
+3. Si tasa de failures > 50% sostenido en alguno de los nuevos checks,
+   calibrar threshold:
+   - check_authenticity_markers: tal vez el set de markers para Reddit es
+     demasiado angosto, expandir
+   - check_max_headers: si LinkedIn legítimamente usa 3 headers a veces,
+     subir cap a 3
+   - check_tricolon: si está cazando false positives en data_drop posts,
+     agregar exception por VarietyMode
+4. Si tasa de smell test scores sube significativamente (Haiku detectando
+   menos AI tells), confirmar que los fixes están haciendo su trabajo.
+
+## Out of scope (not in this patch)
+
+- **Subtle parallel detection** (e.g., "X feels like A, Y feels like B").
+  Demasiado difícil para regex sin generar false positives en frases
+  completamente naturales. Confiar en el smell test (F3) para esto.
+- **VarietyMode-aware exceptions.** En modo data_drop el check de tricolon
+  puede ser demasiado estricto (las listas de números son tricolon-shaped por
+  diseño). Por ahora tolerar esto; si se vuelve issue, agregar parameter
+  `variety_mode` a `check_tricolon` que relaja el check para data_drop.
+- **Per-subreddit authenticity markers.** Algunos subs (r/Entrepreneur)
+  toleran menos jerga que otros (r/indiehackers). Por ahora un set único
+  para Reddit; calibrar después con data.
