@@ -29,6 +29,7 @@
 import Link from 'next/link';
 import { AmbientBackground } from '@/components/ui/ambient-background';
 import { getSpotsCount, LIFETIME_SPOT_TOTAL } from './spots-count';
+import { DemoUrlForm } from './demo-url-form';
 
 const TICKER_ITEMS: Array<{
   src: 'reddit' | 'hn' | 'ih' | 'x';
@@ -359,15 +360,14 @@ export async function LandingLiveOne() {
           </p>
         </div>
         <div className="landing-demo">
-          <div className="landing-demo-shell">
-            <span className="prompt">$</span>
-            <span className="cmd">
-              helm read <span className="url">https://your-brand.com</span>
-            </span>
-            <Link href="/signup" className="send">
-              Read brand <ArrowSvg />
-            </Link>
-          </div>
+          {/* PR Sprint 7.25 Phase 8 — replaced the static
+              terminal placeholder with a real controlled input.
+              Submitting hands the URL to /signup?url=<encoded>
+              and the existing signup → onboarding flow auto-
+              fires the brand-bible builder once the email is
+              confirmed (see app/(auth)/signup/page.tsx, key
+              `helm:pendingBrandUrl`). */}
+          <DemoUrlForm />
         </div>
       </section>
 

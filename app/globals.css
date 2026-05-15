@@ -2613,7 +2613,21 @@ details[open] .platform-payload-summary::before {
   font-weight: 600;
 }
 
-/* Ticker strip — "Listening now" */
+/* Ticker strip — "Listening now"
+ * PR Sprint 7.25 Phase 8 hotfix — the green "Listening now" pill
+ * sat in a flex row next to the animated track. The track's
+ * `transform: translateX(-50%)` moved its children leftward past
+ * the track's own box edge; the parent's `overflow: hidden` only
+ * clipped them at the parent's edge (24px from the viewport),
+ * NOT at the label's right edge. Net effect: scrolling items
+ * crossed visually behind the (translucent) label and looked
+ * like garbage piled on top of the text.
+ *
+ * Two fixes layered:
+ *   1. mask-image on the track fades items out before they
+ *      reach the label area, killing the visible overlap.
+ *   2. z-index + opaque-ish bg on the label so anything that
+ *      survives the mask still sits behind the label visually. */
 .landing-ticker {
   margin: 60px auto 0;
   max-width: 1240px;
@@ -2623,6 +2637,7 @@ details[open] .platform-payload-summary::before {
   gap: 18px;
   flex-wrap: nowrap;
   overflow: hidden;
+  position: relative;
 }
 .landing-ticker .label {
   flex: 0 0 auto;
@@ -2636,8 +2651,16 @@ details[open] .platform-payload-summary::before {
   gap: 8px;
   padding: 6px 12px;
   border-radius: 8px;
-  background: rgba(34, 197, 94, 0.08);
+  /* Layered: solid bg behind, green tint on top. Hex stack from
+     the dark canvas (#07091A) so the pill is opaque against the
+     page bg — items animating beneath the track's mask still
+     can't bleed through. */
+  background:
+    linear-gradient(rgba(34, 197, 94, 0.08), rgba(34, 197, 94, 0.08)),
+    var(--bg);
   border: 1px solid rgba(34, 197, 94, 0.32);
+  position: relative;
+  z-index: 2;
 }
 .landing-ticker .label::before {
   content: '';
@@ -2660,6 +2683,24 @@ details[open] .platform-payload-summary::before {
   white-space: nowrap;
   flex: 1 1 auto;
   min-width: 0;
+  /* Fade items out near the left edge (where the "Listening now"
+     pill sits) and the right edge (cosmetic). 64px feathered band
+     on each side is enough to hide the cross-under without
+     amputating any quote mid-letter. */
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    black 64px,
+    black calc(100% - 64px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    black 64px,
+    black calc(100% - 64px),
+    transparent 100%
+  );
 }
 @media (prefers-reduced-motion: reduce) {
   .landing-ticker-track {
@@ -3221,7 +3262,10 @@ details[open] .platform-payload-summary::before {
   line-height: 1.4;
 }
 
-/* Demo terminal */
+/* Demo terminal — now a real <form> with a controlled input.
+ * Layout: $ prompt + "helm read" prefix label + flex-grow input +
+ * Read brand button on the right. Wraps to two rows on narrow
+ * viewports so the input always has at least ~200px of width. */
 .landing-demo {
   max-width: 720px;
   margin: 0 auto;
@@ -3229,8 +3273,8 @@ details[open] .platform-payload-summary::before {
 .landing-demo-shell {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 14px 16px;
+  gap: 10px;
+  padding: 12px 14px;
   border-radius: 14px;
   background: var(--bg-elev);
   border: 1px solid var(--border-bright);
@@ -3238,21 +3282,45 @@ details[open] .platform-payload-summary::before {
   font-size: 14px;
   position: relative;
   box-shadow: 0 24px 48px rgba(0, 0, 0, 0.4);
+  flex-wrap: wrap;
+  transition: border-color 180ms;
+}
+.landing-demo-shell:focus-within {
+  border-color: var(--d-orange);
+  box-shadow:
+    0 24px 48px rgba(0, 0, 0, 0.4),
+    0 0 0 3px rgba(249, 115, 22, 0.18);
 }
 .landing-demo-shell .prompt {
   color: var(--d-green-2);
   font-weight: 700;
+  flex: 0 0 auto;
 }
-.landing-demo-shell .cmd {
+.landing-demo-shell .cmd-prefix {
   color: var(--text-1);
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-weight: 600;
+  flex: 0 0 auto;
 }
-.landing-demo-shell .cmd .url {
+.landing-demo-shell .cmd-input {
+  flex: 1 1 200px;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  outline: 0;
   color: var(--d-blue-2);
+  font-family: inherit;
+  font-size: inherit;
+  padding: 6px 4px;
+  /* Caret colour matches the URL ink colour rather than the
+     default white — keeps the terminal feel consistent. */
+  caret-color: var(--d-blue-2);
+}
+.landing-demo-shell .cmd-input::placeholder {
+  color: var(--text-3);
+  opacity: 0.8;
+}
+.landing-demo-shell .cmd-input:disabled {
+  opacity: 0.6;
 }
 .landing-demo-shell .send {
   display: inline-flex;
@@ -3264,9 +3332,29 @@ details[open] .platform-payload-summary::before {
   color: #fff;
   font-size: 12px;
   font-weight: 700;
+  font-family: inherit;
   border: 0;
   cursor: pointer;
   white-space: nowrap;
+  transition: all 180ms;
+  flex: 0 0 auto;
+  text-decoration: none;
+}
+.landing-demo-shell .send:hover:not(:disabled) {
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+  color: #fff;
+}
+.landing-demo-shell .send:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.landing-demo-shell .cmd-error {
+  flex: 1 1 100%;
+  font-family: inherit;
+  font-size: 11px;
+  margin-top: 2px;
+  text-align: left;
 }
 
 /* Pricing CTA band */
