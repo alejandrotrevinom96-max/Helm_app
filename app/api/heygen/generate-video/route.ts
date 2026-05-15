@@ -137,8 +137,20 @@ export async function POST(request: Request) {
           : fire.error,
         errorKind: fire.errorKind,
         retry: fire.retry,
+        // PR Sprint 7.25 Phase 11.10 — surface the actual upstream
+        // HeyGen error string. The mapped `error` is the friendly
+        // UI copy; `upstreamError` is the raw HeyGen message
+        // ("Avatar XYZ not found", "Invalid voice_id", "Talking
+        // photo URL must be 1024x1024", etc.). The card renders it
+        // as small mono text so the founder knows what HeyGen
+        // actually objected to instead of seeing the generic
+        // mapped string forever.
+        upstreamError: fire.error,
         ...(isVoice
-          ? { hint: 'Please update your avatar in Settings → Video Avatar.' }
+          ? {
+              hint:
+                'If you just changed your avatar in Settings, give the queue ~60s — it auto-retries. If the same error keeps coming back, the upstream message below has the actual reason.',
+            }
           : {}),
       },
       { status: isVoice ? 400 : 502 },

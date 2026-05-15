@@ -160,6 +160,17 @@ export function StructuredDraftCard({
   const [heygenErrorMessage, setHeygenErrorMessage] = useState<string | null>(
     null,
   );
+  // PR Sprint 7.25 Phase 11.10 — separate slot for the raw HeyGen
+  // upstream error string. `heygenErrorMessage` is the friendly
+  // mapped copy ("Voice configuration issue. Update your avatar
+  // in Settings."); `heygenUpstreamError` is what HeyGen actually
+  // said ("Avatar abc123 not found", "Invalid voice_id", etc.).
+  // Rendered as small mono text under the friendly message so
+  // the founder can act on the real reason when the mapped copy
+  // turns out to be misleading.
+  const [heygenUpstreamError, setHeygenUpstreamError] = useState<
+    string | null
+  >(null);
 
   const handleCopy = async () => {
     if (structuredContent == null) return;
@@ -439,6 +450,7 @@ export function StructuredDraftCard({
   const fireHeygen = async (jobId: string) => {
     setHeygenStatusOverride('queued');
     setHeygenErrorMessage(null);
+    setHeygenUpstreamError(null);
     try {
       const res = await fetch('/api/heygen/generate-video', {
         method: 'POST',
@@ -450,6 +462,7 @@ export function StructuredDraftCard({
         error?: string;
         hint?: string;
         errorKind?: string;
+        upstreamError?: string;
       };
       if (!res.ok || !data.success) {
         // not_configured = no avatar in Settings → actionable.
@@ -465,9 +478,15 @@ export function StructuredDraftCard({
             : data.errorKind === 'feature_disabled'
               ? 'HeyGen integration is off on this deployment. Queue will process when it ships.'
               : data.errorKind === 'voice_config'
-                ? 'Voice configuration issue. Update your avatar in Settings → Video Avatar.'
+                ? 'Voice configuration issue. If you just updated your avatar, the queue auto-retries in ~60s. Otherwise check the upstream message below.'
                 : (data.hint ?? data.error ?? 'Video generation failed to start');
         setHeygenErrorMessage(friendly);
+        // PR Sprint 7.25 Phase 11.10 — capture the raw HeyGen
+        // error so the founder sees what HeyGen actually said
+        // (vs the friendly mapped copy that can be misleading).
+        if (data.upstreamError) {
+          setHeygenUpstreamError(data.upstreamError);
+        }
         return;
       }
       // HeyGen accepted the call → server flipped status to
@@ -734,13 +753,29 @@ export function StructuredDraftCard({
       {/* PR Sprint 7.25 Phase 11.6 — surface HeyGen failure details
           inline. Pre-fix the only signal was the small "🎬 video
           failed" chip + a tooltip. Founders kept asking "why?" and
-          had to open the Library detail modal to find out. */}
+          had to open the Library detail modal to find out.
+          PR Sprint 7.25 Phase 11.10 — also show the raw HeyGen
+          upstream error string in small mono text. The mapped
+          friendly copy can be misleading (e.g. "Voice
+          configuration issue" when the actual problem is an
+          unregistered talking_photo URL) — surfacing the raw
+          message lets the founder act on the real reason. */}
       {heygenStatus === 'failed' && heygenErrorMessage && (
         <div className="mb-4 p-3 border border-danger/30 bg-danger/10 rounded text-xs text-danger flex items-start gap-2">
           <span aria-hidden>🎬</span>
           <div className="flex-1 min-w-0">
             <div className="font-semibold mb-0.5">Video didn&apos;t start.</div>
             <div className="text-danger/90">{heygenErrorMessage}</div>
+            {heygenUpstreamError && (
+              <details className="mt-2">
+                <summary className="text-[10px] font-mono uppercase tracking-[0.12em] text-text-3 cursor-pointer hover:text-text-2">
+                  HeyGen said
+                </summary>
+                <div className="mt-1 p-2 rounded bg-bg-elev border border-border font-mono text-[11px] text-text-2 break-words">
+                  {heygenUpstreamError}
+                </div>
+              </details>
+            )}
           </div>
           {heygenJobIdFromPayload && (
             <button
