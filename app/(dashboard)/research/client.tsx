@@ -1,12 +1,24 @@
 'use client';
 
+// PR Sprint 7.25 Phase 4 — Research page redesign on top of the
+// platform design system. AmbientBackground wraps the page; the
+// page-head adopts the purple "live" eyebrow + animated gradient
+// accent; action buttons use the new platform-btn classes; the
+// finding cards + source-filter chips + tabs all move to platform-*
+// classes. The inner complex blocks (PainPointCard, BrandAnalysisCard,
+// KeywordChips, AutoConfigSection, CompetitorComparison) keep their
+// own styling because they already render against the dark canvas
+// — touching them would multiply the diff for no visible payoff.
+// Every API integration (scan / synthesize / extract / config PATCH
+// / findings pagination / insights load) is byte-identical to
+// pre-Phase-4.
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import type { Project, ResearchFinding } from '@/lib/db/schema';
 import { timeAgo, formatRelativeDate } from '@/lib/utils';
+import { AmbientBackground } from '@/components/ui/ambient-background';
 import { GlassCard } from '@/components/ui/glass-card';
 import { EmptyState } from '@/components/ui/empty-state';
-import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { SimpleMarkdown } from '@/components/ui/simple-markdown';
 import { KeywordChips } from './keyword-chips';
@@ -61,7 +73,7 @@ export function ResearchClient({
   const [sources, setSources] = useState<Sources>(initialConfig.sources);
   const [weeklyInsight, setWeeklyInsight] = useState(initialConfig.weeklyInsight);
   const [weeklyInsightAt, setWeeklyInsightAt] = useState<Date | string | null>(
-    initialConfig.weeklyInsightAt
+    initialConfig.weeklyInsightAt,
   );
 
   const [configOpen, setConfigOpen] = useState(initialConfig.keywords.length === 0);
@@ -75,15 +87,10 @@ export function ResearchClient({
   const [configError, setConfigError] = useState<string | null>(null);
   const [configSaved, setConfigSaved] = useState(false);
 
-  // Pagination state — first page came from the server. We append more
-  // findings via /api/research/findings as the user clicks Load more.
   const [allFindings, setAllFindings] = useState<ResearchFinding[]>(findings);
   const [hasMore, setHasMore] = useState(findings.length === 50);
   const [loadingMore, setLoadingMore] = useState(false);
 
-  // PR #57 — Sprint 7.0.1: pain points block. Mount-load + refresh on
-  // demand via the extract endpoint. Failure is silent — the section
-  // just shows the empty state.
   const [painPoints, setPainPoints] = useState<PainPoint[]>([]);
   const [painSummary, setPainSummary] = useState<string | null>(null);
   const [painSkippedReason, setPainSkippedReason] = useState<string | null>(
@@ -161,7 +168,7 @@ export function ResearchClient({
       competitors: string[];
       excludeWords: string[];
       sources: Sources;
-    }>
+    }>,
   ) => {
     setConfigError(null);
     try {
@@ -175,7 +182,6 @@ export function ResearchClient({
         setConfigError(data.error ?? `Save failed (${res.status})`);
       } else {
         setConfigSaved(true);
-        // Auto-clear the green tick so the next save can flash it again.
         setTimeout(() => setConfigSaved(false), 2000);
       }
     } catch (e) {
@@ -183,7 +189,6 @@ export function ResearchClient({
     }
   };
 
-  // Optimistic local update + fire-and-forget persistence
   const updateKeywords = (next: string[]) => {
     setKeywords(next);
     persistConfig({ keywords: next });
@@ -255,7 +260,7 @@ export function ResearchClient({
   };
 
   const visibleFindings = allFindings.filter(
-    (f) => filter === 'all' || f.source === filter
+    (f) => filter === 'all' || f.source === filter,
   );
 
   const loadMore = async () => {
@@ -263,7 +268,7 @@ export function ResearchClient({
     try {
       const sourceParam = filter !== 'all' ? `&source=${filter}` : '';
       const res = await fetch(
-        `/api/research/findings?projectId=${project.id}&offset=${allFindings.length}&limit=20${sourceParam}`
+        `/api/research/findings?projectId=${project.id}&offset=${allFindings.length}&limit=20${sourceParam}`,
       );
       const data = await res.json();
       if (res.ok && Array.isArray(data.findings)) {
@@ -280,368 +285,472 @@ export function ResearchClient({
   };
 
   return (
-    <div className="p-4 md:p-8">
-      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end gap-3 mb-6 md:mb-8">
-        <div>
-          <h1 className="font-display text-display-md font-light tracking-tight">
-            Research
-          </h1>
-          <p className="text-text-2 mt-2 max-w-2xl text-sm">
-            Pain points and opportunities from your community
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {/* PR #56 — Sprint 7.0: surface the auto-discovery flow.
-              We put this first because configuring sources is the
-              prerequisite — a scan with zero connected sources is
-              just a keyword search. */}
-          <Link href="/research/sources">
-            <Button variant="secondary" size="sm">
+    <AmbientBackground accentTint="purple">
+      <main className="platform-main platform-main-wide">
+        <header className="platform-page-head platform-page-head-row platform-reveal-1">
+          <div>
+            <span className="platform-eyebrow platform-eyebrow-purple">
+              live · audience signals
+            </span>
+            <h1>
+              Research<span className="accent-purple-grad">.</span>
+            </h1>
+            <p className="sub">
+              Pain points and opportunities from your community — extracted
+              from Reddit, HN, and Indie Hackers conversations.
+            </p>
+            {initialConfig.lastSyncedAt && !scanLoading && (
+              <div className="platform-last-scan">
+                Last scan{' '}
+                <b>{formatRelativeDate(initialConfig.lastSyncedAt)}</b>
+              </div>
+            )}
+          </div>
+
+          <div className="platform-page-head-actions">
+            <Link
+              href="/research/sources"
+              className="platform-btn platform-btn-ghost"
+            >
               Sources →
-            </Button>
-          </Link>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={generateInsight}
-            disabled={synthLoading}
-          >
-            {synthLoading ? 'Synthesizing…' : 'Generate insight'}
-          </Button>
-          <Button size="sm" onClick={scan} disabled={scanLoading}>
-            {scanLoading ? 'Scanning…' : 'Scan now ↻'}
-          </Button>
-        </div>
-      </div>
+            </Link>
+            <button
+              type="button"
+              onClick={generateInsight}
+              disabled={synthLoading}
+              className="platform-btn platform-btn-ghost"
+            >
+              {synthLoading ? 'Synthesizing…' : 'Generate insight'}
+            </button>
+            <button
+              type="button"
+              onClick={scan}
+              disabled={scanLoading}
+              className="platform-btn platform-btn-primary"
+            >
+              {scanLoading ? 'Scanning…' : 'Scan now ↻'}
+            </button>
+          </div>
+        </header>
 
-      {scanStatus && (
-        <div className="mb-4 text-xs text-text-2">{scanStatus}</div>
-      )}
-      {synthError && (
-        <div className="mb-4 text-xs text-danger">{synthError}</div>
-      )}
-      {initialConfig.lastSyncedAt && !scanLoading && (
-        <div className="mb-4 text-[11px] font-mono text-text-3">
-          Last scan: {formatRelativeDate(initialConfig.lastSyncedAt)}
-        </div>
-      )}
-
-      {/* PR #57 — Sprint 7.0.1: Pain Points this week. Sits above
-          Configuration because this is the highest-signal artifact
-          the page now produces — it's what a founder opens the tab
-          to see. */}
-      <section className="mb-6">
-        <div className="flex items-baseline justify-between mb-3">
-          <h2 className="font-display text-xl font-light">
-            Pain points this week
-          </h2>
-          <button
-            onClick={extractPainPoints}
-            disabled={extractLoading}
-            className="text-xs font-mono text-accent hover:opacity-80 disabled:opacity-50"
+        {scanStatus && (
+          <div
+            className="platform-field-help"
+            style={{ marginBottom: '14px' }}
           >
-            {extractLoading ? 'Extracting…' : '↻ Extract now'}
-          </button>
-        </div>
-        {extractError && (
-          <div className="mb-3 p-3 border border-danger/30 bg-danger/10 rounded-lg text-sm text-danger">
-            {extractError}
+            {scanStatus}
           </div>
         )}
-        {extractHint && painPoints.length === 0 && (
-          <div className="mb-3 text-xs text-text-3">{extractHint}</div>
-        )}
-        {painSummary && painPoints.length > 0 && (
-          <p className="text-sm text-text-2 mb-3 max-w-2xl">{painSummary}</p>
-        )}
-        {painPoints.length > 0 ? (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-            {painPoints.map((p, i) => (
-              <PainPointCard
-                key={`${p.theme}-${i}`}
-                painPoint={p}
-                projectId={project.id}
-              />
-            ))}
+        {synthError && (
+          <div
+            className="platform-field-help"
+            style={{ color: 'var(--d-red-2)', marginBottom: '14px' }}
+          >
+            {synthError}
           </div>
-        ) : (
-          <GlassCard className="p-6 text-center text-text-3 text-sm">
-            {painSkippedReason ??
-              'No pain points yet. Connect sources in /research/sources first, run a scan, then hit Extract.'}
-          </GlassCard>
         )}
-      </section>
 
-      {/* PR #62 — Sprint 7.0.5: Smart Auto-configure. Lives between
-          Pain Points and Configuration because it's the strategic
-          read the founder needs BEFORE manually editing keywords —
-          and one click later, "Apply to research →" populates the
-          Configuration card below. */}
-      <section className="mb-6">
-        <BrandAnalysisCard projectId={project.id} />
-      </section>
-
-      {/* Configuration card (collapsible) */}
-      <GlassCard className="p-5 mb-6">
-        <button
-          onClick={() => setConfigOpen(!configOpen)}
-          className="w-full flex justify-between items-center"
-        >
-          <span className="font-display text-lg font-light">Configuration</span>
-          <span className="text-text-3 text-lg">{configOpen ? '−' : '+'}</span>
-        </button>
-
-        {configOpen && (
-          <div className="mt-4 space-y-5">
-            <AutoConfigSection
-              projectId={project.id}
-              onApplied={() => window.location.reload()}
-            />
-
-            <KeywordChips
-              label="Keywords"
-              values={keywords}
-              onAdd={(v) => updateKeywords([...keywords, v])}
-              onRemove={(v) => updateKeywords(keywords.filter((k) => k !== v))}
-              placeholder="e.g. indie hacker, micro-saas"
-            />
-            <KeywordChips
-              label="Competitors"
-              values={competitors}
-              onAdd={(v) => updateCompetitors([...competitors, v])}
-              onRemove={(v) =>
-                updateCompetitors(competitors.filter((k) => k !== v))
-              }
-              placeholder="e.g. posthog, baremetrics"
-            />
-            <KeywordChips
-              label="Exclude words"
-              values={excludeWords}
-              accent="danger"
-              onAdd={(v) => updateExcludeWords([...excludeWords, v])}
-              onRemove={(v) =>
-                updateExcludeWords(excludeWords.filter((k) => k !== v))
-              }
-              placeholder="words to filter out"
-            />
-
-            <div>
-              <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2">
-                Sources
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {SOURCE_KEYS.map((s) => (
-                  <button
-                    key={s}
-                    onClick={() => updateSources({ ...sources, [s]: !sources[s] })}
-                    className={`text-xs px-3 py-1.5 rounded-md border transition-colors ${
-                      sources[s]
-                        ? 'border-accent bg-accent-soft text-accent'
-                        : 'border-border text-text-3 hover:border-border-bright'
-                    }`}
-                  >
-                    {SOURCE_LABELS[s]}
-                  </button>
-                ))}
-              </div>
-              <p className="text-[11px] text-text-3 mt-2">
-                Twitter/X, Facebook, Instagram are not supported — their APIs
-                either cost $100+/mo or don&apos;t allow public-content search.
+        {/* Pain points this week */}
+        <section className="platform-reveal-2" style={{ marginBottom: '28px' }}>
+          <div className="platform-section-row">
+            <h2 className="platform-section-title">
+              Pain points{' '}
+              <span className="accent-blue-purple">this week</span>
+            </h2>
+            <button
+              onClick={extractPainPoints}
+              disabled={extractLoading}
+              className="platform-extract-pill"
+            >
+              {extractLoading ? 'Extracting…' : '↻ Extract now'}
+            </button>
+          </div>
+          {extractError && (
+            <div
+              className="platform-field-help"
+              style={{
+                color: 'var(--d-red-2)',
+                padding: '10px 12px',
+                background: 'rgba(239,68,68,0.06)',
+                border: '1px solid rgba(239,68,68,0.22)',
+                borderRadius: '10px',
+                marginBottom: '12px',
+              }}
+            >
+              {extractError}
+            </div>
+          )}
+          {extractHint && painPoints.length === 0 && (
+            <div
+              className="platform-field-help"
+              style={{ marginBottom: '12px' }}
+            >
+              {extractHint}
+            </div>
+          )}
+          {painSummary && painPoints.length > 0 && (
+            <p
+              className="platform-desc"
+              style={{ marginBottom: '14px', maxWidth: '60ch' }}
+            >
+              {painSummary}
+            </p>
+          )}
+          {painPoints.length > 0 ? (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              {painPoints.map((p, i) => (
+                <PainPointCard
+                  key={`${p.theme}-${i}`}
+                  painPoint={p}
+                  projectId={project.id}
+                />
+              ))}
+            </div>
+          ) : (
+            <div
+              className="platform-card platform-card-glow-purple"
+              style={{ textAlign: 'center', marginBottom: 0 }}
+            >
+              <p className="platform-desc">
+                {painSkippedReason ??
+                  'No pain points yet. Connect sources in /research/sources first, run a scan, then hit Extract.'}
               </p>
             </div>
+          )}
+        </section>
 
-            {configError && (
-              <div className="flex items-center gap-3 text-xs text-danger">
-                <span>⚠ {configError}</span>
-                <button
-                  onClick={() => setConfigError(null)}
-                  className="underline hover:text-text-1"
+        {/* Brand analysis card stays as-is — has its own purple/blue
+            glass styling that already matches the platform palette. */}
+        <section
+          className="platform-reveal-3"
+          style={{ marginBottom: '28px' }}
+        >
+          <BrandAnalysisCard projectId={project.id} />
+        </section>
+
+        {/* Configuration card (collapsible) — wrapped in platform-card
+            for the new look; inner inputs keep their existing forms. */}
+        <section
+          className="platform-card platform-card-glow-blue platform-reveal-4"
+        >
+          <button
+            type="button"
+            onClick={() => setConfigOpen(!configOpen)}
+            style={{
+              width: '100%',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              background: 'transparent',
+              border: 0,
+              padding: 0,
+              cursor: 'pointer',
+              color: 'inherit',
+            }}
+          >
+            <span className="platform-h2" style={{ margin: 0 }}>
+              Configuration
+            </span>
+            <span style={{ color: 'var(--text-3)', fontSize: '20px' }}>
+              {configOpen ? '−' : '+'}
+            </span>
+          </button>
+
+          {configOpen && (
+            <div style={{ marginTop: '20px', display: 'flex', flexDirection: 'column', gap: '22px' }}>
+              <AutoConfigSection
+                projectId={project.id}
+                onApplied={() => window.location.reload()}
+              />
+
+              <KeywordChips
+                label="Keywords"
+                values={keywords}
+                onAdd={(v) => updateKeywords([...keywords, v])}
+                onRemove={(v) => updateKeywords(keywords.filter((k) => k !== v))}
+                placeholder="e.g. indie hacker, micro-saas"
+              />
+              <KeywordChips
+                label="Competitors"
+                values={competitors}
+                onAdd={(v) => updateCompetitors([...competitors, v])}
+                onRemove={(v) =>
+                  updateCompetitors(competitors.filter((k) => k !== v))
+                }
+                placeholder="e.g. posthog, baremetrics"
+              />
+              <KeywordChips
+                label="Exclude words"
+                values={excludeWords}
+                accent="danger"
+                onAdd={(v) => updateExcludeWords([...excludeWords, v])}
+                onRemove={(v) =>
+                  updateExcludeWords(excludeWords.filter((k) => k !== v))
+                }
+                placeholder="words to filter out"
+              />
+
+              <div>
+                <div className="platform-field-label">Sources</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                  {SOURCE_KEYS.map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() =>
+                        updateSources({ ...sources, [s]: !sources[s] })
+                      }
+                      className={`platform-source-chip${
+                        sources[s] ? ' platform-source-chip-on' : ''
+                      }`}
+                    >
+                      {SOURCE_LABELS[s]}
+                    </button>
+                  ))}
+                </div>
+                <p className="platform-field-help" style={{ marginTop: '8px' }}>
+                  Twitter/X, Facebook, Instagram are not supported — their
+                  APIs either cost $100+/mo or don&apos;t allow public-content
+                  search.
+                </p>
+              </div>
+
+              {configError && (
+                <div className="platform-field-help" style={{ color: 'var(--d-red-2)' }}>
+                  ⚠ {configError}{' '}
+                  <button
+                    type="button"
+                    onClick={() => setConfigError(null)}
+                    style={{
+                      background: 'transparent',
+                      border: 0,
+                      cursor: 'pointer',
+                      color: 'inherit',
+                      textDecoration: 'underline',
+                    }}
+                  >
+                    dismiss
+                  </button>
+                </div>
+              )}
+              {configSaved && !configError && (
+                <div
+                  className="platform-field-help"
+                  style={{ color: 'var(--d-green-2)' }}
                 >
-                  dismiss
+                  ✓ Saved
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+
+        {/* Synthesizing skeleton */}
+        {synthLoading && !weeklyInsight && (
+          <GlassCard
+            elevated
+            className="p-5 md:p-6 mb-6 mt-6"
+            aria-label="Synthesizing insight"
+          >
+            <Skeleton className="h-3 w-32 mb-3" />
+            <Skeleton className="h-7 w-3/4 mb-4" />
+            <div className="space-y-2 mb-4">
+              <Skeleton className="h-3 w-full" />
+              <Skeleton className="h-3 w-5/6" />
+              <Skeleton className="h-3 w-4/6" />
+            </div>
+            <p className="text-xs text-text-3 italic">
+              Helm is synthesizing… ~30-60 seconds.
+            </p>
+          </GlassCard>
+        )}
+
+        {/* Insight banner */}
+        {weeklyInsight && (
+          <section
+            className="platform-card platform-card-glow-orange platform-reveal-5"
+            style={{ marginTop: '24px' }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-start',
+                marginBottom: '12px',
+                gap: '12px',
+                flexWrap: 'wrap',
+              }}
+            >
+              <div>
+                <div className="platform-lbl" style={{ color: 'var(--d-orange-2)' }}>
+                  Insight of the week
+                </div>
+                <div className="platform-field-help">
+                  Generated{' '}
+                  {weeklyInsightAt ? formatRelativeDate(weeklyInsightAt) : ''}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={generateInsight}
+                disabled={synthLoading}
+                className="platform-btn platform-btn-ghost"
+              >
+                {synthLoading ? 'Regenerating…' : 'Regenerate'}
+              </button>
+            </div>
+            <SimpleMarkdown text={weeklyInsight} />
+          </section>
+        )}
+
+        {/* Tab navigation */}
+        <div className="platform-tab-row" style={{ marginTop: '32px' }}>
+          <button
+            type="button"
+            onClick={() => setActiveTab('all')}
+            className={`platform-tab${
+              activeTab === 'all' ? ' platform-tab-on' : ''
+            }`}
+          >
+            All findings
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('competitors')}
+            className={`platform-tab${
+              activeTab === 'competitors' ? ' platform-tab-on' : ''
+            }`}
+          >
+            Competitive landscape
+            {competitors.length > 0 && (
+              <span className="platform-tab-count">
+                ({competitors.length})
+              </span>
+            )}
+          </button>
+        </div>
+
+        {activeTab === 'all' ? (
+          <>
+            <div
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: '8px',
+                marginBottom: '16px',
+              }}
+            >
+              {(['all', 'reddit', 'hackernews', 'indiehackers'] as const).map(
+                (s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => setFilter(s)}
+                    className={`platform-source-chip${
+                      filter === s ? ' platform-source-chip-on' : ''
+                    }`}
+                  >
+                    {s === 'all'
+                      ? `All (${counts.all})`
+                      : `${SOURCE_LABELS[s as keyof Sources]} (${counts[s]})`}
+                  </button>
+                ),
+              )}
+            </div>
+
+            {visibleFindings.length === 0 && findings.length === 0 && (
+              <GlassCard className="p-0">
+                <EmptyState
+                  title="No findings yet"
+                  description="Add keywords above and click Scan now to search Reddit, HN, and Indie Hackers for posts that match your project."
+                  icon={
+                    <svg
+                      width="22"
+                      height="22"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.75"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <circle cx="11" cy="11" r="8" />
+                      <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                    </svg>
+                  }
+                />
+              </GlassCard>
+            )}
+
+            {visibleFindings.length === 0 && findings.length > 0 && (
+              <EmptyState
+                compact
+                title={`No findings from ${filter}`}
+                description="Try a different source filter or run another scan."
+              />
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
+              {visibleFindings.map((f) => (
+                <FindingCard key={f.id} finding={f} />
+              ))}
+            </div>
+
+            {hasMore && allFindings.length > 0 && (
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'center',
+                  marginTop: '24px',
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={loadMore}
+                  disabled={loadingMore}
+                  className="platform-btn platform-btn-ghost"
+                >
+                  {loadingMore ? 'Loading…' : 'Load more findings'}
                 </button>
               </div>
             )}
-            {configSaved && !configError && (
-              <div className="text-xs text-success">✓ Saved</div>
-            )}
-          </div>
+          </>
+        ) : (
+          <CompetitorComparison projectId={project.id} />
         )}
-      </GlassCard>
-
-      {/* Synthesizing skeleton — only when there's no insight yet to show
-          in place. If there's a previous one, the user keeps seeing it with
-          the Regenerate button in loading state. */}
-      {synthLoading && !weeklyInsight && (
-        <GlassCard elevated className="p-5 md:p-6 mb-6" aria-label="Synthesizing insight">
-          <Skeleton className="h-3 w-32 mb-3" />
-          <Skeleton className="h-7 w-3/4 mb-4" />
-          <div className="space-y-2 mb-4">
-            <Skeleton className="h-3 w-full" />
-            <Skeleton className="h-3 w-5/6" />
-            <Skeleton className="h-3 w-4/6" />
-          </div>
-          <p className="text-xs text-text-3 italic">
-            Helm is synthesizing… ~30-60 seconds.
-          </p>
-        </GlassCard>
-      )}
-
-      {/* Insight banner */}
-      {weeklyInsight && (
-        <GlassCard elevated className="p-5 md:p-6 mb-6">
-          <div className="flex justify-between items-start mb-3 gap-3 flex-wrap">
-            <div>
-              <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-accent mb-1">
-                Insight of the week
-              </div>
-              <div className="text-xs text-text-3">
-                Generated {weeklyInsightAt ? formatRelativeDate(weeklyInsightAt) : ''}
-              </div>
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={generateInsight}
-              disabled={synthLoading}
-            >
-              {synthLoading ? 'Regenerating…' : 'Regenerate'}
-            </Button>
-          </div>
-          <SimpleMarkdown text={weeklyInsight} />
-        </GlassCard>
-      )}
-
-      {/* Tab navigation */}
-      <div className="flex gap-1 border-b border-border mb-4">
-        <button
-          onClick={() => setActiveTab('all')}
-          className={`px-4 py-2 text-xs border-b-2 -mb-px transition-colors ${
-            activeTab === 'all'
-              ? 'border-accent text-accent'
-              : 'border-transparent text-text-2 hover:text-text-1'
-          }`}
-        >
-          All findings
-        </button>
-        <button
-          onClick={() => setActiveTab('competitors')}
-          className={`px-4 py-2 text-xs border-b-2 -mb-px transition-colors ${
-            activeTab === 'competitors'
-              ? 'border-accent text-accent'
-              : 'border-transparent text-text-2 hover:text-text-1'
-          }`}
-        >
-          Competitive landscape
-          {competitors.length > 0 && (
-            <span className="ml-1.5 text-[10px] text-text-3">
-              ({competitors.length})
-            </span>
-          )}
-        </button>
-      </div>
-
-      {activeTab === 'all' ? (
-        <>
-          {/* Source filter chips */}
-          <div className="flex flex-wrap gap-2 mb-4">
-            {(['all', 'reddit', 'hackernews', 'indiehackers'] as const).map((s) => (
-              <button
-                key={s}
-                onClick={() => setFilter(s)}
-                className={`text-[10px] font-mono uppercase tracking-[0.1em] px-3 py-1.5 rounded transition-colors ${
-                  filter === s
-                    ? 'bg-accent-soft text-accent'
-                    : 'text-text-3 hover:text-text-1'
-                }`}
-              >
-                {s === 'all'
-                  ? `All (${counts.all})`
-                  : `${SOURCE_LABELS[s as keyof Sources]} (${counts[s]})`}
-              </button>
-            ))}
-          </div>
-
-          {visibleFindings.length === 0 && findings.length === 0 && (
-            <GlassCard className="p-0">
-              <EmptyState
-                title="No findings yet"
-                description="Add keywords above and click Scan now to search Reddit, HN, and Indie Hackers for posts that match your project."
-                icon={
-                  <svg
-                    width="22"
-                    height="22"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.75"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <circle cx="11" cy="11" r="8" />
-                    <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                  </svg>
-                }
-              />
-            </GlassCard>
-          )}
-
-          {visibleFindings.length === 0 && findings.length > 0 && (
-            <EmptyState
-              compact
-              title={`No findings from ${filter}`}
-              description="Try a different source filter or run another scan."
-            />
-          )}
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
-            {visibleFindings.map((f) => (
-              <FindingCard key={f.id} finding={f} />
-            ))}
-          </div>
-
-          {hasMore && allFindings.length > 0 && (
-            <div className="flex justify-center mt-6">
-              <Button variant="ghost" onClick={loadMore} disabled={loadingMore}>
-                {loadingMore ? 'Loading…' : 'Load more findings'}
-              </Button>
-            </div>
-          )}
-        </>
-      ) : (
-        <CompetitorComparison projectId={project.id} />
-      )}
-    </div>
+      </main>
+    </AmbientBackground>
   );
 }
 
 function FindingCard({ finding }: { finding: ResearchFinding }) {
+  const score = finding.matchScore ?? 0;
+  const isHot = score > 80;
   return (
     <a
       href={finding.url}
       target="_blank"
       rel="noopener"
-      className="glass rounded-2xl p-5 hover:border-border-bright transition-all hover:-translate-y-0.5 block"
+      className="platform-finding-card"
     >
-      <div className="flex justify-between items-center mb-3 gap-2">
-        <span className="text-[10px] font-mono uppercase tracking-[0.1em] text-text-3">
-          {finding.source}
-        </span>
+      <div className="platform-finding-card-head">
+        <span className="platform-finding-card-source">{finding.source}</span>
         <span
-          className={`text-[11px] font-mono px-2 py-1 rounded-full whitespace-nowrap ${
-            (finding.matchScore ?? 0) > 80
-              ? 'bg-accent-soft text-accent'
-              : 'bg-success-soft text-success'
+          className={`platform-finding-card-score ${
+            isHot
+              ? 'platform-finding-card-score-hot'
+              : 'platform-finding-card-score-warm'
           }`}
         >
           {finding.matchScore} match
         </span>
       </div>
-      <h3 className="text-sm font-medium mb-2 leading-snug">{finding.title}</h3>
+      <h3 className="platform-finding-card-title">{finding.title}</h3>
       {finding.snippet && (
-        <p className="text-xs text-text-2 mb-3 line-clamp-2">{finding.snippet}</p>
+        <p className="platform-finding-card-snippet">{finding.snippet}</p>
       )}
-      <div className="flex justify-between text-[11px] text-text-3 font-mono">
+      <div className="platform-finding-card-meta">
         <span>
           ↑ {finding.upvotes ?? 0} · 💬 {finding.comments ?? 0}
         </span>
