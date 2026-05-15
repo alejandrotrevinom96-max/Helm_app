@@ -8,8 +8,10 @@
 // matches the rest of the auth flow added in PR #33.
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { ThemeToggle } from '@/components/ui/theme-toggle';
 import { FoundersBanner } from './founders-banner';
+// PR Sprint 7.25 Phase 7 — ThemeToggle removed from the landing
+// nav. The app is dark-only now (see lib/theme.ts). The component
+// file stays on disk for revert safety but no caller renders it.
 
 export function LandingNav() {
   const [scrolled, setScrolled] = useState(false);
@@ -75,7 +77,6 @@ export function LandingNav() {
           >
             Roadmap
           </a>
-          <ThemeToggle />
           <Link
             href="/login"
             className="text-text-2 hover:text-text-1 transition-colors"

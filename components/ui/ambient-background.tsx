@@ -4,7 +4,7 @@
 //
 // Three stacked fixed-position layers that sit behind every
 // redesigned platform page (Settings / Analytics / Research /
-// Compass / Generate):
+// Compass / Marketing):
 //
 //   1. .ambient  — three large radial gradients tinted blue + orange
 //                  + purple. Static; sets the "deep canvas with
@@ -22,22 +22,18 @@
 // intercept clicks. Pages render at z-index: 1 inside the
 // component's children.
 //
-// Activation: dark theme only. The light theme stays clean
-// (current marketing-clean look), so the component renders empty
-// when [data-theme='light'] is active. Founders on light see no
-// change.
-//
-// Usage:
-//   <AmbientBackground>
-//     <YourPageContent />
-//   </AmbientBackground>
-//
-// The cursor tracking runs in a single `useEffect` on mount; it
-// short-circuits when the user is in light mode or has reduced-
-// motion preference set, so we don't pay the mousemove cost when
-// the gradient isn't visible anyway.
+// PR Sprint 7.25 Phase 7 hotfix — platform pages are ALWAYS dark.
+// The mockups are dark-only; previously this component honored
+// the user's theme cookie and short-circuited on light mode,
+// which meant founders with the legacy `helm-theme=light` cookie
+// saw zero of the redesign (no ambient, no glow, no dot grid).
+// Now the wrapper sets `data-theme='dark'` on its root + paints
+// the canvas with `var(--bg)` so every CSS var inside the
+// subtree resolves to dark values regardless of the global
+// cookie. The marketing site / auth pages keep respecting the
+// cookie because they don't use AmbientBackground.
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 
 interface Props {
@@ -88,28 +84,10 @@ export function AmbientBackground({
   staticOnly = false,
   className = '',
 }: Props) {
-  // Track whether the dark theme is active so the layers stay
-  // hidden on light mode (the platform design is dark-only). We
-  // listen for theme attribute changes on <html> so a runtime
-  // toggle picks up immediately.
-  const [isDark, setIsDark] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (typeof document === 'undefined') return;
-    const html = document.documentElement;
-    const read = () => {
-      const theme = html.getAttribute('data-theme');
-      setIsDark(theme === 'dark');
-    };
-    read();
-    const observer = new MutationObserver(read);
-    observer.observe(html, { attributes: true, attributeFilter: ['data-theme'] });
-    return () => observer.disconnect();
-  }, []);
-
-  useEffect(() => {
-    if (!isDark || staticOnly) return;
+    if (staticOnly) return;
     if (typeof window === 'undefined') return;
     // Respect prefers-reduced-motion — the cursor-following glow
     // is purely decorative.
@@ -133,14 +111,26 @@ export function AmbientBackground({
     };
     window.addEventListener('mousemove', onMove, { passive: true });
     return () => window.removeEventListener('mousemove', onMove);
-  }, [isDark, staticOnly]);
+  }, [staticOnly]);
 
   return (
     <div
       ref={rootRef}
+      // data-theme='dark' here forces every var(--bg|surface-1|
+      // text-1|border|...) inside this subtree to resolve to the
+      // dark palette — even when the global <html> data-theme is
+      // 'light'. That's what makes the platform pages render the
+      // full ambient + glow treatment regardless of the user's
+      // theme cookie. minHeight covers cases where the wrapped
+      // page is shorter than the viewport (the ambient should
+      // still extend to the bottom).
+      data-theme="dark"
       className={`relative isolate ${className}`}
       style={
         {
+          background: 'var(--bg)',
+          color: 'var(--text-1)',
+          minHeight: '100vh',
           // CSS vars consumed by the .dotgrid + .cursor-glow masks
           // below. Defaults center the spotlight when the cursor
           // hasn't moved yet (or on touch devices).
@@ -149,44 +139,57 @@ export function AmbientBackground({
         } as React.CSSProperties
       }
     >
-      {isDark && (
-        <>
-          {/* Static ambient gradients — set the canvas glow. */}
-          <div
-            aria-hidden
-            className="pointer-events-none fixed inset-0 z-0"
-            style={{ background: ACCENT_GRADIENTS[accentTint] ?? ACCENT_GRADIENTS.default }}
-          />
-          {/* Dot grid masked to a circle around the cursor. */}
-          {!staticOnly && (
-            <div
-              aria-hidden
-              className="pointer-events-none fixed inset-0 z-0"
-              style={{
-                backgroundImage:
-                  'radial-gradient(circle, rgba(255, 255, 255, 0.06) 1px, transparent 1.2px)',
-                backgroundSize: '28px 28px',
-                WebkitMaskImage:
-                  'radial-gradient(circle 420px at var(--mx, 50%) var(--my, 40%), rgba(0, 0, 0, 1) 0%, rgba(0, 0, 0, 0.55) 45%, transparent 75%)',
-                maskImage:
-                  'radial-gradient(circle 420px at var(--mx, 50%) var(--my, 40%), rgba(0, 0, 0, 1) 0%, rgba(0, 0, 0, 0.55) 45%, transparent 75%)',
-              }}
-            />
-          )}
-          {/* Cursor-following pale-blue glow. */}
-          {!staticOnly && (
-            <div
-              aria-hidden
-              className="pointer-events-none fixed inset-0 z-0"
-              style={{
-                background:
-                  'radial-gradient(circle 480px at var(--mx, 50%) var(--my, 40%), rgba(96, 165, 250, 0.10), transparent 60%)',
-              }}
-            />
-          )}
-        </>
+      {/* Static ambient gradients + dot grid + cursor glow —
+          `position: fixed` so they cover the viewport (cursor
+          tracking maps mouse coords to layer coords cleanly).
+          CSS variables (--bg, etc.) cascade through the DOM
+          tree, not the stacking context — so even though fixed
+          positions to the viewport, these layers still inherit
+          data-theme='dark' from the wrapper via DOM ancestry.
+          The wrapper's `isolation: isolate` keeps the fixed
+          layers' stacking context scoped to AmbientBackground
+          so they don't bleed over modals/toasts elsewhere on
+          the page. */}
+      <div
+        aria-hidden
+        className="pointer-events-none fixed inset-0"
+        style={{
+          background: ACCENT_GRADIENTS[accentTint] ?? ACCENT_GRADIENTS.default,
+          zIndex: 0,
+        }}
+      />
+      {/* Dot grid masked to a circle around the cursor. */}
+      {!staticOnly && (
+        <div
+          aria-hidden
+          className="pointer-events-none fixed inset-0"
+          style={{
+            zIndex: 0,
+            backgroundImage:
+              'radial-gradient(circle, rgba(255, 255, 255, 0.06) 1px, transparent 1.2px)',
+            backgroundSize: '28px 28px',
+            WebkitMaskImage:
+              'radial-gradient(circle 420px at var(--mx, 50%) var(--my, 40%), rgba(0, 0, 0, 1) 0%, rgba(0, 0, 0, 0.55) 45%, transparent 75%)',
+            maskImage:
+              'radial-gradient(circle 420px at var(--mx, 50%) var(--my, 40%), rgba(0, 0, 0, 1) 0%, rgba(0, 0, 0, 0.55) 45%, transparent 75%)',
+          }}
+        />
       )}
-      <div className="relative z-10">{children}</div>
+      {/* Cursor-following pale-blue glow. */}
+      {!staticOnly && (
+        <div
+          aria-hidden
+          className="pointer-events-none fixed inset-0"
+          style={{
+            zIndex: 0,
+            background:
+              'radial-gradient(circle 480px at var(--mx, 50%) var(--my, 40%), rgba(96, 165, 250, 0.10), transparent 60%)',
+          }}
+        />
+      )}
+      <div className="relative" style={{ zIndex: 1 }}>
+        {children}
+      </div>
     </div>
   );
 }

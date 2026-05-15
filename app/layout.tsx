@@ -38,22 +38,18 @@ export const metadata: Metadata = {
   },
 };
 
-// PR Sprint 7.25 Phase 1 — dark-first default. New visitors land
-// on dark unless the cookie says light or the OS explicitly prefers
-// light (matches the server-side resolver in lib/theme.ts so the
-// SSR HTML's data-theme matches what the boot script computes,
-// avoiding a flash of the wrong theme).
+// PR Sprint 7.25 Phase 7 — dark-only. The redesign is dark-first by
+// spec (deep navy canvas + ambient gradients + dot grid + cursor
+// glow). The toggle has been removed from the sidebar + landing
+// nav, the cookie is no longer read, and the boot script pins
+// data-theme='dark' unconditionally so existing visitors with a
+// stale helm-theme=light cookie still get the redesigned look
+// without having to clear cookies. lib/theme.ts mirrors this on
+// the server so SSR HTML matches the client.
 const themeBootScript = `
 (() => {
   try {
-    const m = document.cookie.match(/helm-theme=(\\w+)/);
-    const t = m && m[1];
-    if (t === 'light' || t === 'dark') {
-      document.documentElement.setAttribute('data-theme', t);
-      return;
-    }
-    const prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
-    document.documentElement.setAttribute('data-theme', prefersLight ? 'light' : 'dark');
+    document.documentElement.setAttribute('data-theme', 'dark');
   } catch (e) {}
 })();
 `;

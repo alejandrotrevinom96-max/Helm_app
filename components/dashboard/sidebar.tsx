@@ -5,7 +5,9 @@ import { usePathname } from 'next/navigation';
 import { useState, useTransition, useEffect } from 'react';
 import type { Project } from '@/lib/db/schema';
 import { setActiveProject } from '@/app/(dashboard)/actions';
-import { ThemeToggle } from '@/components/ui/theme-toggle';
+// PR Sprint 7.25 Phase 7 — ThemeToggle removed from the sidebar
+// (app is dark-only now). The component file stays on disk for
+// revert safety but no caller renders it.
 import { FounderCard } from './founder-card';
 import { AddProjectModal } from './add-project-modal';
 import { isAdmin } from '@/lib/config';
@@ -259,16 +261,6 @@ export function Sidebar({
             </>
           )}
         </nav>
-
-        <div className="px-3 py-2 border-t border-border">
-          <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 px-3 mb-3">
-            System
-          </div>
-          <div className="px-3 mb-3 flex items-center justify-between">
-            <span className="text-xs text-text-2">Theme</span>
-            <ThemeToggle />
-          </div>
-        </div>
 
         <div className="p-3 border-t border-border">
           {/* PR #33 — Sprint 6.1: avatar card → dropdown trigger

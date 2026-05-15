@@ -1,27 +1,21 @@
-import { cookies, headers } from 'next/headers';
 import type { Theme } from './design-tokens';
 
 const COOKIE_NAME = 'helm-theme';
 
+// PR Sprint 7.25 Phase 7 — DARK-ONLY. The platform redesign is
+// dark-first by spec: deep navy canvas, ambient gradients, dot
+// grid, cursor glow. Light theme was a leftover from the v1
+// dashboard era and contradicted every mockup the founder
+// produced. Now the resolver hardcodes 'dark' so:
+//   - <html data-theme> on every request renders dark
+//   - The boot script in app/layout.tsx pins data-theme='dark'
+//     unconditionally too (cookie ignored)
+//   - The ThemeToggle component is removed from the sidebar +
+//     landing nav (one-shot — no switching)
+// We keep the COOKIE_NAME export because the (actions)/theme.ts
+// server action still imports it (kept on disk for revert
+// safety; calling it is a no-op until the toggle ships again).
 export async function getServerTheme(): Promise<Theme> {
-  const cookieStore = await cookies();
-  const fromCookie = cookieStore.get(COOKIE_NAME)?.value as Theme | undefined;
-  if (fromCookie === 'light' || fromCookie === 'dark') return fromCookie;
-
-  // Browsers that support client-hints expose Sec-CH-Prefers-Color-Scheme.
-  // Most browsers don't send it without an Accept-CH negotiation, so this
-  // is best-effort. The inline script in the layout is the real fallback.
-  const headerStore = await headers();
-  const prefer = headerStore.get('sec-ch-prefers-color-scheme');
-  if (prefer === 'light') return 'light';
-
-  // PR Sprint 7.25 Phase 1 — dark-first default for new visitors.
-  // The platform redesign is dark-first; defaulting unset visitors
-  // to dark surfaces the new visuals immediately. Existing users
-  // already have helm-theme=light on their cookie and stay on
-  // light until they actively toggle. Users with
-  // prefers-color-scheme: light still get light (explicit signal
-  // wins over the dark-first default).
   return 'dark';
 }
 
