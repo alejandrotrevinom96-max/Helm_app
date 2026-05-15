@@ -8,9 +8,11 @@
 //
 // We fetch the toggle state on mount so a hard refresh doesn't show
 // it stuck on the wrong value.
+//
+// PR Sprint 7.25 Phase 2 — repainted on top of the platform redesign
+// (green-glow card, big 52x28 toggle, mono ghost-link footer). All
+// API integrations are untouched.
 import { useEffect, useState } from 'react';
-import { GlassCard } from '@/components/ui/glass-card';
-import { Switch } from '@/components/ui/switch';
 
 interface Props {
   /** Active project ID used by the test-brief button. */
@@ -47,8 +49,9 @@ export function WeeklyBriefConfig({ projectId }: Props) {
     };
   }, []);
 
-  const toggle = async (next: boolean) => {
-    if (saving) return;
+  const toggle = async () => {
+    if (saving || loading) return;
+    const next = !enabled;
     setSaving(true);
     setFeedback(null);
     // Optimistic — flip the UI immediately, revert on failure.
@@ -122,38 +125,49 @@ export function WeeklyBriefConfig({ projectId }: Props) {
   };
 
   return (
-    <GlassCard className="p-5">
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex-1 min-w-0">
-          <h2 className="font-display text-xl font-light mb-1">
-            Weekly Audience Brief
-          </h2>
-          <p className="text-sm text-text-3 max-w-prose">
+    <section className="platform-card platform-card-glow-green platform-reveal-2">
+      <div className="platform-brief-head">
+        <div>
+          <h2 className="platform-h2">Weekly Audience Brief</h2>
+          <p className="platform-desc">
             Every Monday morning, we&apos;ll email you a brief with the pain
-            points your audience discussed this week, 5 ready-to-post angles
-            in your voice, and a recap of what worked / flopped.
+            points your audience discussed this week,{' '}
+            <b>5 ready-to-post angles</b> in your voice, and a recap of what
+            worked / flopped.
           </p>
         </div>
-        <Switch
-          checked={enabled}
-          onCheckedChange={toggle}
+        <button
+          type="button"
+          role="switch"
+          aria-checked={enabled}
+          aria-label="Toggle Weekly Brief email"
           disabled={loading || saving}
-          label="Toggle Weekly Brief email"
+          onClick={toggle}
+          className={`platform-toggle-big${enabled ? '' : ' platform-toggle-off'}`}
         />
       </div>
 
       {enabled && (
-        <div className="mt-4 pt-4 border-t border-border flex items-center gap-3">
+        <div className="platform-card-foot">
           <button
             type="button"
             onClick={sendTest}
             disabled={!projectId || testing}
-            className="text-xs font-mono text-accent hover:opacity-80 disabled:opacity-50"
+            className="platform-ghost-link"
           >
-            {testing ? 'Sending…' : 'Send test brief now →'}
+            {testing ? 'Sending…' : 'Send test brief now'}
+            <svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden>
+              <path
+                d="M3 8h10M9 4l4 4-4 4"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
           </button>
           {!projectId && (
-            <span className="text-xs text-text-3">
+            <span className="platform-field-help">
               (no active project to brief)
             </span>
           )}
@@ -162,17 +176,18 @@ export function WeeklyBriefConfig({ projectId }: Props) {
 
       {feedback && (
         <div
-          className={`mt-3 text-xs ${
+          className={`platform-field-help ${
             feedback.kind === 'error'
               ? 'text-danger'
               : feedback.kind === 'success'
-                ? 'text-emerald-500'
-                : 'text-text-2'
+                ? 'text-success'
+                : ''
           }`}
+          style={{ marginTop: '10px' }}
         >
           {feedback.msg}
         </div>
       )}
-    </GlassCard>
+    </section>
   );
 }

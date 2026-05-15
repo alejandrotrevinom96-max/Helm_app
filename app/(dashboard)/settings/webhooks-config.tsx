@@ -1,9 +1,13 @@
 'use client';
 
+// PR #40 — webhook config card. POSTs to /api/settings/webhook
+// for URL save / secret regen / removal / test-ping. All backend
+// behavior unchanged.
+//
+// PR Sprint 7.25 Phase 2 — repainted on top of the platform redesign
+// (blue-glow card, mono eyebrow, native <details> payload preview,
+// orange "Generate" secret action, primary orange CTA).
 import { useState, useEffect } from 'react';
-import { Button } from '@/components/ui/button';
-import { GlassCard } from '@/components/ui/glass-card';
-import { Skeleton } from '@/components/ui/skeleton';
 
 export function WebhooksConfig() {
   const [url, setUrl] = useState('');
@@ -104,109 +108,134 @@ export function WebhooksConfig() {
     setFeedback({ kind: 'success', msg: 'Webhook removed' });
   };
 
-  if (loading) return <Skeleton className="h-64 w-full" />;
+  if (loading) {
+    return (
+      <section className="platform-card platform-card-glow-blue platform-reveal-3">
+        <div className="platform-lbl">Webhooks</div>
+        <h2 className="platform-h2">Webhook delivery</h2>
+        <p className="platform-desc">Loading…</p>
+      </section>
+    );
+  }
 
   return (
-    <GlassCard className="p-6 space-y-5">
-      <div>
-        <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2">
-          Webhooks
-        </div>
-        <h3 className="font-display text-xl font-light mb-2">
-          Webhook delivery
-        </h3>
-        <p className="text-sm text-text-2">
-          When a scheduled post is due, Helm POSTs to your URL. Useful for
-          Zapier, n8n, Buffer, or any custom automation.
-        </p>
-      </div>
+    <section className="platform-card platform-card-glow-blue platform-reveal-3">
+      <div className="platform-lbl">Webhooks</div>
+      <h2 className="platform-h2">Webhook delivery</h2>
+      <p className="platform-desc">
+        When a scheduled post is due, Helm POSTs to your URL. Useful for{' '}
+        <b>Zapier</b>, <b>n8n</b>, <b>Buffer</b>, or any custom automation.
+      </p>
 
-      <div>
-        <label className="block text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2">
+      <div className="platform-field">
+        <label className="platform-field-label" htmlFor="webhook-url">
           Webhook URL
         </label>
         <input
+          id="webhook-url"
           type="url"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           placeholder="https://your-server.com/webhook"
-          className="w-full bg-bg-elev border border-border rounded-lg px-3 py-2 text-sm outline-none focus:border-accent"
+          className="platform-input"
         />
-        <p className="text-xs text-text-3 mt-1">
-          Must be HTTPS (HTTP allowed only for localhost testing).
+        <p className="platform-field-help">
+          Must be HTTPS (HTTP allowed only for{' '}
+          <code>localhost</code> testing).
         </p>
       </div>
 
-      <div>
-        <label className="block text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2">
-          Signing secret
-        </label>
+      <div className="platform-field">
+        <div className="platform-field-label">Signing secret</div>
         {revealedSecret ? (
           <div>
-            <code className="block text-xs bg-bg-elev px-3 py-2 rounded text-text-1 break-all">
-              {revealedSecret}
-            </code>
-            <p className="text-xs text-amber-500 mt-2">
+            <code className="platform-secret-revealed">{revealedSecret}</code>
+            <p className="platform-field-help" style={{ color: 'var(--d-orange-2)' }}>
               ⚠ Copy this now. We won&apos;t show it again.
             </p>
           </div>
         ) : hasSecret ? (
-          <div className="flex items-center gap-2">
-            <code className="flex-1 text-xs bg-bg-elev px-3 py-2 rounded text-text-3">
+          <div className="platform-secret-row">
+            <code className="platform-secret-mask">
               ••••••••••••••••••••••••••••••••
             </code>
-            <Button variant="ghost" size="sm" onClick={generateSecret}>
+            <button
+              type="button"
+              onClick={generateSecret}
+              className="platform-secret-action"
+            >
               Regenerate
-            </Button>
+            </button>
           </div>
         ) : (
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-text-3">No secret set</span>
-            <Button variant="ghost" size="sm" onClick={generateSecret}>
+          <div className="platform-secret-row">
+            <span className="platform-secret-none">No secret set</span>
+            <button
+              type="button"
+              onClick={generateSecret}
+              className="platform-secret-action"
+            >
               Generate
-            </Button>
+            </button>
           </div>
         )}
-        <p className="text-xs text-text-3 mt-2">
-          Helm signs each payload with HMAC-SHA256 in header{' '}
-          <code className="text-text-2">X-Helm-Signature</code>.
+        <p className="platform-field-help">
+          Helm signs each payload with <code>HMAC-SHA256</code> in header{' '}
+          <code>X-Helm-Signature</code>.
         </p>
       </div>
 
-      <div className="flex flex-wrap gap-2 pt-2 border-t border-border">
-        <Button onClick={save} disabled={saving}>
+      <div className="platform-actions-row">
+        <button
+          type="button"
+          onClick={save}
+          disabled={saving}
+          className="platform-btn platform-btn-primary"
+        >
           {saving ? 'Saving…' : 'Save URL'}
-        </Button>
-        <Button
-          variant="secondary"
+        </button>
+        <button
+          type="button"
           onClick={testWebhook}
           disabled={testing || !url}
+          className="platform-btn platform-btn-ghost"
         >
           {testing ? 'Testing…' : 'Send test ping'}
-        </Button>
+        </button>
         {url && (
           <>
-            <div className="flex-1" />
-            <Button variant="ghost" size="sm" onClick={remove}>
+            <div style={{ flex: 1 }} />
+            <button
+              type="button"
+              onClick={remove}
+              className="platform-btn platform-btn-ghost"
+            >
               Remove
-            </Button>
+            </button>
           </>
         )}
       </div>
 
       {feedback && (
         <div
-          className={`text-sm ${feedback.kind === 'success' ? 'text-success' : 'text-danger'}`}
+          className="platform-field-help"
+          style={{
+            marginTop: '12px',
+            color:
+              feedback.kind === 'success'
+                ? 'var(--d-green-2)'
+                : 'var(--d-red-2)',
+          }}
         >
           {feedback.kind === 'success' ? '✓' : '⚠'} {feedback.msg}
         </div>
       )}
 
-      <details className="pt-2 border-t border-border">
-        <summary className="text-xs text-text-3 cursor-pointer hover:text-text-1">
+      <details className="platform-payload">
+        <summary className="platform-payload-summary">
           Sample payload structure
         </summary>
-        <pre className="mt-2 text-[11px] bg-bg-elev p-3 rounded overflow-auto leading-relaxed">{`{
+        <pre className="platform-payload-block">{`{
   "event": "scheduled_post.due",
   "timestamp": "2026-05-04T12:34:56.789Z",
   "data": {
@@ -216,13 +245,11 @@ export function WebhooksConfig() {
     "scheduledFor": "2026-05-04T12:30:00.000Z"
   }
 }`}</pre>
-        <p className="text-[11px] text-text-3 mt-2">
+        <p className="platform-field-help" style={{ marginTop: '8px' }}>
           Verify the signature server-side:{' '}
-          <code className="text-text-2">
-            HMAC_SHA256(secret, body) === header.split(&apos;=&apos;)[1]
-          </code>
+          <code>HMAC_SHA256(secret, body) === header.split(&apos;=&apos;)[1]</code>
         </p>
       </details>
-    </GlassCard>
+    </section>
   );
 }

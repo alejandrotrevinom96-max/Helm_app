@@ -15,8 +15,13 @@
 // `avatarType` so a saved selection always reflects the radio
 // state — even when the founder hasn't picked a stock avatar yet,
 // they can stage their intent.
+//
+// PR Sprint 7.25 Phase 2 — repainted on top of the platform redesign
+// (orange-glow card, avatar-option radio cards with active-state
+// orange glow, primary orange CTA). The picker modal keeps its
+// existing Tailwind utility classes because it's a modal layer
+// on top of every page — touching it would be a separate scope.
 import { useCallback, useEffect, useState } from 'react';
-import { GlassCard } from '@/components/ui/glass-card';
 import {
   uploadAvatarPhoto,
   isAvatarUploadFailure,
@@ -26,13 +31,6 @@ import type { AvatarOption } from '@/app/api/heygen/avatars/route';
 
 type AvatarType = 'stock' | 'photo' | 'twin';
 
-// PR Sprint 7.13 hotfix v2 — local state widens avatarType to
-// `AvatarType | null` so the UI can express the "no option
-// chosen yet" state. The API still persists one of the three
-// concrete strings (DB column defaults to 'stock'); we just
-// don't pre-check any radio at first render unless the saved
-// row has actual selection data (avatarId or photoUrl) backing
-// it.
 interface AvatarSettings {
   avatarType: AvatarType | null;
   avatarId: string | null;
@@ -52,20 +50,11 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
     photoUrl: null,
     voiceId: null,
   });
-  // PR Sprint 7.13 hotfix v2 — the larger picker lives in a
-  // modal overlay, not inline. Opens via a "Choose avatar" /
-  // "Change avatar" button under the stock option. Keeps the
-  // Settings card compact while giving the founder enough
-  // canvas to actually compare faces at a useful size.
   const [pickerOpen, setPickerOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [avatars, setAvatars] = useState<AvatarOption[]>([]);
   const [avatarsLoading, setAvatarsLoading] = useState(false);
   const [avatarsError, setAvatarsError] = useState<string | null>(null);
-  // PR Sprint 7.13 hotfix — gender filter on the avatar grid.
-  // 'all' is the default; the buttons toggle to 'male' or
-  // 'female' which filters the rendered grid client-side
-  // (HeyGen's /v2/avatars already returns the full list).
   const [genderFilter, setGenderFilter] = useState<
     'all' | 'male' | 'female'
   >('all');
@@ -73,19 +62,8 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
-  // Feature-flag echo — if HeyGen is disabled at deployment level
-  // we still render the card but show a banner explaining the
-  // settings persist for when the integration flips on.
   const [envDisabled, setEnvDisabled] = useState(false);
 
-  // Initial load — fetch the saved selection for this project.
-  // PR Sprint 7.13 hotfix v2: derive avatarType from whether
-  // the saved row has an actual avatarId / photoUrl. Pre-fix
-  // the API would default avatarType='stock' for every founder
-  // (because the DB column defaults to 'stock') even though no
-  // stock avatar had ever been picked — making the radio pre-
-  // check feel like an arbitrary opinion. Now: no selection
-  // signal in the row → no radio pre-checked.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -106,13 +84,8 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
           if (data.avatarType === 'photo' && data.photoUrl) {
             derived = 'photo';
           } else if (data.avatarType === 'twin') {
-            // Twin is locked but we honor a saved selection so
-            // the founder sees their intent persisted.
             derived = 'twin';
           } else if (data.avatarType === 'stock' && data.avatarId) {
-            // Only pre-check 'stock' when an avatarId is
-            // ACTUALLY saved — distinguishes "default fired" from
-            // "user picked stock".
             derived = 'stock';
           }
           setSettings({
@@ -157,9 +130,6 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
     }
   }, []);
 
-  // Lazy-load the stock avatar list only when the user is on the
-  // stock option (saves an upstream HeyGen call for photo-avatar
-  // users).
   useEffect(() => {
     if (settings.avatarType === 'stock' && avatars.length === 0) {
       void loadAvatars();
@@ -181,12 +151,6 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
   };
 
   const handleSave = async () => {
-    // PR Sprint 7.13 hotfix v2: refuse to save when no option
-    // is selected. The previous default-to-stock behavior meant
-    // the founder could click Save without picking anything and
-    // the DB would land with avatarType='stock' + avatarId=null
-    // (which the gate then treats as "not ready" anyway). Now
-    // we surface a clear message instead of a confusing save.
     if (!settings.avatarType) {
       setSaveMessage('Pick an option first.');
       return;
@@ -208,7 +172,6 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
       if (settings.avatarType === 'photo') {
         body.photoUrl = settings.photoUrl;
       }
-      // Voice is optional across both flows.
       body.voiceId = settings.voiceId;
 
       const res = await fetch(`/api/projects/${projectId}/heygen-avatar`, {
@@ -222,9 +185,6 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
       if (!res.ok) {
         setSaveMessage(data.error ?? 'Save failed');
       } else {
-        // Mirror the same derive-from-saved-data rule as the
-        // initial load so a save → reload → save round-trip is
-        // idempotent.
         const savedType = data.avatarType as AvatarType | undefined;
         let derived: AvatarType | null = null;
         if (savedType === 'photo' && data.photoUrl) derived = 'photo';
@@ -247,283 +207,345 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
 
   if (loading) return null;
 
+  const pickRadio = (next: AvatarType) =>
+    setSettings((prev) => ({ ...prev, avatarType: next }));
+
   return (
-    <GlassCard className="p-6">
-      <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2">
-        Video Avatar
-      </div>
-      <h3 className="font-display text-xl font-light mb-1">
-        Avatar for AI video generation
-      </h3>
-      <p className="text-sm text-text-2 mb-5">
-        Helm uses this avatar to turn Reel and UGC scripts into talking-
-        head videos. Stock avatars ship immediately; uploaded photos take
-        5 - 10 minutes per render.
+    <section className="platform-card platform-card-glow-orange platform-reveal-4">
+      <div className="platform-lbl">Video avatar</div>
+      <h2 className="platform-h2">Avatar for AI video generation</h2>
+      <p className="platform-desc">
+        Helm uses this avatar to turn Reel and UGC scripts into talking-head
+        videos. Stock avatars ship immediately; uploaded photos take{' '}
+        <b>5–10 minutes per render</b>.
       </p>
 
       {envDisabled && (
-        <div className="mb-5 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg text-xs text-amber-600">
+        <div
+          className="platform-field-help"
+          style={{
+            marginTop: '12px',
+            padding: '10px 12px',
+            borderRadius: '10px',
+            background: 'rgba(249,115,22,0.08)',
+            border: '1px solid rgba(249,115,22,0.32)',
+            color: 'var(--d-orange-2)',
+          }}
+        >
           AI video isn&apos;t enabled on this deployment yet. Your selection
-          will save and apply automatically once we flip the integration
-          on.
+          will save and apply automatically once we flip the integration on.
         </div>
       )}
 
-      <div className="space-y-3">
+      <div style={{ marginTop: '14px' }}>
         {/* Option A — Stock */}
-        <label
-          className={`block p-4 rounded-lg border cursor-pointer transition-colors ${
+        <div
+          role="radio"
+          tabIndex={0}
+          aria-checked={settings.avatarType === 'stock'}
+          onClick={() => pickRadio('stock')}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              pickRadio('stock');
+            }
+          }}
+          className={`platform-avatar-option${
             settings.avatarType === 'stock'
-              ? 'border-accent bg-accent-soft'
-              : 'border-border hover:border-border-bright'
+              ? ' platform-avatar-option-on'
+              : ''
           }`}
         >
-          <div className="flex items-start gap-3">
-            <input
-              type="radio"
-              name="avatarType"
-              value="stock"
-              checked={settings.avatarType === 'stock'}
-              onChange={() =>
-                setSettings((prev) => ({ ...prev, avatarType: 'stock' }))
-              }
-              className="mt-1"
-            />
-            <div className="flex-1">
-              <div className="text-sm font-medium text-text-1 mb-1">
-                Use a stock avatar
-              </div>
-              <div className="text-xs text-text-3 mb-3">
-                Pick from our curated catalog. Fastest path —
-                videos render in ~2 minutes.
-              </div>
+          <span className="platform-avatar-radio" aria-hidden />
+          <div className="platform-avatar-body">
+            <h4>Use a stock avatar</h4>
+            <p>
+              Pick from our curated catalog. Fastest path — videos render in
+              ~2 minutes.
+            </p>
 
-              {settings.avatarType === 'stock' && (
-                <div className="space-y-3">
-                  {/* PR Sprint 7.13 hotfix v2 — picker moved to a
-                      full-width modal. The inline section is now
-                      compact: shows the SELECTED avatar (or a
-                      single "Choose avatar →" CTA when none is
-                      picked yet) plus a "Change" button that
-                      opens the picker. Bigger thumbnails inside
-                      the modal let the founder actually see
-                      faces at a useful resolution. */}
-                  {avatarsLoading && (
-                    <div className="flex items-center gap-3">
-                      <div className="w-24 h-24 rounded-lg bg-bg-elev animate-pulse" />
-                      <div className="space-y-2 flex-1">
-                        <div className="h-3 w-32 rounded bg-bg-elev animate-pulse" />
-                        <div className="h-2 w-20 rounded bg-bg-elev animate-pulse" />
-                      </div>
-                    </div>
-                  )}
-                  {avatarsError && (
-                    <div className="text-xs text-danger">
-                      {avatarsError}
-                    </div>
-                  )}
+            {settings.avatarType === 'stock' && (
+              <div className="platform-avatar-body-inner">
+                {avatarsLoading && (
+                  <div className="platform-field-help">Loading catalog…</div>
+                )}
+                {avatarsError && (
+                  <div className="platform-field-help" style={{ color: 'var(--d-red-2)' }}>
+                    {avatarsError}
+                  </div>
+                )}
 
-                  {!avatarsLoading && !avatarsError && (
-                    <>
-                      {(() => {
-                        const selected = settings.avatarId
-                          ? avatars.find(
-                              (a) => a.avatarId === settings.avatarId,
-                            )
-                          : null;
-                        if (selected) {
-                          return (
-                            <div className="flex items-center gap-4">
-                              <div className="relative shrink-0 w-24 h-24 rounded-lg overflow-hidden border-2 border-accent">
-                                {selected.previewImageUrl ? (
-                                  // eslint-disable-next-line @next/next/no-img-element
-                                  <img
-                                    src={selected.previewImageUrl}
-                                    alt={selected.name}
-                                    className="w-full h-full object-cover bg-bg-elev"
-                                  />
-                                ) : (
-                                  <div className="w-full h-full flex items-center justify-center bg-bg-elev text-text-3">
-                                    ◯
-                                  </div>
-                                )}
-                                {selected.premium && (
-                                  <span className="absolute top-1 left-1 text-[8px] font-mono uppercase tracking-[0.08em] font-bold px-1 py-0.5 rounded bg-accent text-white">
-                                    Premium
-                                  </span>
-                                )}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="text-sm font-medium text-text-1 truncate">
-                                  {selected.name}
-                                </div>
-                                {selected.gender && (
-                                  <div className="text-[11px] font-mono uppercase tracking-[0.1em] text-text-3 mt-0.5">
-                                    {selected.gender}
-                                  </div>
-                                )}
-                                <button
-                                  type="button"
-                                  onClick={() => setPickerOpen(true)}
-                                  className="mt-2 text-xs text-accent hover:underline"
-                                >
-                                  Change avatar →
-                                </button>
-                              </div>
+                {!avatarsLoading && !avatarsError && (() => {
+                  const selected = settings.avatarId
+                    ? avatars.find((a) => a.avatarId === settings.avatarId)
+                    : null;
+                  if (selected) {
+                    return (
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '14px',
+                          padding: '12px 14px',
+                          borderRadius: '12px',
+                          background: 'rgba(255,255,255,0.03)',
+                          border: '1px solid var(--border)',
+                        }}
+                      >
+                        <div
+                          style={{
+                            width: '56px',
+                            height: '56px',
+                            borderRadius: '12px',
+                            overflow: 'hidden',
+                            border: '2px solid var(--d-orange)',
+                            flex: '0 0 auto',
+                            background: 'var(--bg-elev)',
+                          }}
+                        >
+                          {selected.previewImageUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={selected.previewImageUrl}
+                              alt={selected.name}
+                              style={{
+                                width: '100%',
+                                height: '100%',
+                                objectFit: 'cover',
+                              }}
+                            />
+                          ) : (
+                            <div
+                              style={{
+                                width: '100%',
+                                height: '100%',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                color: 'var(--text-3)',
+                              }}
+                            >
+                              ◯
                             </div>
-                          );
-                        }
-                        return (
+                          )}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div
+                            style={{
+                              fontSize: '14px',
+                              fontWeight: 600,
+                              color: 'var(--text-1)',
+                            }}
+                          >
+                            {selected.name}
+                          </div>
+                          {selected.gender && (
+                            <div
+                              style={{
+                                fontFamily: 'JetBrains Mono, monospace',
+                                fontSize: '10px',
+                                letterSpacing: '0.12em',
+                                textTransform: 'uppercase',
+                                color: 'var(--text-3)',
+                                marginTop: '2px',
+                              }}
+                            >
+                              {selected.gender}
+                            </div>
+                          )}
                           <button
                             type="button"
-                            onClick={() => setPickerOpen(true)}
-                            className="w-full p-4 rounded-lg border border-dashed border-border-bright hover:border-accent hover:bg-accent-soft transition-colors text-sm text-text-2 hover:text-text-1"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setPickerOpen(true);
+                            }}
+                            className="platform-ghost-link"
+                            style={{ marginTop: '6px' }}
                           >
-                            🎬 Choose avatar →
-                            <span className="block text-[11px] text-text-3 mt-1">
-                              Browse the stock avatar catalog
-                              ({avatars.length} available)
-                            </span>
+                            Change avatar
+                            <svg
+                              width="10"
+                              height="10"
+                              viewBox="0 0 16 16"
+                              fill="none"
+                              aria-hidden
+                            >
+                              <path
+                                d="M3 8h10M9 4l4 4-4 4"
+                                stroke="currentColor"
+                                strokeWidth="1.8"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                            </svg>
                           </button>
-                        );
-                      })()}
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
+                        </div>
+                      </div>
+                    );
+                  }
+                  return (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPickerOpen(true);
+                      }}
+                      className="platform-btn platform-btn-ghost"
+                      style={{ width: '100%', justifyContent: 'center' }}
+                    >
+                      🎬 Choose avatar →{' '}
+                      <span style={{ color: 'var(--text-3)', fontWeight: 400 }}>
+                        ({avatars.length} available)
+                      </span>
+                    </button>
+                  );
+                })()}
+              </div>
+            )}
           </div>
-        </label>
+        </div>
 
-        {/* Option B — Photo Avatar IV */}
-        <label
-          className={`block p-4 rounded-lg border cursor-pointer transition-colors ${
+        {/* Option B — Photo */}
+        <div
+          role="radio"
+          tabIndex={0}
+          aria-checked={settings.avatarType === 'photo'}
+          onClick={() => pickRadio('photo')}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              pickRadio('photo');
+            }
+          }}
+          className={`platform-avatar-option${
             settings.avatarType === 'photo'
-              ? 'border-accent bg-accent-soft'
-              : 'border-border hover:border-border-bright'
+              ? ' platform-avatar-option-on'
+              : ''
           }`}
         >
-          <div className="flex items-start gap-3">
-            <input
-              type="radio"
-              name="avatarType"
-              value="photo"
-              checked={settings.avatarType === 'photo'}
-              onChange={() =>
-                setSettings((prev) => ({ ...prev, avatarType: 'photo' }))
-              }
-              className="mt-1"
-            />
-            <div className="flex-1">
-              <div className="text-sm font-medium text-text-1 mb-1">
-                Use my photo
-              </div>
-              <div className="text-xs text-text-3 mb-3">
-                Upload a single portrait — Helm turns it into a talking-
-                head avatar. JPG, PNG, or WebP. Max{' '}
-                {AVATAR_MAX_BYTES / (1024 * 1024)} MB.
-              </div>
+          <span className="platform-avatar-radio" aria-hidden />
+          <div className="platform-avatar-body">
+            <h4>Use my photo</h4>
+            <p>
+              Upload a single portrait — Helm turns it into a talking-head
+              avatar. JPG, PNG, or WebP. Max{' '}
+              {AVATAR_MAX_BYTES / (1024 * 1024)} MB.
+            </p>
 
-              {settings.avatarType === 'photo' && (
-                <div className="space-y-3">
-                  <input
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (f) void handleUpload(f);
+            {settings.avatarType === 'photo' && (
+              <div
+                className="platform-avatar-body-inner"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) void handleUpload(f);
+                  }}
+                  disabled={uploading}
+                  className="platform-field-help"
+                  style={{ color: 'var(--text-2)' }}
+                />
+                {uploading && (
+                  <div className="platform-field-help" style={{ marginTop: '8px' }}>
+                    Uploading…
+                  </div>
+                )}
+                {uploadError && (
+                  <div
+                    className="platform-field-help"
+                    style={{ marginTop: '8px', color: 'var(--d-red-2)' }}
+                  >
+                    {uploadError}
+                  </div>
+                )}
+                {settings.photoUrl && !uploading && (
+                  <div
+                    style={{
+                      marginTop: '10px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '12px',
                     }}
-                    disabled={uploading}
-                    className="block text-xs text-text-2 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:bg-accent file:text-white file:hover:opacity-90 file:cursor-pointer cursor-pointer disabled:opacity-50"
-                  />
-                  {uploading && (
-                    <div className="text-xs text-text-3">Uploading…</div>
-                  )}
-                  {uploadError && (
-                    <div className="text-xs text-danger">{uploadError}</div>
-                  )}
-                  {settings.photoUrl && !uploading && (
-                    <div className="flex items-center gap-3">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={settings.photoUrl}
-                        alt="Avatar preview"
-                        className="w-20 h-20 object-cover rounded-lg border border-border"
-                      />
-                      <div className="text-xs text-text-3">
-                        Preview · ready to save
-                      </div>
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={settings.photoUrl}
+                      alt="Avatar preview"
+                      style={{
+                        width: '64px',
+                        height: '64px',
+                        objectFit: 'cover',
+                        borderRadius: '12px',
+                        border: '1px solid var(--border)',
+                      }}
+                    />
+                    <div className="platform-field-help">
+                      Preview · ready to save
                     </div>
-                  )}
-                </div>
-              )}
-            </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
-        </label>
+        </div>
 
         {/* Option C — Digital Twin (locked) */}
-        <label
-          className={`block p-4 rounded-lg border border-border opacity-60 cursor-not-allowed`}
+        <div
+          role="radio"
+          aria-checked={false}
+          aria-disabled
+          className="platform-avatar-option platform-avatar-option-disabled"
         >
-          <div className="flex items-start gap-3">
-            <input
-              type="radio"
-              name="avatarType"
-              value="twin"
-              disabled
-              checked={false}
-              readOnly
-              className="mt-1"
-            />
-            <div className="flex-1">
-              <div className="flex items-center gap-2 mb-1">
-                <span className="text-sm font-medium text-text-1">
-                  Record a video (15s)
-                </span>
-                <span className="text-[10px] font-mono uppercase tracking-[0.15em] px-2 py-0.5 bg-text-3/15 text-text-2 rounded">
-                  Coming soon
-                </span>
-              </div>
-              <div className="text-xs text-text-3">
-                Record a 15-second clip to train your own Digital Twin
-                avatar. Available in a future paid plan.
-              </div>
+          <span className="platform-avatar-radio" aria-hidden />
+          <div className="platform-avatar-body">
+            <div className="platform-avatar-head-row">
+              <h4>Record a video (15s)</h4>
+              <span className="platform-pill-soon">coming soon</span>
             </div>
+            <p>
+              Record a 15-second clip to train your own Digital Twin avatar.
+              Available in a future paid plan.
+            </p>
           </div>
-        </label>
+        </div>
       </div>
 
-      <div className="flex items-center justify-between mt-5 pt-5 border-t border-border">
-        <div className="text-xs text-text-3">
-          {saveMessage && (
-            <span
-              className={
+      <div
+        className="platform-actions-row"
+        style={{
+          justifyContent: 'flex-end',
+          marginTop: '22px',
+          paddingTop: '18px',
+          borderTop: '1px solid var(--border)',
+        }}
+      >
+        {saveMessage && (
+          <span
+            className="platform-field-help"
+            style={{
+              marginRight: 'auto',
+              color:
                 saveMessage === 'Saved ✓'
-                  ? 'text-emerald-500'
-                  : 'text-danger'
-              }
-            >
-              {saveMessage}
-            </span>
-          )}
-        </div>
+                  ? 'var(--d-green-2)'
+                  : 'var(--d-red-2)',
+            }}
+          >
+            {saveMessage}
+          </span>
+        )}
         <button
           type="button"
           onClick={handleSave}
           disabled={saving}
-          className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+          className="platform-btn platform-btn-primary"
         >
           {saving ? 'Saving…' : 'Save avatar settings'}
         </button>
       </div>
 
-      {/* PR Sprint 7.13 hotfix v2 — avatar picker modal. Renders
-          a full-screen overlay with the HeyGen catalog at a much
-          larger thumbnail size than the compact Settings card
-          allowed. Click a card → selects + closes (in-memory;
-          the founder still hits "Save avatar settings" to
-          persist). Backdrop click + Esc both dismiss without
-          changing the selection. */}
       {pickerOpen && (
         <AvatarPickerModal
           avatars={avatars}
@@ -537,17 +559,16 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
           onClose={() => setPickerOpen(false)}
         />
       )}
-    </GlassCard>
+    </section>
   );
 }
 
 // PR Sprint 7.13 hotfix v2 — picker modal extracted into its
 // own component to keep the main HeyGenAvatarConfig render tree
 // readable. Listens for Esc to close + locks body scroll while
-// open. Cards are deliberately larger than the inline grid
-// (aspect-[3/4] portrait, 2 cols mobile / 3 tablet / 4-5
-// desktop) so the founder can compare faces at a useful
-// resolution.
+// open. Kept on Tailwind utilities (not the platform-* class
+// set) because it's a modal layer that floats above every page
+// — restyling it falls outside the per-card Settings redesign.
 function AvatarPickerModal({
   avatars,
   selectedId,
@@ -563,7 +584,6 @@ function AvatarPickerModal({
   onSelect: (id: string) => void;
   onClose: () => void;
 }) {
-  // Esc to close.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
@@ -572,9 +592,6 @@ function AvatarPickerModal({
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  // Lock body scroll while the modal is open so the
-  // background page doesn't bounce when the user scrolls
-  // through 50+ avatars.
   useEffect(() => {
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
@@ -598,14 +615,7 @@ function AvatarPickerModal({
       aria-modal="true"
       role="dialog"
     >
-      {/* PR Sprint 7.13 hotfix v3 — modal grew to consume the
-          available viewport. Pre-fix the modal capped at
-          max-w-5xl (1024px) which on the founder's 1800px+
-          monitor left huge dead space to the right of the
-          catalog. Now: w-[96vw] floor with max-w-screen-2xl
-          ceiling and max-h-[95vh] so the grid breathes. */}
       <div className="bg-bg-elev border border-border rounded-2xl w-[96vw] max-w-screen-2xl max-h-[95vh] flex flex-col overflow-hidden shadow-2xl">
-        {/* Header */}
         <div className="px-5 md:px-7 py-4 border-b border-border flex items-start justify-between gap-4 shrink-0">
           <div>
             <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-1">
@@ -615,8 +625,8 @@ function AvatarPickerModal({
               Choose an avatar
             </h3>
             <p className="text-xs text-text-3 mt-1">
-              {filtered.length} of {avatars.length} avatars · click
-              one to select
+              {filtered.length} of {avatars.length} avatars · click one to
+              select
             </p>
           </div>
           <button
@@ -629,7 +639,6 @@ function AvatarPickerModal({
           </button>
         </div>
 
-        {/* Filter row */}
         <div className="px-5 md:px-7 py-3 border-b border-border flex flex-wrap gap-2 shrink-0">
           {(
             [
@@ -653,25 +662,12 @@ function AvatarPickerModal({
           ))}
         </div>
 
-        {/* Grid */}
         <div className="flex-1 overflow-y-auto px-5 md:px-7 py-5">
           {filtered.length === 0 ? (
             <div className="text-sm text-text-3 text-center py-12">
               No avatars match this filter.
             </div>
           ) : (
-            // PR Sprint 7.13 hotfix v4 — auto-fit grid replaces
-            // fixed breakpoint columns. The previous version
-            // declared explicit col counts per breakpoint and at
-            // narrow modal widths the columns just squeezed
-            // (e.g. 7 cols inside a 640px modal = ~90px per
-            // thumb — useless for face comparison). Now:
-            // `repeat(auto-fill, minmax(260px, 1fr))` enforces a
-            // 260px FLOOR per card; the browser fits as many as
-            // the modal width allows and stretches them to share
-            // remaining space. Cards never shrink below 260×347
-            // (3:4 aspect) so faces stay readable on every
-            // viewport.
             <div
               className="grid gap-5"
               style={{
@@ -710,31 +706,24 @@ function AvatarPickerModal({
                       </div>
                     )}
 
-                    {/* Gender badge (top-right) — bigger pill
-                        now that each card has 260px+ of room. */}
                     {genderLabel && (
                       <span className="absolute top-2.5 right-2.5 text-xs font-mono font-bold px-2 py-1 rounded-md bg-bg/90 text-text-1 backdrop-blur-sm">
                         {genderLabel}
                       </span>
                     )}
 
-                    {/* Premium badge (top-left) */}
                     {a.premium && (
                       <span className="absolute top-2.5 left-2.5 text-[11px] font-mono uppercase tracking-[0.08em] font-bold px-2 py-1 rounded-md bg-accent text-white">
                         Premium
                       </span>
                     )}
 
-                    {/* Name (bottom gradient) — bumped to base
-                        font size; cards are big enough now that
-                        the smaller name was an unforced loss. */}
                     <div className="absolute bottom-0 inset-x-0 p-3 bg-gradient-to-t from-black/85 via-black/50 to-transparent">
                       <div className="text-base font-medium text-white truncate leading-tight">
                         {a.name}
                       </div>
                     </div>
 
-                    {/* Selected overlay */}
                     {selected && (
                       <div className="absolute inset-0 flex items-center justify-center bg-accent/20 pointer-events-none">
                         <div className="w-14 h-14 rounded-full bg-accent text-white flex items-center justify-center text-2xl">
@@ -749,11 +738,10 @@ function AvatarPickerModal({
           )}
         </div>
 
-        {/* Footer hint */}
         <div className="px-5 md:px-7 py-3 border-t border-border text-[11px] text-text-3 shrink-0">
           Selecting an avatar updates the form. Remember to click{' '}
-          <span className="text-text-1">Save avatar settings</span>{' '}
-          to persist between sessions.
+          <span className="text-text-1">Save avatar settings</span> to persist
+          between sessions.
         </div>
       </div>
     </div>

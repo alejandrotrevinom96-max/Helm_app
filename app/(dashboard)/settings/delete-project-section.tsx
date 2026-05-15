@@ -6,11 +6,10 @@
 // "Delete project" opens <DeleteProjectModal> which gates the
 // destructive action behind a type-to-confirm prompt.
 //
-// Why client (not server): the modal has its own state machine
-// (closed → open → typing → submitting → success → redirect).
-// Keeping the wrapper as a client component means the section
-// + modal share open/close state directly without prop-drilling
-// or context.
+// PR Sprint 7.25 Phase 2 — repainted on top of the platform redesign
+// (red-glow danger card, danger eyebrow, btn-danger CTA). The modal
+// itself keeps its existing styling — restyling it sits outside
+// the per-card Settings redesign scope.
 
 import { useState } from 'react';
 import { DeleteProjectModal } from './delete-project-modal';
@@ -26,29 +25,25 @@ export function DeleteProjectSection({ projectId, projectName }: Props) {
   return (
     <>
       <section
-        className="rounded-2xl p-5 md:p-6 border border-danger/30"
-        style={{ background: 'rgba(232, 89, 63, 0.04)' }}
+        className="platform-card platform-card-danger platform-card-glow-red platform-reveal-5"
         aria-label="Danger zone"
       >
-        <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-danger mb-3">
-          Danger zone
-        </div>
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          <div className="min-w-0">
-            <h3 className="font-display text-lg font-light mb-1">
-              Delete project
-            </h3>
-            <p className="text-sm text-text-2 leading-relaxed">
-              Permanently delete{' '}
-              <strong className="text-text-1">{projectName}</strong>{' '}
-              and all its content, drafts, scheduled posts, and data.
+        <div className="platform-lbl platform-lbl-danger">Danger zone</div>
+        <h2 className="platform-h2" style={{ marginBottom: '12px' }}>
+          Delete project
+        </h2>
+        <div className="platform-danger-row">
+          <p className="platform-desc">
+            Permanently delete <b>{projectName}</b> and all its content,
+            drafts, scheduled posts, and data.{' '}
+            <b style={{ color: 'var(--d-red-2)' }}>
               This action cannot be undone.
-            </p>
-          </div>
+            </b>
+          </p>
           <button
             type="button"
             onClick={() => setOpen(true)}
-            className="shrink-0 inline-flex items-center justify-center px-4 py-2 bg-danger text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity"
+            className="platform-btn platform-btn-danger"
           >
             Delete project
           </button>

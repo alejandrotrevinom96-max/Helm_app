@@ -1,12 +1,21 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { getActiveProject } from '@/lib/active-project';
+import { AmbientBackground } from '@/components/ui/ambient-background';
 import { WebhooksConfig } from './webhooks-config';
 import { VisualsStatus } from './visuals-status';
 import { WeeklyBriefConfig } from './weekly-brief-config';
 import { HeygenAvatarConfig } from './heygen-avatar-config';
 import { DeleteProjectSection } from './delete-project-section';
 
+// PR Sprint 7.25 Phase 2 — Platform redesign lands first on /settings.
+// The page wraps every card in <AmbientBackground> (dark-only canvas
+// glow + dot grid + cursor light) and uses the new editorial page
+// header (88px Instrument Serif italic title + mono eyebrow). The
+// existing card components stayed at the same import path and
+// preserve every backend hookup (webhook PATCH, weekly-brief toggle,
+// HeyGen avatar PATCH, project delete) — only their visuals moved
+// to the new `platform-*` class set defined in app/globals.css.
 export default async function SettingsPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -18,13 +27,19 @@ export default async function SettingsPage() {
   const activeProject = await getActiveProject(user.id);
 
   return (
-    <div className="p-6 md:p-10 max-w-3xl">
-      <h1 className="font-display text-display-lg font-light tracking-tight mb-2">
-        Settings
-      </h1>
-      <p className="text-text-2 mb-8">Account configuration and integrations.</p>
+    <AmbientBackground accentTint="default">
+      <main className="platform-main">
+        <header className="platform-page-head platform-reveal-1">
+          <span className="platform-eyebrow">account · automation · danger</span>
+          <h1>
+            Settings<span className="accent">.</span>
+          </h1>
+          <p className="sub">
+            Account configuration and integrations. Configure once — Helm
+            keeps doing the work.
+          </p>
+        </header>
 
-      <div className="space-y-6">
         <WeeklyBriefConfig projectId={activeProject?.id ?? null} />
         <WebhooksConfig />
         <VisualsStatus />
@@ -52,7 +67,7 @@ export default async function SettingsPage() {
             projectName={activeProject.name}
           />
         )}
-      </div>
-    </div>
+      </main>
+    </AmbientBackground>
   );
 }
