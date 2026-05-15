@@ -167,9 +167,28 @@ const TYPES_NEED_VIDEO = new Set(['reel', 'ugc']);
 
 // Extract a clean script string from a structured draft. Different
 // templates name the script-bearing fields differently — reels
-// use hook + beats + caption, ugc uses opening + body + closing.
-// We concatenate whatever's present into a single string the
-// HeyGen worker can pass straight to the avatar.
+// PR Sprint 7.24 — UGC script extraction fix.
+//
+// Pre-fix this function read the legacy { opening, body, closing }
+// shape that pre-dated the UGCBundle port (Sprint 7.18). The real
+// structured payload for ugc and reel content types is a UGCBundle:
+//   { hook: { text, duration_seconds, delivery },
+//     body: [ { beat, text, duration_seconds, delivery }, ... ],
+//     cta: { text, duration_seconds, delivery },
+//     overlays: [...], caption, hashtags, metadata }
+//
+// Reading obj.opening/body/closing returned undefined, scriptText
+// resolved to null, and the heygenJobs row was NEVER created — so
+// for every UGC and reel generation the HeyGen pipeline silently
+// noop'd. From the founder's perspective: a video content type was
+// selected, a draft was saved, but no video ever got queued.
+//
+// The fix reads the bundle's hook.text + body[].text + cta.text in
+// order. This matches the canonical `scriptText` helper exported
+// from ugc-schema.ts but we don't import it directly to avoid a
+// Zod-parse round-trip on output that already passed validation
+// upstream (we trust the shape because UGCBundleSchema.safeParse
+// ran on `parsed` immediately before this function is called).
 function extractScriptText(
   contentType: string,
   structured: unknown,
@@ -178,25 +197,27 @@ function extractScriptText(
   const obj = structured as Record<string, unknown>;
   const parts: string[] = [];
 
-  // Reel: hook + beat dialogue/audio + caption.
-  if (contentType === 'reel') {
-    if (typeof obj.hook === 'string') parts.push(obj.hook);
-    if (Array.isArray(obj.beats)) {
-      for (const b of obj.beats) {
+  // Both 'reel' and 'ugc' content types map to the 'ugc' taxonomy
+  // (DB_TO_TAXONOMY in lib/ai/platform-tone.ts) and produce the
+  // UGCBundle shape. The original split branches dated from the
+  // pre-7.18 era when reel and ugc had different prompts.
+  if (contentType === 'reel' || contentType === 'ugc') {
+    const hook = obj.hook as Record<string, unknown> | undefined;
+    if (hook && typeof hook === 'object' && typeof hook.text === 'string') {
+      parts.push(hook.text);
+    }
+    if (Array.isArray(obj.body)) {
+      for (const b of obj.body) {
         if (b && typeof b === 'object') {
           const beat = b as Record<string, unknown>;
-          if (typeof beat.audio === 'string') parts.push(beat.audio);
+          if (typeof beat.text === 'string') parts.push(beat.text);
         }
       }
     }
-    if (typeof obj.caption === 'string') parts.push(obj.caption);
-  }
-
-  // UGC: opening + body + closing reads as a natural script.
-  if (contentType === 'ugc') {
-    if (typeof obj.opening === 'string') parts.push(obj.opening);
-    if (typeof obj.body === 'string') parts.push(obj.body);
-    if (typeof obj.closing === 'string') parts.push(obj.closing);
+    const cta = obj.cta as Record<string, unknown> | undefined;
+    if (cta && typeof cta === 'object' && typeof cta.text === 'string') {
+      parts.push(cta.text);
+    }
   }
 
   const joined = parts.filter((p) => p.trim().length > 0).join('\n\n');

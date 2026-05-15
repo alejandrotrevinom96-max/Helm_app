@@ -676,15 +676,19 @@ function DraftBody({
   payload: Record<string, unknown>;
 }) {
   switch (contentType) {
+    // PR Sprint 7.24 — both 'reel' and 'ugc' produce the UGCBundle
+    // shape (Sprint 7.18 taxonomy collapse) so they share the same
+    // view. Pre-fix this branch routed to ReelView/UgcView which
+    // each read the legacy {hook:string, beats:[]} or {opening,
+    // body, closing} shapes that no longer exist post-7.18.
     case 'reel':
-      return <ReelView payload={payload} />;
+    case 'ugc':
+      return <UgcBundleView payload={payload} />;
     case 'carousel':
       return <CarouselView payload={payload} />;
     case 'photo':
     case 'single_image':
       return <PhotoView payload={payload} />;
-    case 'ugc':
-      return <UgcView payload={payload} />;
     case 'community_post':
       return <CommunityPostView payload={payload} />;
     case 'text_post':
@@ -726,58 +730,182 @@ function asObjectArray(v: unknown): Record<string, unknown>[] {
 
 // ----- sub-views -------------------------------------------------------------
 
-function ReelView({ payload }: { payload: Record<string, unknown> }) {
-  const hook = asString(payload.hook);
-  const beats = asObjectArray(payload.beats);
-  const onScreen = asStringArray(payload.onScreenText);
-  const audio = asString(payload.audioSuggestion);
+// PR Sprint 7.24 — UGCBundle renderer. Replaces the legacy ReelView
+// and UgcView, both of which read pre-7.18 shapes that no longer
+// match what the generator produces. UGCBundle is a structured
+// teleprompter-friendly script with hook / body[] / cta / overlays
+// / caption / hashtags / metadata — see lib/voice-engine/ugc-schema.ts.
+//
+// Layout reads as a recordable script with timecodes so the founder
+// can use the card itself as their teleprompter:
+//   [HOOK · 0-Xs · delivery]
+//     "<hook text>"
+//   [BODY]
+//     Beat 1 (Xs · delivery): "<text>"
+//     Beat 2 (Ys · delivery): "<text>"
+//     ...
+//   [CTA · Xs · delivery]
+//     "<cta text>"
+//   [OVERLAYS]
+//     0.5s — "DROPPED"
+//     2.3s — "BUFFER ❌"
+//   [CAPTION]
+//     <caption text>
+//   [HASHTAGS]
+//     #tag1 #tag2 #tag3
+function UgcBundleView({ payload }: { payload: Record<string, unknown> }) {
+  const hook = (payload.hook ?? {}) as Record<string, unknown>;
+  const body = asObjectArray(payload.body);
+  const cta = (payload.cta ?? {}) as Record<string, unknown>;
+  const overlays = asObjectArray(payload.overlays);
   const caption = asString(payload.caption);
+  const hashtags = asStringArray(payload.hashtags);
+
+  const hookText = asString(hook.text);
+  const hookDur = typeof hook.duration_seconds === 'number'
+    ? hook.duration_seconds
+    : null;
+  const hookDelivery = asString(hook.delivery);
+
+  const ctaText = asString(cta.text);
+  const ctaDur = typeof cta.duration_seconds === 'number'
+    ? cta.duration_seconds
+    : null;
+  const ctaDelivery = asString(cta.delivery);
+
+  const totalDuration =
+    (hookDur ?? 0) +
+    body.reduce((sum, b) => {
+      const d = typeof b.duration_seconds === 'number' ? b.duration_seconds : 0;
+      return sum + d;
+    }, 0) +
+    (ctaDur ?? 0);
+
   return (
     <div className="space-y-4">
-      <div>
-        <Label>Hook (first 3s)</Label>
-        <p className="text-sm italic text-text-1">{hook}</p>
-      </div>
-      {beats.length > 0 && (
+      {hookText && (
         <div>
-          <Label>Beats</Label>
+          <Label>
+            Hook
+            {hookDur !== null && (
+              <span className="ml-2 normal-case tracking-normal text-text-3">
+                · {hookDur.toFixed(1)}s
+              </span>
+            )}
+            {hookDelivery && (
+              <span className="ml-2 normal-case tracking-normal text-accent">
+                · {hookDelivery}
+              </span>
+            )}
+          </Label>
+          <p className="text-sm italic text-text-1">&ldquo;{hookText}&rdquo;</p>
+        </div>
+      )}
+
+      {body.length > 0 && (
+        <div>
+          <Label>Body — {body.length} beat{body.length === 1 ? '' : 's'}</Label>
           <ol className="space-y-2">
-            {beats.map((b, i) => (
-              <li key={i} className="text-sm text-text-1">
-                <span className="font-mono text-text-3 mr-2">
-                  {asString(b.duration) || `${i + 1}.`}
-                </span>
-                {asString(b.visual)}
-                {asString(b.audio) && (
-                  <div className="text-xs text-text-3 ml-7">🎵 {asString(b.audio)}</div>
-                )}
-              </li>
-            ))}
+            {body.map((b, i) => {
+              const beat = typeof b.beat === 'number' ? b.beat : i + 1;
+              const text = asString(b.text);
+              const dur =
+                typeof b.duration_seconds === 'number' ? b.duration_seconds : null;
+              const delivery = asString(b.delivery);
+              return (
+                <li key={i} className="text-sm text-text-1">
+                  <div className="flex items-baseline gap-2 mb-0.5">
+                    <span className="font-mono text-[11px] text-text-3 shrink-0">
+                      Beat {beat}
+                    </span>
+                    {dur !== null && (
+                      <span className="font-mono text-[11px] text-text-3 shrink-0">
+                        · {dur.toFixed(1)}s
+                      </span>
+                    )}
+                    {delivery && (
+                      <span className="font-mono text-[11px] text-accent shrink-0">
+                        · {delivery}
+                      </span>
+                    )}
+                  </div>
+                  <p className="ml-0">&ldquo;{text}&rdquo;</p>
+                </li>
+              );
+            })}
           </ol>
         </div>
       )}
-      {onScreen.length > 0 && (
+
+      {ctaText && (
         <div>
-          <Label>On-screen text</Label>
-          <div className="flex flex-wrap gap-2">
-            {onScreen.map((t, i) => (
-              <span key={i} className="px-2 py-1 bg-bg-elev rounded text-xs">
-                &ldquo;{t}&rdquo;
+          <Label>
+            CTA
+            {ctaDur !== null && (
+              <span className="ml-2 normal-case tracking-normal text-text-3">
+                · {ctaDur.toFixed(1)}s
               </span>
-            ))}
-          </div>
+            )}
+            {ctaDelivery && (
+              <span className="ml-2 normal-case tracking-normal text-accent">
+                · {ctaDelivery}
+              </span>
+            )}
+          </Label>
+          <p className="text-sm italic text-text-1">&ldquo;{ctaText}&rdquo;</p>
         </div>
       )}
-      {audio && (
+
+      {totalDuration > 0 && (
+        <div className="text-[11px] font-mono text-text-3">
+          Total spoken duration: ~{totalDuration.toFixed(1)}s
+        </div>
+      )}
+
+      {overlays.length > 0 && (
         <div>
-          <Label>Audio</Label>
-          <p className="text-sm text-text-1">{audio}</p>
+          <Label>On-screen overlays · {overlays.length}</Label>
+          <ul className="space-y-1">
+            {overlays.map((o, i) => {
+              const trigger =
+                typeof o.trigger_at_seconds === 'number'
+                  ? o.trigger_at_seconds
+                  : null;
+              const dur =
+                typeof o.duration_seconds === 'number' ? o.duration_seconds : null;
+              const text = asString(o.text);
+              return (
+                <li
+                  key={i}
+                  className="text-xs text-text-1 flex items-baseline gap-2"
+                >
+                  <span className="font-mono text-text-3 shrink-0">
+                    {trigger !== null ? `${trigger.toFixed(1)}s` : '—'}
+                    {dur !== null ? `–${(trigger ?? 0 + dur).toFixed(1)}s` : ''}
+                  </span>
+                  <span className="px-2 py-0.5 bg-bg-elev rounded font-medium">
+                    {text}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
         </div>
       )}
+
       {caption && (
         <div>
           <Label>Caption ({caption.length} chars)</Label>
           <p className="text-sm whitespace-pre-wrap text-text-1">{caption}</p>
+        </div>
+      )}
+
+      {hashtags.length > 0 && (
+        <div>
+          <Label>Hashtags</Label>
+          <p className="text-xs text-text-2">
+            {hashtags.map((h) => `#${h}`).join(' ')}
+          </p>
         </div>
       )}
     </div>
@@ -841,29 +969,11 @@ function PhotoView({ payload }: { payload: Record<string, unknown> }) {
   );
 }
 
-function UgcView({ payload }: { payload: Record<string, unknown> }) {
-  return (
-    <div className="space-y-3">
-      <div>
-        <Label>Opening</Label>
-        <p className="text-sm italic text-text-1">{asString(payload.opening)}</p>
-      </div>
-      <div>
-        <Label>Body</Label>
-        <p className="text-sm whitespace-pre-wrap text-text-1">{asString(payload.body)}</p>
-      </div>
-      <div>
-        <Label>Closing</Label>
-        <p className="text-sm text-text-1">{asString(payload.closing)}</p>
-      </div>
-      {asString(payload.recommendedDuration) && (
-        <div className="text-[11px] font-mono text-text-3">
-          Duration: {asString(payload.recommendedDuration)}
-        </div>
-      )}
-    </div>
-  );
-}
+// PR Sprint 7.24 — UgcView removed. The legacy renderer read
+// payload.opening/body/closing which no longer exist post-7.18.
+// UGC content type now routes to UgcBundleView (above) which reads
+// the real UGCBundle shape: hook + body[] + cta + overlays + caption
+// + hashtags + metadata.
 
 function CommunityPostView({ payload }: { payload: Record<string, unknown> }) {
   return (
