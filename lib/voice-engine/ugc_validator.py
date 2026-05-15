@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import re
 
+from text_post_validator import check_x_not_y
 from ugc_schema import UGCBundle
 
 
@@ -100,6 +101,8 @@ def validate_ugc_bundle(bundle: UGCBundle) -> list[str]:
     failures.extend(_check_hook_specificity(bundle))
     failures.extend(_check_cta_not_sales_disguised(bundle))
     failures.extend(_check_swipe_test_self_report(bundle))
+    failures.extend(check_x_not_y(bundle.script_text))
+    failures.extend(check_x_not_y(bundle.caption))
 
     return failures
 
@@ -127,6 +130,8 @@ def validate_ugc_bundle(bundle: UGCBundle) -> list[str]:
     failures.extend(_check_caption_not_summary(bundle))
     failures.extend(_check_hook_quality(bundle))
     failures.extend(_check_swipe_test_self_report(bundle))
+    failures.extend(check_x_not_y(bundle.script_text))
+    failures.extend(check_x_not_y(bundle.caption))
 
     return failures
 

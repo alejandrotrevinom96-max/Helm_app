@@ -19,12 +19,92 @@ Usage:
         # Send failures back to the model for regeneration
         ...
 
-Version: 1.0
+Version: 2.0 (hook specificity score + sales-disguised CTA detector)
 """
 
 from __future__ import annotations
 
+import re
+
+from text_post_validator import check_x_not_y
 from ugc_schema import UGCBundle
+
+
+# ============================================================================
+# Constants for hook specificity scoring
+# ============================================================================
+
+NUMBER_PATTERN = re.compile(
+    r"\b\d+(?:[.,]\d+)?(?:k|m|hrs?|min|seconds?|secs?|years?|months?|weeks?|days?|x|%)?\b",
+    re.IGNORECASE,
+)
+DOLLAR_PATTERN = re.compile(r"\$\d+(?:[.,]\d+)?[km]?", re.IGNORECASE)
+
+CONFESSION_VERBS: set[str] = {
+    "used to", "dropped", "deleted", "spent", "wasted", "quit",
+    "stopped", "killed", "switched", "ditched", "fired", "tried",
+    "failed", "lost", "missed", "ignored", "regret", "burned",
+}
+
+NAMED_ENTITY_TOOLS: set[str] = {
+    "buffer", "hootsuite", "chatgpt", "claude", "gemini", "notion",
+    "reddit", "twitter", "linkedin", "tiktok", "instagram", "threads",
+    "facebook", "vercel", "supabase", "stripe", "canva", "figma",
+    "google", "youtube", "slack", "discord", "github", "intercom",
+    "hubspot", "salesforce", "airtable", "zapier", "make.com",
+    "n8n", "openai", "anthropic", "perplexity", "midjourney", "fal",
+    "heygen", "loom", "calendly", "shopify", "webflow", "framer",
+}
+
+VAGUE_NOUNS: set[str] = {
+    "thing", "things", "stuff", "something", "anything", "everything",
+    "nothing",
+}
+
+
+# ============================================================================
+# Sales-disguised CTA constants
+# ============================================================================
+
+SALES_CTA_PHRASES: tuple[str, ...] = (
+    "check out", "learn more", "click the link", "click below",
+    "sign up", "subscribe", "purchase", "buy now", "get yours",
+    "limited time", "don't miss", "act now", "swipe up to",
+    "link in bio to buy", "link in bio to purchase", "visit our website",
+    "visit my site", "shop now", "use code", "discount code",
+    "promo code", "order now", "claim your", "grab yours",
+)
+
+
+# ============================================================================
+# Public API
+# ============================================================================
+
+def validate_ugc_bundle(bundle: UGCBundle) -> list[str]:
+    """Run all soft validation rules against a UGCBundle.
+
+    Pydantic already enforced the schema. These checks catch the rules that
+    depend on cross-field relationships, platform-specific norms, or content
+    quality heuristics.
+
+    Returns:
+        Empty list if all validations pass. Otherwise, list of human-readable
+        failure messages suitable to send back to the model for regeneration.
+    """
+    failures: list[str] = []
+
+    failures.extend(_check_total_duration(bundle))
+    failures.extend(_check_overlay_timing_within_video(bundle))
+    failures.extend(_check_overlay_not_verbatim_repeat(bundle))
+    failures.extend(_check_caption_not_summary(bundle))
+    failures.extend(_check_hook_quality(bundle))
+    failures.extend(_check_hook_specificity(bundle))
+    failures.extend(_check_cta_not_sales_disguised(bundle))
+    failures.extend(_check_swipe_test_self_report(bundle))
+    failures.extend(check_x_not_y(bundle.script_text))
+    failures.extend(check_x_not_y(bundle.caption))
+
+    return failures
 
 
 # ============================================================================
@@ -50,6 +130,8 @@ def validate_ugc_bundle(bundle: UGCBundle) -> list[str]:
     failures.extend(_check_caption_not_summary(bundle))
     failures.extend(_check_hook_quality(bundle))
     failures.extend(_check_swipe_test_self_report(bundle))
+    failures.extend(check_x_not_y(bundle.script_text))
+    failures.extend(check_x_not_y(bundle.caption))
 
     return failures
 
@@ -172,4 +254,68 @@ def _check_swipe_test_self_report(bundle: UGCBundle) -> list[str]:
             "metadata.passes_swipe_test is false. The model self-reported the "
             "hook does not pass the 0.5-second swipe test. Regenerate the hook."
         ]
+    return []
+
+
+def _check_hook_specificity(bundle: UGCBundle) -> list[str]:
+    """Score the hook on specificity. Hooks below the threshold are rejected.
+
+    Scoring:
+      +1 if contains a specific number (with or without unit)
+      +1 if mentions a named tool/brand the audience recognizes
+      +1 if uses a confession verb (used to, dropped, deleted, tried, etc.)
+      -1 if relies on vague nouns (something, things, stuff)
+
+    Threshold: score < 0 fails. Score 0 passes (neutral hook with no penalty).
+    Score >= 1 is the target.
+    """
+    text = bundle.hook.text
+    text_lower = text.lower()
+    score = 0
+    matched_signals: list[str] = []
+
+    if NUMBER_PATTERN.search(text) or DOLLAR_PATTERN.search(text):
+        score += 1
+        matched_signals.append("number")
+
+    if any(tool in text_lower for tool in NAMED_ENTITY_TOOLS):
+        score += 1
+        matched_signals.append("named_brand")
+
+    if any(verb in text_lower for verb in CONFESSION_VERBS):
+        score += 1
+        matched_signals.append("confession_verb")
+
+    cleaned_words = set(re.findall(r"\b\w+\b", text_lower))
+    vague_hits = cleaned_words & VAGUE_NOUNS
+    if vague_hits:
+        score -= 1
+        matched_signals.append(f"vague_noun_penalty:{','.join(sorted(vague_hits))}")
+
+    if score < 0:
+        return [
+            f"Hook specificity score is {score} (need >= 0, ideally >= 1). "
+            f"Signals: {matched_signals or 'none'}. Hook: '{text}'. "
+            f"Either add specifics (number, brand, confession verb) or remove "
+            f"vague nouns ({', '.join(sorted(vague_hits)) if vague_hits else 'n/a'})."
+        ]
+    return []
+
+
+def _check_cta_not_sales_disguised(bundle: UGCBundle) -> list[str]:
+    """CTAs disguised as sales pitches kill conversion on UGC.
+
+    Detects common sales-style CTA phrases that should be replaced with
+    conversational asks ("comment X if...", "save this for later",
+    "tag a founder who...").
+    """
+    cta_lower = bundle.cta.text.lower()
+    for phrase in SALES_CTA_PHRASES:
+        if phrase in cta_lower:
+            return [
+                f"CTA contains sales phrase '{phrase}'. UGC CTAs should be "
+                f"conversational, not transactional. Rewrite as a question or "
+                f"invitation. Examples: 'Comment X if you've been here', "
+                f"'Save this for next sprint', 'Tag a founder who needs this'."
+            ]
     return []

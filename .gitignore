@@ -18,3 +18,7 @@ SECURITY_AUDIT.md
 
 # Local Claude Code state (lock files, scheduled tasks).
 .claude/
+
+# Python bytecode caches from the Helm Adaptive Voice Engine upstream.
+__pycache__/
+*.pyc
