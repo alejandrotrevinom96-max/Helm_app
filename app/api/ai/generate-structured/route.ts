@@ -100,6 +100,17 @@ import {
   flattenStructuredContentForValidation,
   validateTextPost,
 } from '@/lib/voice-engine/text-post-validator';
+// PR Sprint 7.22 Sprint B — Patch 2 product bridges. The matcher
+// picks the best pain → bridge match for this generation (Haiku
+// call, ~$0.001). When it returns a match, the formatted
+// PRODUCT_RELEVANCE block gets spliced into both the adaptive and
+// the fallback prompt paths so the model weaves the product into
+// the post organically instead of defaulting to a templated
+// disclosure.
+import {
+  formatBridgeForPrompt,
+  matchBridgeForPain,
+} from '@/lib/voice-engine/product-bridge-matcher';
 
 export const maxDuration = 60;
 
@@ -359,6 +370,48 @@ export async function POST(request: Request) {
   );
   const userPrompt = (prompt ?? '').trim() || 'Generate content based on brand context.';
 
+  // PR Sprint 7.22 Sprint B — Patch 2 product bridges. Run the LLM
+  // matcher ONCE per request (the painPoint is the same userPrompt
+  // for every content type in the batch). The result is reused
+  // across all subsequent buildAdaptivePrompt / buildGenerationPrompt
+  // calls inside the for-loop below.
+  //
+  // Skipped entirely when the project has no approved bridges (no
+  // Haiku call at all). On Haiku failure the matcher returns an
+  // empty BridgeMatch — never throws, never blocks generation.
+  let productRelevanceSection = '';
+  const projectBridges = bible?.painToProductBridges ?? [];
+  if (projectBridges.length > 0) {
+    try {
+      const match = await matchBridgeForPain({
+        painPoint: userPrompt,
+        availableBridges: projectBridges,
+      });
+      productRelevanceSection = formatBridgeForPrompt(match);
+      if (productRelevanceSection.length > 0) {
+        // Audit so operators can see which generations are getting
+        // bridge injection + which bridge fired. One row per request
+        // keeps the volume sane.
+        void logAudit({
+          userId: user.id,
+          projectId,
+          action: 'product_bridge_applied',
+          notes: `pain="${match.matchedPain}" confidence=${match.confidence.toFixed(2)}`.slice(
+            0,
+            500,
+          ),
+        }).catch(() => {
+          /* non-fatal */
+        });
+      }
+    } catch (err) {
+      console.warn(
+        '[generate-structured] bridge matcher threw — continuing without PRODUCT_RELEVANCE:',
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+
   // PR Sprint 7.14 — load Voice Memory + Performance Memory.
   // Best-effort: a DB failure leaves the blocks as their
   // "not-enough-data" stubs (the builders are tolerant) so a
@@ -500,6 +553,8 @@ ${LANGUAGE_INSTRUCTION_AUDIENCE}`;
               clientContext: voiceEngineCtx,
               painPoint: userPrompt,
               includeExamples: true,
+              // PR Sprint 7.22 Sprint B — bridge match (or empty).
+              productRelevanceSection,
             })
           : buildGenerationPrompt({
               platform: platformLower,
@@ -512,6 +567,8 @@ ${LANGUAGE_INSTRUCTION_AUDIENCE}`;
               // to the user message but measurably improves output
               // quality (LLMs pattern-match on the good/bad pairs).
               includeExamples: true,
+              // PR Sprint 7.22 Sprint B — bridge match (or empty).
+              productRelevanceSection,
             })
         : null;
 

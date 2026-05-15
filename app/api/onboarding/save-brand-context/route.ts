@@ -35,6 +35,12 @@ import {
 import { eq, and, desc } from 'drizzle-orm';
 import type { BrandBible } from '@/lib/types/brand';
 import { EMPTY_VOICE } from '@/lib/types/brand';
+// PR Sprint 7.22 Sprint B — Patch 2 product bridges. Fire-and-forget
+// background trigger that generates auto-approved bridges via the
+// Haiku intake when conditions are met (>=3 audience pain points,
+// no bridges yet, product framing present). The helper does the
+// gating internally so this call is always safe.
+import { maybeGenerateBridges } from '@/lib/voice-engine/maybe-generate-bridges';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -287,6 +293,20 @@ export async function POST(request: Request) {
     .update(projects)
     .set({ brandContext: nextBible })
     .where(eq(projects.id, projectId));
+
+  // PR Sprint 7.22 Sprint B — Patch 2 product bridges auto-trigger.
+  // Fire-and-forget: the helper checks gating conditions internally
+  // (audience.primary.painPoints >= 3, no bridges already, product
+  // framing present) and either generates a fresh set via the Haiku
+  // intake + auto-approves them, or no-ops silently. We deliberately
+  // do NOT await — the founder gets the save response immediately
+  // and bridges land in the background within ~5s.
+  //
+  // Triggering here means: every time the wizard saves the brand
+  // step, we re-check whether bridges should be generated. The
+  // helper is idempotent (won't run again once 3+ approved bridges
+  // exist), so re-saves are cheap.
+  void maybeGenerateBridges(projectId, user.id);
 
   return NextResponse.json({
     success: true,

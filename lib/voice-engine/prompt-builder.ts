@@ -52,6 +52,13 @@ export interface BuildAdaptivePromptOpts {
   painPoint: string;
   targetSub?: string | null;
   includeExamples?: boolean;
+  // PR Sprint 7.22 Sprint B — Patch 2 product bridges. The endpoint
+  // runs the LLM matcher BEFORE this function so the result arrives
+  // pre-formatted as a PRODUCT_RELEVANCE section string. We splice
+  // it between PAIN_POINT and CONTENT_TYPE_RULES when present and
+  // empty-string otherwise. Mirrors the same arg on
+  // buildGenerationPrompt (lib/ai/platform-tone.ts).
+  productRelevanceSection?: string;
 }
 
 export class VoiceEngineValidationError extends Error {
@@ -98,6 +105,13 @@ export function buildAdaptivePrompt(opts: BuildAdaptivePromptOpts): string {
     }
   }
 
+  // PR Sprint 7.22 Sprint B — Patch 2 product bridges. Splice the
+  // PRODUCT_RELEVANCE block (or empty string) right after PAIN_POINT
+  // so the model sees the product angle right after it learns what
+  // the post is about, but before format mechanics override the
+  // framing. Pre-built upstream by the matcher; nothing async here.
+  const productRelevance = opts.productRelevanceSection ?? '';
+
   return `${PROMPT_COMPOSITION_RULES}
 
 CLIENT CONTEXT (apply strongly, this is the client-specific intelligence):
@@ -105,7 +119,7 @@ ${dynamicContext}
 
 PAIN_POINT (what this post is about):
 ${opts.painPoint}
-${subLine}
+${subLine}${productRelevance}
 CONTENT_TYPE_RULES for ${contentTypeKey.toUpperCase()} (base format mechanics):
 ${contentRules}
 ${examplesSection}

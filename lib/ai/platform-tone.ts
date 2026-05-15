@@ -1113,6 +1113,13 @@ export interface BuildGenerationPromptArgs {
   // to A/B-compare against the legacy generate-then-clean flow,
   // or to shave ~3.5KB of prompt tokens in dev iteration.
   injectHumanize?: boolean;
+  // PR Sprint 7.22 Sprint B — Patch 2 product bridges. The endpoint
+  // runs the matcher (Haiku call) BEFORE this function so the result
+  // arrives pre-formatted as a PRODUCT_RELEVANCE section string. We
+  // splice it between PAIN_POINT and CONTENT_TYPE_RULES when present
+  // and empty-string otherwise. Pre-built (not awaited here) so this
+  // function stays synchronous and easy to test.
+  productRelevanceSection?: string;
 }
 
 export function buildGenerationPrompt(
@@ -1161,6 +1168,14 @@ export function buildGenerationPrompt(
   // resulting empty section keeps the surrounding spacing intact.
   const humanizeSection = injectHumanize ? `\n\n${HUMANIZE_RULES}\n` : '';
 
+  // PR Sprint 7.22 Sprint B — Patch 2 product bridges. The matcher
+  // ran upstream and returned a formatted PRODUCT_RELEVANCE block (or
+  // an empty string when no bridge applied). We splice it between
+  // PAIN_POINT and CONTENT_TYPE_RULES so the model sees the product's
+  // angle right after it knows what the post is about, but before
+  // format mechanics override the framing.
+  const productRelevance = args.productRelevanceSection ?? '';
+
   return `${PROMPT_COMPOSITION_RULES}${humanizeSection}
 
 BRAND_BIBLE:
@@ -1171,7 +1186,7 @@ ${args.voiceFingerprint}
 
 PAIN_POINT (what this post is about):
 ${args.painPoint}
-${subLine}
+${subLine}${productRelevance}
 CONTENT_TYPE_RULES for ${contentType.toUpperCase()} (base format mechanics):
 ${contentRules}
 ${examplesSection}
