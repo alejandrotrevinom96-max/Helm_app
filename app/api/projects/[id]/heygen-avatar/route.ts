@@ -14,8 +14,8 @@
 // to the content-preferences route.
 import { createClient } from '@/lib/supabase/server';
 import { db } from '@/lib/db';
-import { projects } from '@/lib/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { projects, heygenJobs } from '@/lib/db/schema';
+import { eq, and, inArray } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 
 const UUID_RE =
@@ -151,11 +151,64 @@ export async function PATCH(
 
   await db.update(projects).set(updates).where(eq(projects.id, id));
 
+  // PR Sprint 7.25 Phase 11.8 — re-queue stuck video jobs when the
+  // avatar config changes. Before this, a founder whose first
+  // generation failed with errorKind='voice_config' or
+  // 'not_configured' was stuck:
+  //   1. They open Settings, pick a working avatar.
+  //   2. They go back to the Generator card.
+  //   3. The auto-fire useEffect's ref is still TRUE so it doesn't
+  //      re-fire.
+  //   4. The cron's retry policy excludes voice_config errors.
+  //   5. The job sits at status='failed' forever.
+  // Now: any heygen_jobs row for this project with status='failed'
+  // gets promoted back to status='queued' + attemptCount=0 +
+  // cleared error fields. The heygen-worker cron picks it up
+  // within ~60s on the next tick, fires with the new avatar, and
+  // the founder's video renders without needing to click anything
+  // else. We only do this when the update actually touched avatar
+  // fields (not when only voice_id changed alone, which goes
+  // through the existing voice-fallback path).
+  const touchedAvatarFields =
+    'heygenAvatarType' in updates ||
+    'heygenAvatarId' in updates ||
+    'heygenPhotoUrl' in updates;
+  let requeuedCount = 0;
+  if (touchedAvatarFields) {
+    try {
+      const requeued = await db
+        .update(heygenJobs)
+        .set({
+          status: 'queued',
+          errorMessage: null,
+          errorKind: null,
+          attemptCount: 0,
+          completedAt: null,
+        })
+        .where(
+          and(
+            eq(heygenJobs.projectId, id),
+            inArray(heygenJobs.status, ['failed']),
+          ),
+        )
+        .returning({ id: heygenJobs.id });
+      requeuedCount = requeued.length;
+    } catch (err) {
+      // Don't fail the avatar save if the re-queue errors — the
+      // founder can manually retry from the Library. Log + move on.
+      console.warn(
+        '[heygen-avatar] re-queue failed jobs after avatar update:',
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+
   const refreshed = await loadOwnedProject(user.id, id);
   return NextResponse.json({
     avatarType: (refreshed?.heygenAvatarType ?? 'stock') as AvatarType,
     avatarId: refreshed?.heygenAvatarId ?? null,
     photoUrl: refreshed?.heygenPhotoUrl ?? null,
     voiceId: refreshed?.heygenVoiceId ?? null,
+    requeuedFailedJobs: requeuedCount,
   });
 }

@@ -1,5 +1,7 @@
 'use client';
 
+import { createPortal } from 'react-dom';
+
 // PR #86 — Sprint 7.10: Video Avatar settings card.
 //
 // Three radio options:
@@ -592,13 +594,45 @@ function AvatarPickerModal({
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
+  // PR Sprint 7.25 Phase 11.8 — lock scroll on BOTH document.body
+  // AND the dashboard's main scroll container. The dashboard
+  // layout puts pages inside <main className="overflow-y-auto"> —
+  // so locking body alone doesn't stop the page behind the modal
+  // from scrolling when the founder wheels over the avatar grid.
+  // We also lock html for safety.
   useEffect(() => {
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    const html = document.documentElement;
+    const body = document.body;
+    const main = document.querySelector(
+      'main.overflow-y-auto',
+    ) as HTMLElement | null;
+    const prevHtml = html.style.overflow;
+    const prevBody = body.style.overflow;
+    const prevMain = main?.style.overflow ?? '';
+    html.style.overflow = 'hidden';
+    body.style.overflow = 'hidden';
+    if (main) main.style.overflow = 'hidden';
     return () => {
-      document.body.style.overflow = prev;
+      html.style.overflow = prevHtml;
+      body.style.overflow = prevBody;
+      if (main) main.style.overflow = prevMain;
     };
   }, []);
+
+  // PR Sprint 7.25 Phase 11.8 — render in a portal to document.body
+  // so the modal escapes any ancestor that's creating a containing
+  // block for `position: fixed`. The Settings page lives inside
+  // <AmbientBackground> + the dashboard layout's <main> wrapper —
+  // any one of those (or their children) with a `transform`,
+  // `filter`, or `contain` value silently turns our fixed modal
+  // into an absolute one. Portaling sidesteps the issue entirely:
+  // the modal sits at the document root, fixed positioning works
+  // against the viewport unconditionally.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+  if (!mounted) return null;
 
   const filtered = avatars.filter((a) => {
     if (genderFilter === 'all') return true;
@@ -606,7 +640,7 @@ function AvatarPickerModal({
     return g.startsWith(genderFilter[0]);
   });
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-2 md:p-4"
       onClick={(e) => {
@@ -744,6 +778,7 @@ function AvatarPickerModal({
           between sessions.
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
