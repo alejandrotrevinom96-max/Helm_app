@@ -1129,6 +1129,14 @@ export interface BuildGenerationPromptArgs {
   // favor. Decided ONCE per request (not per content type) so the
   // archetype is consistent across a batch.
   varietyInstructionSection?: string;
+  // PR Sprint 7.22 Sprint E.2 — E1 voice idiosyncrasies. The
+  // endpoint runs the run-on-request refresher upstream and passes
+  // the formatted WRITER VOICE PROFILE block (or empty string when
+  // the project has < 10 posted samples on this platform). We
+  // splice it BEFORE VOICE_FINGERPRINT so the model sees the
+  // structured rules first and uses the raw samples as
+  // illustrations of those rules.
+  writerVoiceProfileSection?: string;
 }
 
 export function buildGenerationPrompt(
@@ -1193,12 +1201,23 @@ export function buildGenerationPrompt(
     ? `\n\n${args.varietyInstructionSection.trim()}\n`
     : '';
 
+  // PR Sprint 7.22 Sprint E.2 — E1 voice idiosyncrasies. The
+  // refresher ran upstream and returned a formatted WRITER VOICE
+  // PROFILE block (or empty when the project has < 10 posted
+  // samples). We splice it BEFORE VOICE_FINGERPRINT so the model
+  // sees the structured rules first and uses the raw samples as
+  // illustration of those rules. Empty string preserves the
+  // original layout when no profile is available.
+  const writerVoiceProfile = args.writerVoiceProfileSection
+    ? `${args.writerVoiceProfileSection.trim()}\n\n`
+    : '';
+
   return `${PROMPT_COMPOSITION_RULES}${humanizeSection}
 
 BRAND_BIBLE:
 ${args.brandBible}
 
-VOICE_FINGERPRINT (samples of the writer's actual past output):
+${writerVoiceProfile}VOICE_FINGERPRINT (samples of the writer's actual past output):
 ${args.voiceFingerprint}
 
 PAIN_POINT (what this post is about):

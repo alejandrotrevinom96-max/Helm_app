@@ -80,6 +80,12 @@ export interface BuildAdaptivePromptOpts {
   // PR Sprint 7.22 Sprint E.1 — F4 variety injection. Mirrors the
   // same arg on buildGenerationPrompt. Append-at-the-end semantics.
   varietyInstructionSection?: string;
+  // PR Sprint 7.22 Sprint E.2 — E1 voice idiosyncrasies. Mirrors
+  // the same arg on buildGenerationPrompt. Splices into the CLIENT
+  // CONTEXT block (which is what the adaptive path uses instead of
+  // a separate VOICE_FINGERPRINT line) by being appended to the
+  // dynamicContext output. Empty string when no profile available.
+  writerVoiceProfileSection?: string;
 }
 
 export class VoiceEngineValidationError extends Error {
@@ -148,10 +154,19 @@ export function buildAdaptivePrompt(opts: BuildAdaptivePromptOpts): string {
     ? `\n\n${opts.varietyInstructionSection.trim()}\n`
     : '';
 
+  // PR Sprint 7.22 Sprint E.2 — E1 voice idiosyncrasies. The
+  // adaptive path's CLIENT CONTEXT block already contains the
+  // raw voice fingerprint samples; we append the structured WRITER
+  // VOICE PROFILE right after so the model sees the rules + the
+  // samples that illustrate them as a single unit.
+  const writerVoiceProfile = opts.writerVoiceProfileSection
+    ? `\n\n${opts.writerVoiceProfileSection.trim()}`
+    : '';
+
   return `${PROMPT_COMPOSITION_RULES}${humanizeSection}
 
 CLIENT CONTEXT (apply strongly, this is the client-specific intelligence):
-${dynamicContext}
+${dynamicContext}${writerVoiceProfile}
 
 PAIN_POINT (what this post is about):
 ${opts.painPoint}

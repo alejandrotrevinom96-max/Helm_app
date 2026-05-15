@@ -130,6 +130,13 @@ import {
   shouldInjectVariety,
 } from '@/lib/voice-engine/variety-injector';
 import type { ArchetypeUsage, PostArchetype } from '@/lib/types/brand';
+// PR Sprint 7.22 Sprint E.2 — E1 voice idiosyncrasies. The
+// run-on-request refresher decides whether to use the cached
+// profile, kick off a background refresh, or extract synchronously
+// the first time. Returns null when the project hasn't shipped
+// >=10 posted samples on the platform.
+import { getOrRefreshIdiosyncrasies } from '@/lib/voice-engine/maybe-refresh-idiosyncrasies';
+import { formatIdiosyncrasiesAsPromptRules } from '@/lib/voice-engine/voice-idiosyncrasy-extractor';
 
 export const maxDuration = 60;
 
@@ -450,6 +457,32 @@ export async function POST(request: Request) {
     );
   }
 
+  // PR Sprint 7.22 Sprint E.2 — E1 voice idiosyncrasies refresh.
+  // Run-on-request: if the cached profile for this (project,
+  // platform) is fresh → use as-is; if stale → use cached + kick
+  // background refresh; if missing → extract synchronously (one-
+  // time cost, then cached). Returns null when the project has
+  // < 10 posted samples on this platform — the prompt builder
+  // gets an empty WRITER VOICE PROFILE section and skips the
+  // splice gracefully.
+  let writerVoiceProfileSection = '';
+  try {
+    const idio = await getOrRefreshIdiosyncrasies({
+      projectId,
+      userId: user.id,
+      platform: platformLowerForVariety,
+      bible,
+    });
+    if (idio) {
+      writerVoiceProfileSection = formatIdiosyncrasiesAsPromptRules(idio);
+    }
+  } catch (err) {
+    console.warn(
+      '[generate-structured] voice idiosyncrasies refresh failed (non-fatal):',
+      err instanceof Error ? err.message : err,
+    );
+  }
+
   let productRelevanceSection = '';
   const projectBridges = bible?.painToProductBridges ?? [];
   if (projectBridges.length > 0) {
@@ -628,6 +661,8 @@ ${LANGUAGE_INSTRUCTION_AUDIENCE}`;
               productRelevanceSection,
               // PR Sprint 7.22 Sprint E.1 — variety mode (or empty).
               varietyInstructionSection,
+              // PR Sprint 7.22 Sprint E.2 — writer voice profile.
+              writerVoiceProfileSection,
             })
           : buildGenerationPrompt({
               platform: platformLower,
@@ -644,6 +679,8 @@ ${LANGUAGE_INSTRUCTION_AUDIENCE}`;
               productRelevanceSection,
               // PR Sprint 7.22 Sprint E.1 — variety mode (or empty).
               varietyInstructionSection,
+              // PR Sprint 7.22 Sprint E.2 — writer voice profile.
+              writerVoiceProfileSection,
             })
         : null;
 
