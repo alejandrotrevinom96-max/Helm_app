@@ -132,6 +132,56 @@ export async function POST(request: Request) {
     if (!project)
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
+    // Cache short-circuit (PR Sprint 7.25 Phase 8) — when a draftId is
+    // attached and the draft already has a persisted imageUrl, return
+    // it instead of re-generating. The client now auto-fires this
+    // endpoint on card mount; without the cache, every Library /
+    // Generator re-mount would trigger a fresh ~$0.05 Flux call.
+    // Pass `?regenerate=1` to force a fresh generation (used by the
+    // "↻ Regenerate" button).
+    const reqUrl = new URL(request.url);
+    const forceRegen = reqUrl.searchParams.get('regenerate') === '1';
+    if (!forceRegen && draftId) {
+      try {
+        const [existing] = await db
+          .select({
+            imageUrl: generatedPosts.imageUrl,
+            imagePrompt: generatedPosts.imagePrompt,
+          })
+          .from(generatedPosts)
+          .where(
+            and(
+              eq(generatedPosts.id, draftId),
+              eq(generatedPosts.projectId, projectId),
+            ),
+          )
+          .limit(1);
+        if (existing?.imageUrl) {
+          return NextResponse.json({
+            ok: true,
+            cached: true,
+            visual: {
+              url: existing.imageUrl,
+              prompt: existing.imagePrompt ?? '',
+              width: 1024,
+              height: 1024,
+              cost: 0,
+              provider: 'cache',
+              persisted: true,
+            },
+          });
+        }
+      } catch (err) {
+        // Don't fail the request on a cache lookup error — fall
+        // through to the regenerate path so the founder still
+        // gets an image. Logged for diagnostics.
+        console.warn(
+          '[visuals/generate] cache lookup failed (non-fatal):',
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
+
     if (!process.env.FAL_API_KEY) {
       return NextResponse.json(
         {

@@ -126,6 +126,41 @@ export async function POST(
     );
   }
 
+  // Cache short-circuit — if every slide on this draft already has a
+  // persisted URL, return them instead of re-charging Flux. The
+  // client now auto-fires this endpoint on mount (PR Sprint 7.25
+  // Phase 8); without the cache, every Library visit would trigger
+  // a fresh ~$0.30 carousel regeneration. The Library / scheduler
+  // already trust visualUrls as the canonical source of truth, so
+  // re-emitting them here is the right answer for a re-mount.
+  //
+  // To force a fresh generation (the "↻ Regenerate" button) the
+  // client passes `?regenerate=1` — we honor that and skip the
+  // cache.
+  const url = new URL(request.url);
+  const forceRegen = url.searchParams.get('regenerate') === '1';
+  if (!forceRegen) {
+    const cached = (row.post.visualUrls as unknown) as
+      | (string | null)[]
+      | null;
+    if (
+      Array.isArray(cached) &&
+      cached.length > 0 &&
+      cached.every((u): u is string => typeof u === 'string' && u.length > 0)
+    ) {
+      return NextResponse.json({
+        success: true,
+        slidesGenerated: cached.length,
+        slidesRequested: cached.length,
+        failures: [],
+        visualUrls: cached,
+        persisted: true,
+        estimatedCostUsd: 0,
+        cached: true,
+      });
+    }
+  }
+
   const slides = extractSlides(row.post.structuredContent);
   if (slides.length === 0) {
     return NextResponse.json(

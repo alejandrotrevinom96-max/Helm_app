@@ -10,7 +10,7 @@
 // We keep this in components/marketing/ (new folder) instead of the
 // existing app/(dashboard)/marketing/draft-card.tsx so the legacy
 // Haiku-pillar-variants flow stays untouched.
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { GlassCard } from '@/components/ui/glass-card';
 
 interface Props {
@@ -127,6 +127,18 @@ export function StructuredDraftCard({
     urls: [],
   });
 
+  // PR Sprint 7.25 Phase 8 — auto-fire image generation on mount.
+  // Founders shouldn't have to click "Generate 8 slides" — Helm
+  // absorbs the Flux cost out of margin. The refs below dedupe the
+  // implicit auto-fire (we only want it once per card, not on every
+  // state-induced re-render or React 18 strict-mode double-mount).
+  // Both endpoints have a server-side cache short-circuit that
+  // returns persisted URLs without re-charging Flux, so a duplicate
+  // fire would be safe even without the ref — but the ref keeps the
+  // network noise off the developer console.
+  const autoFiredSlidesRef = useRef(false);
+  const autoFiredSingleRef = useRef(false);
+
   const handleCopy = async () => {
     if (structuredContent == null) return;
     try {
@@ -199,7 +211,7 @@ export function StructuredDraftCard({
     message?: string;
   }>({ kind: 'idle' });
 
-  const handleGenerateSingleImage = async () => {
+  const handleGenerateSingleImage = async (forceRegen = false) => {
     if (!draftId || singleImage.kind === 'generating') return;
     setSingleImage({ kind: 'generating' });
     try {
@@ -214,16 +226,24 @@ export function StructuredDraftCard({
         (typeof sc.content === 'string' && sc.content) ||
         'Generate a brand-aligned image for this post.';
 
-      const res = await fetch('/api/visuals/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          projectId,
-          platform,
-          postContent,
-          draftId,
-        }),
-      });
+      // PR Sprint 7.25 Phase 8 — pass `?regenerate=1` only when the
+      // founder explicitly clicked Regenerate. On the implicit
+      // auto-fire (mount) we want the server to return the cached
+      // image instantly when one exists so we don't re-charge Flux
+      // on every Library navigation.
+      const res = await fetch(
+        `/api/visuals/generate${forceRegen ? '?regenerate=1' : ''}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectId,
+            platform,
+            postContent,
+            draftId,
+          }),
+        },
+      );
       const data = (await res.json().catch(() => ({}))) as {
         ok?: boolean;
         visual?: { url?: string };
@@ -246,15 +266,22 @@ export function StructuredDraftCard({
     }
   };
 
-  // PR #65 — Sprint 7.0.8: kick off slide image generation. Each
-  // slide costs ~$0.05; we surface the total upfront so the
-  // founder consents to spend before the call fires.
-  const handleGenerateSlides = async () => {
+  // PR #65 — Sprint 7.0.8: kick off slide image generation.
+  //
+  // PR Sprint 7.25 Phase 8 — image generation is now AUTO-FIRED on
+  // mount (see useEffect below). Helm absorbs the cost (~$0.30 per
+  // carousel) — the founder doesn't see a cost prompt anymore.
+  // This handler still exists for the "↻ Regenerate" button.
+  // forceRegen=true bypasses the server-side cache, so Regenerate
+  // burns a fresh Flux pass. The implicit mount auto-fire passes
+  // forceRegen=false and gets the cached URLs instantly when the
+  // draft already has them (re-mount / Library nav case).
+  const handleGenerateSlides = async (forceRegen = false) => {
     if (!draftId || slides.kind === 'generating') return;
     setSlides({ ...slides, kind: 'generating', message: undefined });
     try {
       const res = await fetch(
-        `/api/marketing/posts/${draftId}/generate-slides`,
+        `/api/marketing/posts/${draftId}/generate-slides${forceRegen ? '?regenerate=1' : ''}`,
         { method: 'POST' },
       );
       const data = (await res.json()) as {
@@ -304,6 +331,51 @@ export function StructuredDraftCard({
   const payload = isPlainObject(structuredContent)
     ? (structuredContent as Record<string, unknown>)
     : null;
+
+  // PR Sprint 7.25 Phase 8 — auto-fire slide image generation on
+  // mount for carousels. Guarded by:
+  //   - draftId present (no DB row → nothing to attach images to)
+  //   - payload is a real object with at least one slide
+  //   - we haven't already fired (ref guard against re-renders +
+  //     React 18 strict-mode double-mounts)
+  //   - state is still idle (a fast re-render with stale closures
+  //     could otherwise fire after the user already kicked off a
+  //     manual regenerate)
+  // The server endpoint caches persisted URLs, so a re-mount on a
+  // carousel with images already saved returns instantly (cost = $0)
+  // and the state flips from 'generating' to 'ready' within ~200ms.
+  useEffect(() => {
+    if (autoFiredSlidesRef.current) return;
+    if (!draftId) return;
+    if (contentType !== 'carousel') return;
+    if (!payload) return;
+    if (slides.kind !== 'idle' || slides.urls.length > 0) return;
+    const slideCount = countSlides(payload);
+    if (slideCount === 0) return;
+    autoFiredSlidesRef.current = true;
+    void handleGenerateSlides();
+    // We intentionally depend ONLY on the primitive props that
+    // could legitimately change the "should we fire?" answer.
+    // The handler closure captures the latest setSlides via React's
+    // setState identity, so adding it to deps would cause double
+    // fires on every state transition.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftId, contentType, payload]);
+
+  // Same pattern as the carousel auto-fire above, but for single-
+  // image content types. Both Flux endpoints share the server-side
+  // cache short-circuit so a re-mount on a draft that already has
+  // imageUrl persisted returns the URL instantly without charging.
+  useEffect(() => {
+    if (autoFiredSingleRef.current) return;
+    if (!draftId || !projectId) return;
+    if (contentType !== 'photo' && contentType !== 'single_image') return;
+    if (!payload) return;
+    if (singleImage.kind !== 'idle' || singleImage.url) return;
+    autoFiredSingleRef.current = true;
+    void handleGenerateSingleImage();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftId, projectId, contentType, payload]);
 
   // PR #76 — Sprint 7.3: HeyGen status badge. The server attaches
   // heygenJobId + heygenStatus to structuredContent for video-needing
@@ -497,7 +569,14 @@ export function StructuredDraftCard({
         <CarouselSlideImagesBlock
           slideCount={countSlides(payload)}
           state={slides}
-          onGenerate={handleGenerateSlides}
+          // PR Sprint 7.25 Phase 8 — pass forceRegen=true only when
+          // the user is explicitly regenerating (state was already
+          // 'ready'). On first manual click after an auto-fire
+          // failure, forceRegen=false lets the server cache short-
+          // circuit kick in if the URLs landed via a parallel call.
+          onGenerate={() =>
+            handleGenerateSlides(slides.kind === 'ready')
+          }
           canGenerate={Boolean(draftId)}
         />
       )}
@@ -514,7 +593,11 @@ export function StructuredDraftCard({
         payload != null && (
           <SinglePhotoImageBlock
             state={singleImage}
-            onGenerate={handleGenerateSingleImage}
+            // Same forceRegen-only-on-Regenerate logic as the
+            // carousel block above.
+            onGenerate={() =>
+              handleGenerateSingleImage(singleImage.kind === 'ready')
+            }
             canGenerate={Boolean(draftId && projectId)}
           />
         )}
