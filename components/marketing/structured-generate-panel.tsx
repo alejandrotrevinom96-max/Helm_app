@@ -32,7 +32,7 @@
 // works and could be re-mounted as a "classic generator" toggle if
 // founder feedback demands it. Code stays unused but intact.
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { GlassCard } from '@/components/ui/glass-card';
 import { Button } from '@/components/ui/button';
 import { StructuredDraftCard } from './StructuredDraftCard';
@@ -173,15 +173,45 @@ interface Props {
 
 export function StructuredGeneratePanel({ projectId }: Props) {
   const router = useRouter();
+  // PR Sprint 7.21 — pre-fill the prompt textarea when the founder
+  // arrives from a Research pain-point card. PainPointCard builds:
+  //   /marketing/generate?projectId=...&prompt=<urlencoded>
+  // We read the param into the initial state via a lazy useState
+  // initializer so the textarea opens with the seed already in
+  // place. After mount the state is fully user-controlled — typing
+  // overwrites the seed and the Generate call uses the latest text.
+  const searchParams = useSearchParams();
+  const incomingPrompt = searchParams.get('prompt') ?? '';
+
   const [platform, setPlatform] = useState<Platform>('instagram');
   const [types, setTypes] = useState<ContentTypeRow[]>([]);
   const [preferences, setPreferences] = useState<Preference[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
-  const [prompt, setPrompt] = useState('');
+  const [prompt, setPrompt] = useState<string>(() => incomingPrompt);
   const [generating, setGenerating] = useState(false);
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [error, setError] = useState<CategorizedError | null>(null);
   const [loadingTypes, setLoadingTypes] = useState(false);
+
+  // When we arrive with a pre-filled prompt, scroll the textarea
+  // into view so the founder immediately sees what was loaded —
+  // /marketing/generate has the brand bible + content-type grid
+  // above the textarea, and on a fresh viewport the seed would
+  // otherwise be below the fold. Smooth + center keeps the
+  // platform picker still visible for context.
+  useEffect(() => {
+    if (incomingPrompt) {
+      document.getElementById('prompt-textarea')?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+      });
+    }
+    // We intentionally run this once on mount only — the
+    // dependency on `incomingPrompt` is stable for the lifetime
+    // of this navigation; we don't want repeated re-scrolls if
+    // the user later edits the URL.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Hydrate prefs once on mount. Same pattern as
   // StructuredDraftsPanel — the lookup is cheap and per-project.
@@ -442,16 +472,29 @@ export function StructuredGeneratePanel({ projectId }: Props) {
 
       {/* Prompt. */}
       <div>
-        <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2">
+        <label
+          htmlFor="prompt-textarea"
+          className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2 block"
+        >
           What to post about
-        </div>
+        </label>
         <textarea
+          id="prompt-textarea"
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           placeholder="Describe what this batch should cover. Brand bible + voice fingerprint load automatically."
           rows={5}
           className="w-full px-3 py-2 bg-bg border border-border rounded-lg text-sm placeholder:text-text-3 focus:outline-none focus:border-border-bright resize-none"
         />
+        {/* PR Sprint 7.21 — provenance hint when the founder
+            arrived from a Research pain-point card. Reads the
+            URL param directly so the badge surfaces independent
+            of whether the user has since edited the seed text. */}
+        {incomingPrompt && (
+          <p className="text-[11px] text-text-3 mt-1.5">
+            ✦ Pre-filled from Research pain point
+          </p>
+        )}
       </div>
 
       {/* Generate button + meta. */}
