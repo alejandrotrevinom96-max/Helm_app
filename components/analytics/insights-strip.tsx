@@ -5,13 +5,13 @@
 //
 // Client-side fetch on mount so the page itself stays a server
 // component (no Suspense boundary cost, no streaming complexity).
-// While loading: 2 skeleton rows. On error or empty array: render
-// nothing (silent fail — the page degrades to plain widgets). On
-// success: 2–3 rows with a directional icon (↑/↓/→) inferred from
-// `type` and the text from Haiku.
+// While loading: 3 skeleton rows (same height as a real item to
+// avoid layout jump). On error or empty array: render nothing
+// (silent fail). On success: 2–3 rows with a directional icon
+// (↑/↓/→) inferred from `type` and the text from Haiku.
 //
-// The endpoint is global-scoped (no projectId param). If we
-// per-project this later, pass `scope` + `projectId` through here.
+// PR Sprint 7.25 Phase 3 — repainted on top of the platform redesign
+// (platform-insight rows with up/down/flat tinted icon chips).
 import { useEffect, useState } from 'react';
 
 interface Insight {
@@ -19,17 +19,65 @@ interface Insight {
   text: string;
 }
 
-const ICONS: Record<Insight['type'], string> = {
-  up: '↑',
-  down: '↓',
-  neutral: '→',
+type Variant = 'up' | 'down' | 'flat';
+
+const TYPE_TO_VARIANT: Record<Insight['type'], Variant> = {
+  up: 'up',
+  down: 'down',
+  neutral: 'flat',
 };
 
-const TINTS: Record<Insight['type'], string> = {
-  up: 'text-emerald-500',
-  down: 'text-danger',
-  neutral: 'text-text-3',
-};
+function ArrowIcon({ variant }: { variant: Variant }) {
+  if (variant === 'up') {
+    return (
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden
+      >
+        <path d="M5 19l7-7 7 7M12 12V5" />
+      </svg>
+    );
+  }
+  if (variant === 'down') {
+    return (
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden
+      >
+        <path d="M19 5l-7 7-7-7M12 12v7" />
+      </svg>
+    );
+  }
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M3 12h14M13 8l4 4-4 4" />
+    </svg>
+  );
+}
 
 export function InsightsStrip() {
   const [state, setState] = useState<
@@ -38,15 +86,6 @@ export function InsightsStrip() {
     | { kind: 'error' }
   >({ kind: 'loading' });
 
-  // Perf fix (Sprint 7.20) — defer the fetch by 500ms.
-  //   The /analytics page renders 6+ widgets that all kick off
-  //   their own data fetches on mount. Firing the insights call
-  //   in the same tick steals connection slots + main-thread
-  //   time from the widgets the founder actually came here to
-  //   see. A small setTimeout lets the page paint, the widgets
-  //   start streaming, and THEN we ask Claude (or the cache) for
-  //   the bullets. The skeleton holds the slot so layout
-  //   doesn't jump on arrival.
   useEffect(() => {
     let cancelled = false;
     const timer = window.setTimeout(() => {
@@ -74,68 +113,65 @@ export function InsightsStrip() {
     };
   }, []);
 
-  // Skeleton — 3 shimmer-ish rows at the height of an actual
-  // insight item, so the layout doesn't jump when data arrives.
-  //
-  // Why 3 (was 2 pre-Sprint-7.20): the AI returns 2 or 3 bullets
-  // and most responses land at 3; reserving the taller slot
-  // avoids a 1-row jump on cache miss → AI fill.
-  //
-  // Hotfix: pre-fix the row background was `bg-bg-elev/40`,
-  // which in dark mode resolved to oklch(18% 0 0) @ 40%
-  // opacity — visibly DARKER than the page bg (oklch(15%)),
-  // producing the "zona negra opaca entre secciones" the
-  // founder reported. Swapped to `.glass` (var(--surface-1) +
-  // backdrop blur) so the strip blends with every other
-  // Editorial Glass surface on the page.
   if (state.kind === 'loading') {
     return (
-      <section aria-label="This week — loading" className="mb-6">
-        <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2">
-          This week
+      <section
+        aria-label="This week — loading"
+        className="platform-insights platform-reveal-2"
+      >
+        <div className="platform-insights-label">
+          This week · loading insights
         </div>
-        <div className="grid grid-cols-1 gap-2">
-          {[0, 1, 2].map((i) => (
-            <div
-              key={i}
-              className="glass flex items-center gap-2 p-3 rounded-lg"
-            >
-              <span className="w-3 h-3 rounded-full bg-text-3/15 animate-pulse" />
-              <span className="h-3 flex-1 rounded bg-text-3/15 animate-pulse" />
-            </div>
-          ))}
-        </div>
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="platform-insight platform-insight-flat">
+            <span
+              className="platform-insight-ico"
+              style={{ opacity: 0.4 }}
+              aria-hidden
+            />
+            <span
+              className="platform-insight-text"
+              style={{
+                height: '14px',
+                background:
+                  'linear-gradient(90deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02))',
+                borderRadius: '4px',
+              }}
+            />
+          </div>
+        ))}
       </section>
     );
   }
 
-  // Silent fail — caller never sees the strip when there's nothing
-  // useful to surface.
+  // Silent fail
   if (state.kind === 'error' || state.insights.length === 0) {
     return null;
   }
 
   return (
-    <section aria-label="This week" className="mb-6">
-      <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2">
-        This week
+    <section
+      aria-label="This week"
+      className="platform-insights platform-reveal-2"
+    >
+      <div className="platform-insights-label">
+        This week · {state.insights.length} insight
+        {state.insights.length === 1 ? '' : 's'}
       </div>
-      <div className="grid grid-cols-1 gap-2">
-        {state.insights.map((insight, i) => (
+      {state.insights.map((insight, i) => {
+        const variant = TYPE_TO_VARIANT[insight.type];
+        return (
           <div
             key={i}
-            className="glass flex items-start gap-2 p-3 rounded-lg text-sm text-text-2"
+            className={`platform-insight platform-insight-${variant}`}
           >
-            <span
-              className={`text-base leading-none shrink-0 ${TINTS[insight.type]}`}
-              aria-hidden
-            >
-              {ICONS[insight.type]}
+            <span className="platform-insight-ico">
+              <ArrowIcon variant={variant} />
             </span>
-            <span>{insight.text}</span>
+            <p className="platform-insight-text">{insight.text}</p>
           </div>
-        ))}
-      </div>
+        );
+      })}
     </section>
   );
 }

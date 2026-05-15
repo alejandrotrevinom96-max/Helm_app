@@ -1,19 +1,16 @@
 // PR #83 — Sprint 7.8: regrouped analytics page.
 //
 // Top-down structure:
-//   1. Page header + scope toggle (UNCHANGED — see PR #18; the
-//      ALL PROJECTS / THIS PROJECT toggle remains untouched per
-//      this sprint's hard constraint).
+//   1. Page header + scope toggle (URL-driven; same as PR #18).
 //   2. <InsightsStrip /> — AI-generated 2-3 actionable items.
 //      Loads client-side with a skeleton; silent fail on error.
 //   3. <AnalyticsClient /> — KPIs in 4 groups (Growth / Content
-//      performance / Engagement / Monetization). The KPIs that
-//      used to live in HelmActivitySection are folded INTO those
-//      groups now, so HelmActivitySection is no longer rendered.
+//      performance / Engagement / Monetization).
 //
-// `app/(dashboard)/analytics/helm-activity-section.tsx` stays on
-// disk for revert safety but is dead code. Tree-shaking drops it
-// from the bundle.
+// PR Sprint 7.25 Phase 3 — repainted on top of the platform redesign
+// (AmbientBackground wrapper, 88px Instrument Serif italic + animated
+// gradient accent, mono green "live · stack metrics" eyebrow, scope
+// toggle as a pill row). Data fetching is byte-identical to pre-7.25.
 import { createClient } from '@/lib/supabase/server';
 import { db } from '@/lib/db';
 import { integrations, metricSnapshots, projects } from '@/lib/db/schema';
@@ -23,7 +20,7 @@ import Link from 'next/link';
 import { getActiveProject } from '@/lib/active-project';
 import { AnalyticsClient } from './client';
 import { getDashboardData } from '@/lib/analytics/dashboard';
-import { GlassCard } from '@/components/ui/glass-card';
+import { AmbientBackground } from '@/components/ui/ambient-background';
 import { InsightsStrip } from '@/components/analytics/insights-strip';
 import type { MetricSnapshot } from '@/lib/db/schema';
 
@@ -135,88 +132,95 @@ export default async function AnalyticsPage({
   const hasVercel = connected.has('vercel');
   const hasSupabase = connected.has('supabase');
   const hasMeta = connected.has('meta');
-  // PR #83: Reddit is the second priority for the smart banner
-  // (after Meta Ads). Same source-set semantics as the other
-  // providers — present in `integrations.provider` iff connected.
   const hasReddit = connected.has('reddit');
 
   return (
-    <div className="p-6 md:p-10 max-w-6xl">
-      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4 mb-6">
-        <div>
-          <h1 className="font-display text-display-lg font-light tracking-tight mb-2">
-            Analytics
-          </h1>
-          <p className="text-text-2">
-            Real metrics from your stack — plus what you&apos;re doing in Helm.
-          </p>
-        </div>
+    <AmbientBackground accentTint="blue">
+      <main className="platform-main platform-main-wide">
+        <header className="platform-page-head platform-page-head-row platform-reveal-1">
+          <div>
+            <span className="platform-eyebrow platform-eyebrow-live">
+              live · stack metrics
+            </span>
+            <h1>
+              Analytics<span className="accent-grad">.</span>
+            </h1>
+            <p className="sub">
+              Real metrics from your stack — plus what you&apos;re doing in
+              Helm. <b style={{ color: 'var(--text-1)' }}>No estimated
+              numbers, no vanity charts.</b>
+            </p>
+          </div>
 
-        {/* Scope toggle — UNCHANGED. URL-driven so refresh and
-            sharing keep the same view. This sprint explicitly
-            does not touch this control. */}
-        <div className="flex items-center gap-1 bg-bg-elev rounded-lg p-1 border border-border self-start">
-          <Link
-            href="/analytics?scope=project"
-            scroll={false}
-            className={`px-3 py-1.5 text-[10px] font-mono uppercase tracking-[0.1em] rounded-md transition-colors ${
-              scope === 'project'
-                ? 'bg-accent text-white'
-                : 'text-text-3 hover:text-text-1'
-            }`}
-          >
-            This project
-          </Link>
-          <Link
-            href="/analytics?scope=global"
-            scroll={false}
-            className={`px-3 py-1.5 text-[10px] font-mono uppercase tracking-[0.1em] rounded-md transition-colors ${
-              scope === 'global'
-                ? 'bg-accent text-white'
-                : 'text-text-3 hover:text-text-1'
-            }`}
-          >
-            All projects
-          </Link>
-        </div>
-      </div>
+          {/* Scope toggle — URL-driven (PR #18). Refresh + share keep
+              the same view. The mockup uses a single pill row; both
+              links carry the new platform-scope-opt visual but the
+              navigation hookup is unchanged. */}
+          <div className="platform-scope-toggle">
+            <Link
+              href="/analytics?scope=project"
+              scroll={false}
+              className={`platform-scope-opt${
+                scope === 'project' ? ' platform-scope-opt-on' : ''
+              }`}
+            >
+              This project
+            </Link>
+            <Link
+              href="/analytics?scope=global"
+              scroll={false}
+              className={`platform-scope-opt${
+                scope === 'global' ? ' platform-scope-opt-on' : ''
+              }`}
+            >
+              All projects
+            </Link>
+          </div>
+        </header>
 
-      <InsightsStrip />
+        <InsightsStrip />
 
-      {scope === 'project' && !project ? (
-        <GlassCard className="p-8 text-center">
-          <p className="text-text-2 mb-2">
-            No project selected. Switch to All projects or create one to see
-            analytics.
-          </p>
-          <Link
-            href="/integrations"
-            className="text-accent hover:underline text-sm"
-          >
-            Open Integrations →
-          </Link>
-        </GlassCard>
-      ) : (
-        <AnalyticsClient
-          project={
-            scope === 'project' && project
-              ? project
-              : { id: 'all', name: 'All projects' }
-          }
-          snapshots={snapshots}
-          hasVercel={hasVercel}
-          hasSupabase={hasSupabase}
-          hasMeta={hasMeta}
-          hasReddit={hasReddit}
-          lastSyncAt={lastSyncAt}
-          hasMappings={hasMappings}
-          scope={scope}
-          totalSignups={dashboard.totalSignups}
-          postsPublished={dashboard.postsPublished}
-          researchInsights={dashboard.researchInsights}
-          validateResponseRate={dashboard.validateResponseRate}
-        />
-      )}
-    </div>
+        {scope === 'project' && !project ? (
+          <section className="platform-card platform-card-glow-blue platform-reveal-2">
+            <p className="platform-desc" style={{ marginBottom: '10px' }}>
+              No project selected. Switch to All projects or create one to
+              see analytics.
+            </p>
+            <Link href="/integrations" className="platform-cta-link">
+              Open Integrations
+              <svg viewBox="0 0 16 16" fill="none" aria-hidden>
+                <path
+                  d="M3 8h10M9 4l4 4-4 4"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </Link>
+          </section>
+        ) : (
+          <AnalyticsClient
+            project={
+              scope === 'project' && project
+                ? project
+                : { id: 'all', name: 'All projects' }
+            }
+            snapshots={snapshots}
+            hasVercel={hasVercel}
+            hasSupabase={hasSupabase}
+            hasMeta={hasMeta}
+            hasReddit={hasReddit}
+            lastSyncAt={lastSyncAt}
+            hasMappings={hasMappings}
+            scope={scope}
+            totalSignups={dashboard.totalSignups}
+            postsPublished={dashboard.postsPublished}
+            researchInsights={dashboard.researchInsights}
+            validateResponseRate={dashboard.validateResponseRate}
+          />
+        )}
+      </main>
+    </AmbientBackground>
   );
 }

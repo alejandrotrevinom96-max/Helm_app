@@ -7,20 +7,29 @@
 // behavior; this is the single source.
 //
 // Shape:
-//   - eyebrow label (small caps)
+//   - eyebrow label (small caps) + source pill (top row)
 //   - either: prominent value + optional delta line + optional
-//     sparkline
-//   - or: <EmptyWidget /> body (when caller passes `empty`)
+//     sparkline (the "has-value" variant — uses the Instrument
+//     Serif 76px gradient number)
+//   - or: empty-state body (title + subtext + optional CTA)
 //
 // `empty` takes precedence over `value` — when present, the entire
-// card swaps to the empty-state body. That way the caller doesn't
-// have to think about "what counts as empty" — they decide once
-// (e.g. CAC === 0 → empty) and pass the appropriate prop.
+// card swaps to the empty-state body.
+//
+// PR Sprint 7.25 Phase 3 — repainted on top of the platform redesign
+// (platform-metric-card with per-source glow, 76px Instrument Serif
+// gradient number, mono source pill row, mono delta chips).
 import type { ReactNode } from 'react';
-import { GlassCard } from '@/components/ui/glass-card';
-import { Badge } from '@/components/ui/badge';
+import Link from 'next/link';
 import { Sparkline } from '@/components/ui/sparkline';
-import { EmptyWidget } from './empty-widget';
+
+type Source =
+  | 'supabase'
+  | 'vercel'
+  | 'helm'
+  | 'meta'
+  | 'computed'
+  | (string & {});
 
 interface DeltaProps {
   current: number;
@@ -31,10 +40,7 @@ interface DeltaProps {
 interface Props {
   label: string;
   value?: ReactNode;
-  source?: string;
-  // Optional delta line beneath the number. `previous: null` hides
-  // the line — see lib/analytics/dashboard.ts for the "no prior
-  // window data" semantic.
+  source?: Source;
   delta?: DeltaProps;
   sparkline?: number[];
   footer?: ReactNode;
@@ -44,33 +50,41 @@ interface Props {
     ctaLabel?: string;
     ctaHref?: string;
   };
+  /** Glow tint for the card. Defaults map from `source` when not
+   *  set: supabase→green, vercel→blue, helm→orange,
+   *  meta→blue, computed→purple. */
+  glow?: 'green' | 'blue' | 'orange' | 'purple' | 'red';
 }
+
+const SOURCE_DEFAULT_GLOW: Record<string, Props['glow']> = {
+  supabase: 'green',
+  vercel: 'blue',
+  helm: 'orange',
+  meta: 'blue',
+  computed: 'purple',
+};
+
+const SOURCE_PILL_LABEL: Record<string, string> = {
+  supabase: 'Supabase',
+  vercel: 'Vercel',
+  helm: 'Helm',
+  meta: 'Meta',
+  computed: 'Computed',
+};
 
 function formatDelta(current: number, previous: number): {
   symbol: string;
   text: string;
-  tint: string;
+  variant: 'up' | 'down' | 'flat';
 } {
   const diff = current - previous;
   if (diff === 0) {
-    return {
-      symbol: '→',
-      text: 'No change',
-      tint: 'text-text-3',
-    };
+    return { symbol: '→', text: 'No change', variant: 'flat' };
   }
   if (diff > 0) {
-    return {
-      symbol: '↑',
-      text: `+${diff}`,
-      tint: 'text-emerald-500',
-    };
+    return { symbol: '↑', text: `+${diff}`, variant: 'up' };
   }
-  return {
-    symbol: '↓',
-    text: `${diff}`,
-    tint: 'text-danger',
-  };
+  return { symbol: '↓', text: `${diff}`, variant: 'down' };
 }
 
 export function KpiCard({
@@ -81,18 +95,50 @@ export function KpiCard({
   sparkline,
   footer,
   empty,
+  glow,
 }: Props) {
+  const resolvedGlow =
+    glow ?? (source ? SOURCE_DEFAULT_GLOW[source] : undefined) ?? 'blue';
+  const pillLabel = source ? SOURCE_PILL_LABEL[source] ?? source : null;
+  const sourceClass = source ? `platform-source-pill-${source}` : '';
+
   if (empty) {
     return (
-      <GlassCard className="p-4 md:p-5">
-        <div className="flex items-start justify-between gap-2 mb-3">
-          <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 truncate">
-            {label}
-          </span>
-          {source && <Badge>{source}</Badge>}
+      <div className={`platform-metric-card platform-card-glow-${resolvedGlow}`}>
+        <div className="platform-metric-card-head">
+          <span className="platform-metric-card-lbl">{label}</span>
+          {pillLabel && (
+            <span className={`platform-source-pill ${sourceClass}`}>
+              {pillLabel}
+            </span>
+          )}
         </div>
-        <EmptyWidget {...empty} />
-      </GlassCard>
+        <h3 className="platform-metric-card-title">{empty.title}</h3>
+        <p className="platform-metric-card-desc">{empty.subtext}</p>
+        {empty.ctaLabel && empty.ctaHref ? (
+          <Link
+            href={empty.ctaHref}
+            className={
+              resolvedGlow === 'blue'
+                ? 'platform-cta-link platform-cta-link-blue'
+                : resolvedGlow === 'purple'
+                  ? 'platform-cta-link platform-cta-link-purple'
+                  : 'platform-cta-link'
+            }
+          >
+            {empty.ctaLabel}
+            <svg viewBox="0 0 16 16" fill="none" aria-hidden>
+              <path
+                d="M3 8h10M9 4l4 4-4 4"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </Link>
+        ) : null}
+      </div>
     );
   }
 
@@ -101,59 +147,60 @@ export function KpiCard({
     delta.previous !== null &&
     typeof delta.current === 'number' &&
     typeof delta.previous === 'number';
+  const deltaInfo = showDelta
+    ? formatDelta(delta!.current, delta!.previous as number)
+    : null;
   const period = delta?.period ?? '7d';
 
   return (
-    <GlassCard className="p-4 md:p-5">
-      <div className="flex items-start justify-between gap-2 mb-3">
-        <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 truncate">
-          {label}
-        </span>
-        {source && <Badge>{source}</Badge>}
+    <div
+      className={`platform-metric-card platform-metric-card-has-value platform-card-glow-${resolvedGlow}`}
+    >
+      <div className="platform-metric-card-head">
+        <span className="platform-metric-card-lbl">{label}</span>
+        {pillLabel && (
+          <span className={`platform-source-pill ${sourceClass}`}>
+            {pillLabel}
+          </span>
+        )}
       </div>
-      <div className="font-display text-3xl md:text-4xl font-light tracking-tight truncate">
-        {value ?? '—'}
-      </div>
-      {showDelta && delta && (
-        <DeltaLine
-          {...formatDelta(delta.current, delta.previous as number)}
-          period={period}
-        />
-      )}
+      <div className="platform-big-num">{value ?? '—'}</div>
       {sparkline && sparkline.length > 0 && (
-        <div className="text-accent mt-2">
+        <div
+          className="platform-sparkline"
+          style={{
+            color:
+              resolvedGlow === 'green'
+                ? 'var(--d-green-2)'
+                : resolvedGlow === 'orange'
+                  ? 'var(--d-orange-2)'
+                  : resolvedGlow === 'purple'
+                    ? 'var(--d-purple-2)'
+                    : 'var(--d-blue-2)',
+          }}
+        >
           <Sparkline
             data={sparkline}
-            width={100}
-            height={24}
+            width={300}
+            height={56}
             ariaLabel={`${label} trend`}
           />
         </div>
       )}
-      {footer && (
-        <div className="text-[10px] text-text-3 mt-2">{footer}</div>
-      )}
-    </GlassCard>
-  );
-}
-
-function DeltaLine({
-  symbol,
-  text,
-  tint,
-  period,
-}: {
-  symbol: string;
-  text: string;
-  tint: string;
-  period: string;
-}) {
-  return (
-    <div className={`text-xs mt-1 ${tint}`}>
-      <span aria-hidden>{symbol}</span> {text}{' '}
-      <span className="text-text-3">
-        {symbol === '→' ? '' : `vs last ${period}`}
-      </span>
+      <div className="platform-meta-row">
+        <span>{footer ?? null}</span>
+        {deltaInfo && (
+          <span className={`platform-delta platform-delta-${deltaInfo.variant}`}>
+            <span aria-hidden>{deltaInfo.symbol}</span>
+            {deltaInfo.text}
+            {deltaInfo.variant !== 'flat' && (
+              <span style={{ color: 'var(--text-3)', marginLeft: '4px' }}>
+                vs {period}
+              </span>
+            )}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
