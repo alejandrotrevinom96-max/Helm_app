@@ -158,23 +158,6 @@ export function LinkedInCard({ projectId }: Props) {
                   Re-authorize
                 </Button>
               </Link>
-              {/* PR Sprint 7.19 — LinkedIn is per-project, so the
-                  disconnect endpoint needs projectId in the body.
-                  Local setState({...loading}) flips the card to
-                  the disconnected layout without waiting for the
-                  /test refetch. */}
-              <DisconnectButton
-                providerLabel="LinkedIn"
-                endpoint="/api/integrations/linkedin/disconnect"
-                body={{ projectId }}
-                onDisconnected={() => {
-                  setState({
-                    loading: false,
-                    configured: state.configured,
-                    connected: false,
-                  });
-                }}
-              />
             </>
           ) : (
             <Link href={connectHref}>
@@ -183,6 +166,30 @@ export function LinkedInCard({ projectId }: Props) {
               </Button>
             </Link>
           )}
+          {/* PR Sprint B-finish — Disconnect surfaces whenever the
+              founder has ANY LinkedIn row to drop (connected OR
+              expired). Pre-fix the button only rendered in the
+              connected+not-expired branch, which meant an expired
+              token left the founder with only "Reconnect" — no
+              clean way to wipe a row whose refresh chain had
+              broken (e.g., after rotating client secrets). The
+              endpoint already accepts both states; the UI was the
+              only thing gating it. Stays hidden when no row
+              exists at all (`!state.connected && !state.expired`
+              — nothing to disconnect). */}
+          <DisconnectButton
+            providerLabel="LinkedIn"
+            endpoint="/api/integrations/linkedin/disconnect"
+            body={{ projectId }}
+            onDisconnected={() => {
+              setState({
+                loading: false,
+                configured: state.configured,
+                connected: false,
+              });
+            }}
+            hidden={!state.connected && !state.expired}
+          />
         </div>
       </div>
 
