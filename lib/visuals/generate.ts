@@ -161,7 +161,14 @@ export async function generateVisual(
     // tryIRPipelinePath already logged the failure; we fall
     // through to the legacy builder so the user still gets an
     // image rather than a null.
-    logger.warn(
+    // PR Sprint 7.25 Phase 11.13 — demoted from warn to info.
+    // Pre-fix this fired into Sentry on every IR-pipeline miss
+    // (~45 events/day) which was just telemetry, not an error:
+    // the legacy path still produced an image for the user. The
+    // info-level call stays in Vercel logs (one JSON line per
+    // event, easy to grep for IR success rate) without
+    // generating Sentry issues.
+    logger.info(
       'visuals/generate',
       'IR pipeline failed, falling back to legacy buildVisualPrompt',
       { platform: input.platform, contentType: input.contentType },
@@ -203,9 +210,13 @@ async function tryIRPipelinePath(
     // Soft-validation. We log failures but proceed — these are
     // hints, not hard rejects. Hard rejects already throw inside
     // buildVisualPromptIR via Zod.
+    // PR Sprint 7.25 Phase 11.13 — demoted from warn to info.
+    // Soft validations are heuristic warnings (mood mismatch,
+    // lazy subject terms, etc.) — the image still ships. They
+    // shouldn't be Sentry issues; Vercel log entries are enough.
     const failures = validateVisualPromptIR(ir);
     if (failures.length > 0) {
-      logger.warn('visuals/generate', 'IR soft-validation failures', {
+      logger.info('visuals/generate', 'IR soft-validation failures', {
         failures,
         platform: input.platform,
         contentType: input.contentType,
@@ -242,8 +253,15 @@ async function tryIRPipelinePath(
       height: fal_input.height,
     };
   } catch (e) {
+    // PR Sprint 7.25 Phase 11.13 — SubjectBlock extraction
+    // failures demoted to info. The legacy path picks up the
+    // generation so the user always gets an image; this entry is
+    // telemetry on how often Haiku's output drifts past the
+    // schema, not an actionable error. logger.error stays for
+    // genuine crashes (Zod throws from BrandBlock / Platform
+    // parse, network panics, etc.).
     if (e instanceof SubjectExtractionError) {
-      logger.warn(
+      logger.info(
         'visuals/generate',
         'SubjectBlock extraction failed after retries',
         { error: e },

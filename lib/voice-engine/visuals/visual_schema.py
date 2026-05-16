@@ -123,17 +123,22 @@ class SubjectBlock(BaseModel):
                               description="Concrete description of the central subject. "
                                           "E.g., 'A solo founder hunched over a laptop at 2am, "
                                           "8 browser tabs visible'.")
-    composition: str = Field(..., min_length=5, max_length=150,
+    # PR Sprint 7.25 Phase 11.7 — bumped to realistic Haiku output sizes.
+    # Mirror of lib/voice-engine/visuals/visual-schema.ts. Pre-fix the
+    # tight caps (composition 150, setting 200, mood_descriptor 80,
+    # emotional_anchor 30) rejected Haiku's natural output 5-15% of the
+    # time, killing the IR pipeline and forcing the legacy fallback.
+    composition: str = Field(..., min_length=5, max_length=280,
                              description="Framing and arrangement. E.g., 'centered, slight "
                                          "low angle, subject filling 60% of frame'.")
-    setting: str = Field(..., min_length=5, max_length=200,
+    setting: str = Field(..., min_length=5, max_length=280,
                          description="Environment / context. E.g., 'messy home office, "
                                      "warm desk lamp, late night'.")
-    mood_descriptor: str = Field(..., min_length=3, max_length=80,
+    mood_descriptor: str = Field(..., min_length=3, max_length=200,
                                  description="Emotional tone, full phrase. "
                                              "E.g., 'exhausted but determined', "
                                              "'quietly confident', 'frustrated and overwhelmed'.")
-    emotional_anchor: str | None = Field(default=None, max_length=30,
+    emotional_anchor: str | None = Field(default=None, max_length=60,
                                          description="Single dominant emotion as a short tag, "
                                                      "1-3 words max. E.g., 'exhaustion', "
                                                      "'determination', 'relief'. Different from "
@@ -197,14 +202,17 @@ class BrandBlock(BaseModel):
     """Brand-specific visual identity. Pulled from BrandBible.visual."""
     model_config = ConfigDict(extra="forbid")
 
-    archetype: str = Field(..., min_length=2, max_length=50,
+    archetype: str = Field(..., min_length=2, max_length=80,
                            description="Brand archetype, e.g., 'rebel', 'sage', 'creator'.")
-    mood: str = Field(..., min_length=3, max_length=100,
+    # PR Sprint 7.25 Phase 11.7 — bumped to match real brand-bible
+    # data. Founders' bibles legitimately wrote 150-200 char
+    # photography_mood descriptors; the 100-char cap rejected them.
+    mood: str = Field(..., min_length=3, max_length=250,
                       description="Photography mood from BrandBible, e.g., 'warm and human', "
                                   "'clean and minimal', 'gritty documentary'.")
     color_palette: list[str] = Field(default_factory=list, max_length=5,
                                      description="Hex codes or color names. Up to 5.")
-    voice_descriptor: str | None = Field(default=None, max_length=100)
+    voice_descriptor: str | None = Field(default=None, max_length=200)
 
 
 class PlatformBlock(BaseModel):
