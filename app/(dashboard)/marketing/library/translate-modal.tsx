@@ -226,7 +226,7 @@ export function TranslateModal({ sourceJobId, onClose }: Props) {
               Translate to other languages
             </h3>
             <p className="text-xs text-text-3">
-              HeyGen clones the avatar&apos;s voice into each target
+              Helm clones the avatar&apos;s voice into each target
               language + re-renders lip-sync. Same avatar, native
               delivery.
             </p>

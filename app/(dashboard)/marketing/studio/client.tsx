@@ -398,10 +398,10 @@ export function StudioClient({ projectId }: Props) {
               Describe the video you want
             </h2>
             <p className="text-sm text-text-3 mb-4 max-w-prose">
-              Helm hands the prompt off to HeyGen&apos;s Video Agent, which
-              drafts a storyboard. You review, iterate by chat, then
-              approve to render — Helm absorbs the script, scene
-              composition, and voice picking for you.
+              Helm drafts a storyboard from your prompt. You review,
+              iterate by chat, then approve to render — Helm absorbs
+              the script, scene composition, and voice picking for
+              you.
             </p>
 
             <textarea

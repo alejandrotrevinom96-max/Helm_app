@@ -132,6 +132,39 @@ function categorize(
   return 'other';
 }
 
+// PR Sprint D-6 — drop legacy pre-rendered stock avatars.
+//
+// HeyGen's /v2/avatars catalog includes the OG Avatar III pre-
+// rendered stock catalog: "Annelore in Red sweater", "Anna in
+// white blouse", "Edward in Business Suit", etc. These ship with
+// a single fixed pose, can't be re-rendered with new prompts, and
+// look stiff / "rigid" in the picker preview. Founder feedback:
+// surface only the Avatar IV / V engine-compatible catalog.
+//
+// Filter heuristics (in priority order):
+//   1. talking_photo kind → always keep. Talking photos are by
+//      definition Avatar IV/V (they're rendered with the modern
+//      photo-avatar engine at render time).
+//   2. " in <color> <garment>" name pattern → DROP. This is the
+//      tell-tale signature of the legacy pre-rendered catalog.
+//   3. category === 'professional' → DROP. The corporate suit
+//      stock avatars are the most-complained-about subset of the
+//      legacy catalog; the modern equivalents are in talking_photos.
+//   4. Anything else → keep (gives benefit of the doubt to
+//      unrecognized modern stock avatars on premium accounts).
+//
+// Future: replace heuristic with HeyGen's `supported_api_engines`
+// field once it's reliably populated across the catalog.
+const LEGACY_NAME_PATTERN =
+  /\bin\s+(red|blue|black|grey|gray|white|green|yellow|pink|navy|brown|orange|purple|tan|beige)\s+(sweater|suit|shirt|blazer|jacket|dress|tie|blouse|polo|cardigan|hoodie|t-?shirt|outfit)\b/i;
+
+function isLegacyAvatar(opt: AvatarOption): boolean {
+  if (opt.kind === 'talking_photo') return false;
+  if (LEGACY_NAME_PATTERN.test(opt.name)) return true;
+  if (opt.category === 'professional') return true;
+  return false;
+}
+
 // Sort priority so the modern UGC styles surface first in the
 // 'All' view. Within a category, alphabetical by name for
 // stable scanning.
@@ -305,10 +338,20 @@ export async function GET() {
       );
     }
 
-    collected.sort(sortAvatars);
+    // PR Sprint D-6 — strip legacy Avatar III pre-rendered stock
+    // before sorting. Founder feedback was "muchos rígidos, nada
+    // que ver" — the "in <color> <garment>" stock catalog is the
+    // culprit. See isLegacyAvatar() for the heuristics. Tracking
+    // dropped count so we can surface "N legacy avatars filtered"
+    // in the picker UI later if useful.
+    const beforeFilter = collected.length;
+    const modern = collected.filter((a) => !isLegacyAvatar(a));
+    const droppedLegacy = beforeFilter - modern.length;
+    modern.sort(sortAvatars);
 
     return NextResponse.json({
-      avatars: collected,
+      avatars: modern,
+      droppedLegacy,
       // Surface non-fatal errors so the UI can show "some
       // sources couldn't load" if one endpoint dropped.
       partialErrors: errors.length > 0 ? errors : undefined,

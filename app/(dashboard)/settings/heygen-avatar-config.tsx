@@ -908,7 +908,7 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
                   }))
                 }
               >
-                <option value="">Default (HeyGen picks)</option>
+                <option value="">Default (auto-select)</option>
                 {EMOTION_CHOICES.map((em: EmotionChoice) => (
                   <option key={em} value={em}>
                     {em}
@@ -1652,7 +1652,7 @@ function VoiceDesignSection({
               marginBottom: '10px',
             }}
           >
-            Describe the voice you want. HeyGen returns up to 3
+            Describe the voice you want. Helm returns up to 3
             matches; click <em>Use this voice</em> to stamp it on
             your project.
           </p>
