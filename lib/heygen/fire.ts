@@ -67,24 +67,70 @@ const HEYGEN_API = 'https://api.heygen.com';
 type HeygenJob = typeof heygenJobs.$inferSelect;
 type Project = typeof projects.$inferSelect;
 
+// PR Sprint D-1 — HeyGen V2 ElevenLabs settings for studio-grade
+// voice quality. Defaults below are HeyGen's recommended baseline
+// for UGC content (v3 model + balanced stability + style above
+// neutral for natural inflection). Founders can override per
+// project later via a dedicated UI; for now the defaults give a
+// dramatic quality jump over the bare /v2 voice payload.
+interface ElevenLabsSettings {
+  model:
+    | 'eleven_multilingual_v2'
+    | 'eleven_turbo_v2_5'
+    | 'eleven_flash_v2_5'
+    | 'eleven_v3';
+  similarity_boost?: number;
+  stability?: number;
+  style?: number;
+  use_speaker_boost?: boolean;
+}
+
+// PR Sprint D-1 — Avatar IV character config. The HeyGen V2
+// /v2/video/generate Studio endpoint accepts these on both
+// `talking_photo` and `avatar` types when `use_avatar_iv_model`
+// is true. We splice them in conditionally so legacy Avatar III
+// renders (no model field) keep working.
+interface AvatarIvCharacterExtras {
+  model?: '4.3' | '4.3_turbo' | '4.3_turbo_edge';
+  resolution?: '720p' | '1080p' | '4k';
+  prompt?: string; // motion prompt — natural-language body language
+  alpha?: number; // -0.5..0.5, lower = more expressive
+}
+
+type EmotionEnum =
+  | 'Excited'
+  | 'Friendly'
+  | 'Serious'
+  | 'Soothing'
+  | 'Broadcaster'
+  | 'Angry';
+
 interface HeygenGenerateRequest {
   video_inputs: Array<{
     character:
-      | {
+      | ({
           type: 'avatar';
           avatar_id: string;
           avatar_style: 'normal';
-        }
-      | {
+          use_avatar_iv_model?: boolean;
+        } & AvatarIvCharacterExtras)
+      | ({
           type: 'talking_photo';
           talking_photo_id: string;
           use_avatar_iv_model: true;
-        };
+        } & AvatarIvCharacterExtras);
     voice: {
       type: 'text';
       input_text: string;
       voice_id?: string;
       speed: number;
+      // PR Sprint D-1 — V2 voice tuning. All optional;
+      // omitted means HeyGen's per-voice default.
+      pitch?: number;
+      volume?: number;
+      emotion?: EmotionEnum;
+      locale?: string;
+      elevenlabs_settings?: ElevenLabsSettings;
     };
   }>;
   dimension: { width: number; height: number };
@@ -96,6 +142,50 @@ interface HeygenGenerateRequest {
   // since captioned video lifts retention ~30% on muted-by-
   // default TikTok / IG Reels playback.
   caption?: boolean;
+}
+
+// PR Sprint D-1 — map expressiveness preset to Avatar IV's
+// `alpha` scalar. HeyGen's docs say "lower = more expressive"
+// over the range [-0.5, 0.5]. We pick three preset points so
+// the founder picks "low / medium / high" instead of guessing a
+// magic number. Default 'high' for UGC — pre-fix the UGC came
+// out "rígida" because alpha defaulted to 0 (neutral).
+function alphaForExpressiveness(
+  value: string | null | undefined,
+): number {
+  if (value === 'high') return -0.3;
+  if (value === 'medium') return 0.0;
+  if (value === 'low') return 0.2;
+  // Null / unknown → assume the founder wants engaging UGC.
+  // Same default the Settings UI picks on first paint.
+  return -0.3;
+}
+
+// PR Sprint D-1 — case-insensitive parse of the emotion enum.
+// We store the value lowercase in the DB (UI is more forgiving)
+// and HeyGen wants TitleCase, so we normalize at fire time.
+function normalizeEmotion(
+  raw: string | null | undefined,
+): EmotionEnum | undefined {
+  if (!raw) return undefined;
+  const lower = raw.toLowerCase().trim();
+  if (lower === 'excited') return 'Excited';
+  if (lower === 'friendly') return 'Friendly';
+  if (lower === 'serious') return 'Serious';
+  if (lower === 'soothing') return 'Soothing';
+  if (lower === 'broadcaster') return 'Broadcaster';
+  if (lower === 'angry') return 'Angry';
+  return undefined;
+}
+
+// PR Sprint D-1 — clamp founder-supplied speed to HeyGen's
+// allowed range [0.5, 1.5]. The Settings slider caps at
+// [0.8, 1.2] for sanity, but defense-in-depth here keeps us
+// safe if the API receives an out-of-band write.
+function clampSpeed(raw: string | number | null | undefined): number {
+  const n = typeof raw === 'number' ? raw : raw ? Number(raw) : NaN;
+  if (!Number.isFinite(n)) return 1.0;
+  return Math.max(0.5, Math.min(1.5, n));
 }
 
 interface HeygenGenerateResponse {
@@ -187,20 +277,53 @@ export async function fireHeygenForJob(
   // Both talking_photo branches need `use_avatar_iv_model: true`
   // so HeyGen renders the modern Instant Avatar pipeline (not the
   // older static-image lipsync).
+  // PR Sprint D-1 — Avatar IV tuning extras that apply to every
+  // photo/talking_photo character (NOT to legacy studio avatars
+  // running Avatar III). HeyGen's docs flag these fields as
+  // Avatar IV-only — sending them on an Avatar III character is
+  // an "ignored" no-op at worst, but we still gate by branch.
+  //
+  // Defaults baked here:
+  //   model: '4.3_turbo_edge' — fastest + cheapest Avatar IV
+  //                              variant; renders in ~50% the
+  //                              wall-clock of plain '4.3'.
+  //   resolution: '1080p'    — sweet spot for IG/TikTok/FB Reels.
+  //                              '4k' is overkill (mobile feed
+  //                              downsamples anyway), '720p' is
+  //                              visibly soft on modern displays.
+  //   alpha:    from expressiveness preset, default 'high' (-0.3)
+  //   prompt:   founder's motion_prompt (optional). When omitted,
+  //             HeyGen picks a generic talking-head pose.
+  const avatarIvExtras: AvatarIvCharacterExtras = {
+    model: '4.3_turbo_edge',
+    resolution: '1080p',
+    alpha: alphaForExpressiveness(project.heygenAvatarExpressiveness),
+  };
+  const motionPrompt = project.heygenAvatarMotionPrompt?.trim();
+  if (motionPrompt) {
+    avatarIvExtras.prompt = motionPrompt;
+  }
+
   const character: HeygenGenerateRequest['video_inputs'][number]['character'] =
     avatarType === 'photo'
       ? {
           type: 'talking_photo',
           talking_photo_id: project.heygenPhotoUrl!,
           use_avatar_iv_model: true,
+          ...avatarIvExtras,
         }
       : avatarType === 'talking_photo'
         ? {
             type: 'talking_photo',
             talking_photo_id: project.heygenAvatarId!,
             use_avatar_iv_model: true,
+            ...avatarIvExtras,
           }
         : {
+            // Studio avatars stay on Avatar III by default.
+            // Switching them to Avatar IV would require
+            // confirming each avatar's `supported_api_engines`
+            // and re-validating — out of scope for D-1.
             type: 'avatar',
             avatar_id: project.heygenAvatarId!,
             avatar_style: 'normal',
@@ -258,12 +381,40 @@ export async function fireHeygenForJob(
     });
   }
 
+  // PR Sprint D-1 — voice tuning. All fields are V2-Studio
+  // payload extras the founder can override per project; we fall
+  // back to HeyGen-friendly defaults when nothing's set.
+  //
+  //   emotion              — TitleCase enum, omitted = HeyGen default
+  //   locale               — 'en-US' | 'es-MX' | etc., omitted = voice default
+  //   speed                — 0.5–1.5, default 1.0
+  //   elevenlabs_settings  — model: 'eleven_v3' (latest), stability/style
+  //                          tuned for natural narration. Only applied
+  //                          when the voice is ElevenLabs-backed —
+  //                          HeyGen ignores it for non-ElevenLabs
+  //                          voices, so we send it unconditionally
+  //                          (defense-in-depth; cheaper than a
+  //                          per-voice lookup).
   const voice: HeygenGenerateRequest['video_inputs'][number]['voice'] = {
     type: 'text',
     input_text: job.scriptText,
-    speed: 1.0,
+    speed: clampSpeed(project.heygenVoiceSpeed),
     voice_id: project.heygenVoiceId,
+    elevenlabs_settings: {
+      model: 'eleven_v3',
+      stability: 0.5,
+      similarity_boost: 0.75,
+      style: 0.5,
+      use_speaker_boost: true,
+    },
   };
+  const emotion = normalizeEmotion(project.heygenVoiceEmotion);
+  if (emotion) {
+    voice.emotion = emotion;
+  }
+  if (project.heygenVoiceLocale) {
+    voice.locale = project.heygenVoiceLocale;
+  }
 
   const payload: HeygenGenerateRequest = {
     video_inputs: [{ character, voice }],

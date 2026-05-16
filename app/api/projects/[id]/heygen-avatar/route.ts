@@ -80,6 +80,13 @@ export async function GET(
     // render the match indicator without a second round-trip.
     avatarGender: project.heygenAvatarGender,
     voiceGender: project.heygenVoiceGender,
+    // PR Sprint D-1 — tuning fields. All nullable; null means
+    // "use the smart default in fire.ts".
+    voiceEmotion: project.heygenVoiceEmotion,
+    voiceLocale: project.heygenVoiceLocale,
+    voiceSpeed: project.heygenVoiceSpeed,
+    avatarExpressiveness: project.heygenAvatarExpressiveness,
+    avatarMotionPrompt: project.heygenAvatarMotionPrompt,
   });
 }
 
@@ -114,6 +121,13 @@ export async function PATCH(
     // 'male' | 'female' | 'neutral'.
     avatarGender?: unknown;
     voiceGender?: unknown;
+    // PR Sprint D-1 — tuning fields. All optional; pass null
+    // to clear (reverts to fire.ts defaults).
+    voiceEmotion?: unknown;
+    voiceLocale?: unknown;
+    voiceSpeed?: unknown;
+    avatarExpressiveness?: unknown;
+    avatarMotionPrompt?: unknown;
   };
   try {
     body = (await request.json()) as typeof body;
@@ -183,6 +197,82 @@ export async function PATCH(
   }
   if (body.voiceGender !== undefined) {
     updates.heygenVoiceGender = normalizeGender(body.voiceGender);
+  }
+
+  // PR Sprint D-1 — tuning fields. Each normalizer is permissive
+  // (returns null on any invalid value) so a buggy client can't
+  // poison the row with stray strings; null is the "use default"
+  // sentinel fire.ts already understands.
+  const ALLOWED_EMOTIONS = new Set([
+    'Excited',
+    'Friendly',
+    'Serious',
+    'Soothing',
+    'Broadcaster',
+    'Angry',
+  ]);
+  const ALLOWED_EXPRESSIVENESS = new Set(['high', 'medium', 'low']);
+
+  if (body.voiceEmotion !== undefined) {
+    if (typeof body.voiceEmotion === 'string') {
+      // Title-case before validating against HeyGen's enum.
+      const norm =
+        body.voiceEmotion.charAt(0).toUpperCase() +
+        body.voiceEmotion.slice(1).toLowerCase();
+      updates.heygenVoiceEmotion = ALLOWED_EMOTIONS.has(norm) ? norm : null;
+    } else {
+      updates.heygenVoiceEmotion = null;
+    }
+  }
+  if (body.voiceLocale !== undefined) {
+    // Locale shape is loose ('en-US', 'es-MX', etc.). We accept
+    // any non-empty lowercase-or-dash string; HeyGen rejects
+    // unsupported locales server-side.
+    if (typeof body.voiceLocale === 'string' && body.voiceLocale.trim()) {
+      updates.heygenVoiceLocale = body.voiceLocale.trim();
+    } else {
+      updates.heygenVoiceLocale = null;
+    }
+  }
+  if (body.voiceSpeed !== undefined) {
+    const n =
+      typeof body.voiceSpeed === 'number'
+        ? body.voiceSpeed
+        : typeof body.voiceSpeed === 'string'
+          ? Number(body.voiceSpeed)
+          : NaN;
+    if (Number.isFinite(n) && n >= 0.5 && n <= 1.5) {
+      // Store as text (numeric column accepts string with
+      // 2-decimal precision); fire.ts parses with Number()
+      // before sending.
+      updates.heygenVoiceSpeed = n.toFixed(2);
+    } else {
+      updates.heygenVoiceSpeed = null;
+    }
+  }
+  if (body.avatarExpressiveness !== undefined) {
+    if (
+      typeof body.avatarExpressiveness === 'string' &&
+      ALLOWED_EXPRESSIVENESS.has(body.avatarExpressiveness)
+    ) {
+      updates.heygenAvatarExpressiveness = body.avatarExpressiveness;
+    } else {
+      updates.heygenAvatarExpressiveness = null;
+    }
+  }
+  if (body.avatarMotionPrompt !== undefined) {
+    if (
+      typeof body.avatarMotionPrompt === 'string' &&
+      body.avatarMotionPrompt.trim()
+    ) {
+      // Hard-cap at 500 chars — HeyGen's motion prompt is a
+      // sentence-or-two thing, not a script.
+      updates.heygenAvatarMotionPrompt = body.avatarMotionPrompt
+        .trim()
+        .slice(0, 500);
+    } else {
+      updates.heygenAvatarMotionPrompt = null;
+    }
   }
 
   if (Object.keys(updates).length === 0) {
@@ -257,6 +347,12 @@ export async function PATCH(
     // truth fire.ts reads from.
     avatarGender: refreshed?.heygenAvatarGender ?? null,
     voiceGender: refreshed?.heygenVoiceGender ?? null,
+    // PR Sprint D-1 — tuning fields round-trip.
+    voiceEmotion: refreshed?.heygenVoiceEmotion ?? null,
+    voiceLocale: refreshed?.heygenVoiceLocale ?? null,
+    voiceSpeed: refreshed?.heygenVoiceSpeed ?? null,
+    avatarExpressiveness: refreshed?.heygenAvatarExpressiveness ?? null,
+    avatarMotionPrompt: refreshed?.heygenAvatarMotionPrompt ?? null,
     requeuedFailedJobs: requeuedCount,
   });
 }

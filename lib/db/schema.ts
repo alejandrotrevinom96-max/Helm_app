@@ -164,6 +164,34 @@ export const projects = pgTable(
     // from /v2/avatars + /v2/voices; we normalize at write time.
     heygenAvatarGender: text('heygen_avatar_gender'),
     heygenVoiceGender: text('heygen_voice_gender'),
+    // PR Sprint D-1 — voice & avatar tuning fields the founder
+    // can override per project. All nullable; null means "let
+    // fire.ts pick a sensible default". Values that ship to
+    // HeyGen's /v2/video/generate payload under the `voice` and
+    // `character` objects.
+    //
+    //   voiceEmotion        → voice.emotion (case-sensitive
+    //                          HeyGen enum: 'Excited' | 'Friendly'
+    //                          | 'Serious' | 'Soothing' |
+    //                          'Broadcaster' | 'Angry')
+    //   voiceLocale         → voice.locale (e.g. 'en-US', 'es-MX')
+    //   voiceSpeed          → voice.speed (0.5–1.5)
+    //   avatarExpressiveness → character.alpha for Avatar IV photo
+    //                          avatars. high=-0.3 (more expressive)
+    //                          medium=0.0 low=0.2. Pre-fix UGC
+    //                          rendered "rígida"; high is what we
+    //                          want by default for UGC.
+    //   avatarMotionPrompt  → character.prompt for Avatar IV. NL
+    //                          description of body language ("hand
+    //                          gestures while explaining a chart").
+    heygenVoiceEmotion: text('heygen_voice_emotion'),
+    heygenVoiceLocale: text('heygen_voice_locale'),
+    heygenVoiceSpeed: numeric('heygen_voice_speed', {
+      precision: 3,
+      scale: 2,
+    }),
+    heygenAvatarExpressiveness: text('heygen_avatar_expressiveness'),
+    heygenAvatarMotionPrompt: text('heygen_avatar_motion_prompt'),
   },
   (t) => ({
     uniqueUserRepo: unique().on(t.userId, t.githubRepoId),

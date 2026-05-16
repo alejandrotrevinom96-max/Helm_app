@@ -61,7 +61,58 @@ interface AvatarSettings {
   // /api/projects/{id}/heygen-avatar.
   avatarGender: VoiceGender | null;
   voiceGender: VoiceGender | null;
+  // PR Sprint D-1 — advanced tuning. All nullable; null means
+  // "let fire.ts pick the smart default". Splices into the
+  // HeyGen V2 payload (voice.emotion / voice.locale /
+  // voice.speed / character.alpha / character.prompt).
+  voiceEmotion: string | null;
+  voiceLocale: string | null;
+  voiceSpeed: string | null; // numeric column, stored as string with 2 decimals
+  avatarExpressiveness: 'high' | 'medium' | 'low' | null;
+  avatarMotionPrompt: string | null;
 }
+
+// PR Sprint D-1 — closed enum sets used by the picker. The
+// server validates the same lists (PATCH /heygen-avatar) so we
+// don't drift between frontend display + backend acceptance.
+const EMOTION_CHOICES = [
+  'Excited',
+  'Friendly',
+  'Serious',
+  'Soothing',
+  'Broadcaster',
+  'Angry',
+] as const;
+type EmotionChoice = (typeof EMOTION_CHOICES)[number];
+
+const LOCALE_CHOICES: Array<{ value: string; label: string }> = [
+  { value: 'en-US', label: 'English (US)' },
+  { value: 'en-GB', label: 'English (UK)' },
+  { value: 'es-MX', label: 'Spanish (Mexico)' },
+  { value: 'es-ES', label: 'Spanish (Spain)' },
+  { value: 'pt-BR', label: 'Portuguese (Brazil)' },
+  { value: 'fr-FR', label: 'French (France)' },
+  { value: 'de-DE', label: 'German' },
+  { value: 'it-IT', label: 'Italian' },
+];
+
+const EXPRESSIVENESS_CHOICES: Array<{
+  value: 'high' | 'medium' | 'low';
+  label: string;
+  hint: string;
+}> = [
+  {
+    value: 'high',
+    label: 'High',
+    hint: 'Best for UGC and energetic delivery (recommended).',
+  },
+  { value: 'medium', label: 'Medium', hint: 'Balanced — explainers, demos.' },
+  {
+    value: 'low',
+    label: 'Low',
+    hint: 'Calmer delivery — meditative or formal content.',
+  },
+];
 
 // Normalize an arbitrary string (HeyGen returns 'Male' / 'Female'
 // / 'Unknown' / '' / null) into the strict 'male' | 'female' |
@@ -86,7 +137,17 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
     voiceId: null,
     avatarGender: null,
     voiceGender: null,
+    voiceEmotion: null,
+    voiceLocale: null,
+    voiceSpeed: null,
+    avatarExpressiveness: null,
+    avatarMotionPrompt: null,
   });
+  // PR Sprint D-1 — advanced tuning section is collapsed by
+  // default so the Settings card stays scannable for founders
+  // who don't care. Auto-expanded on first paint when ANY
+  // tuning value is non-null (founder previously tuned it).
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [avatars, setAvatars] = useState<AvatarOption[]>([]);
@@ -131,6 +192,12 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
           // them in on next save.
           avatarGender: string | null;
           voiceGender: string | null;
+          // PR Sprint D-1 — tuning fields. All nullable.
+          voiceEmotion: string | null;
+          voiceLocale: string | null;
+          voiceSpeed: string | null;
+          avatarExpressiveness: string | null;
+          avatarMotionPrompt: string | null;
         };
         if (!cancelled) {
           // PR Sprint 7.25 Phase 11.15 — preserve 'talking_photo'
@@ -149,6 +216,17 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
           } else if (data.avatarType === 'stock' && data.avatarId) {
             derived = 'stock';
           }
+          // PR Sprint D-1 — normalize expressiveness (DB may
+          // hold legacy / unexpected values).
+          const exp = data.avatarExpressiveness as
+            | 'high'
+            | 'medium'
+            | 'low'
+            | null;
+          const validExp =
+            exp === 'high' || exp === 'medium' || exp === 'low'
+              ? exp
+              : null;
           setSettings({
             avatarType: derived,
             avatarId: data.avatarId,
@@ -160,7 +238,24 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
             voiceGender: data.voiceGender
               ? normalizeGender(data.voiceGender)
               : null,
+            voiceEmotion: data.voiceEmotion,
+            voiceLocale: data.voiceLocale,
+            voiceSpeed: data.voiceSpeed,
+            avatarExpressiveness: validExp,
+            avatarMotionPrompt: data.avatarMotionPrompt,
           });
+          // PR Sprint D-1 — auto-expand the advanced section
+          // when ANY tuning value is set so the founder sees
+          // their current overrides on next visit.
+          if (
+            data.voiceEmotion ||
+            data.voiceLocale ||
+            data.voiceSpeed ||
+            data.avatarExpressiveness ||
+            data.avatarMotionPrompt
+          ) {
+            setAdvancedOpen(true);
+          }
           setLoading(false);
         }
       } catch {
@@ -267,6 +362,13 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
         // for gender-aware fallbacks + mismatch warnings.
         avatarGender: VoiceGender | null;
         voiceGender: VoiceGender | null;
+        // PR Sprint D-1 — tuning. Always sent (even nulls) so
+        // unsetting a value in the UI clears it on the server.
+        voiceEmotion: string | null;
+        voiceLocale: string | null;
+        voiceSpeed: number | null;
+        avatarExpressiveness: 'high' | 'medium' | 'low' | null;
+        avatarMotionPrompt: string | null;
       }> = {
         avatarType: settings.avatarType,
       };
@@ -286,6 +388,16 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
       body.voiceId = settings.voiceId;
       body.avatarGender = settings.avatarGender;
       body.voiceGender = settings.voiceGender;
+      // PR Sprint D-1 — tuning fields. Coerce voiceSpeed to a
+      // number (state holds the DB-shape string with 2 decimals);
+      // null clears the field on the server.
+      body.voiceEmotion = settings.voiceEmotion;
+      body.voiceLocale = settings.voiceLocale;
+      body.voiceSpeed = settings.voiceSpeed
+        ? Number(settings.voiceSpeed)
+        : null;
+      body.avatarExpressiveness = settings.avatarExpressiveness;
+      body.avatarMotionPrompt = settings.avatarMotionPrompt;
 
       const res = await fetch(`/api/projects/${projectId}/heygen-avatar`, {
         method: 'PATCH',
@@ -307,21 +419,37 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
         else if (savedType === 'stock' && data.avatarId) derived = 'stock';
         // PR Sprint C — the PATCH response now returns
         // avatarGender + voiceGender too. Normalize and persist.
-        const respWithGender = data as typeof data & {
+        // PR Sprint D-1 — same response also round-trips tuning.
+        const respExt = data as typeof data & {
           avatarGender?: string | null;
           voiceGender?: string | null;
+          voiceEmotion?: string | null;
+          voiceLocale?: string | null;
+          voiceSpeed?: string | null;
+          avatarExpressiveness?: string | null;
+          avatarMotionPrompt?: string | null;
         };
+        const exp = respExt.avatarExpressiveness;
+        const validExp =
+          exp === 'high' || exp === 'medium' || exp === 'low'
+            ? (exp as 'high' | 'medium' | 'low')
+            : null;
         setSettings({
           avatarType: derived,
           avatarId: data.avatarId ?? null,
           photoUrl: data.photoUrl ?? null,
           voiceId: data.voiceId ?? null,
-          avatarGender: respWithGender.avatarGender
-            ? normalizeGender(respWithGender.avatarGender)
+          avatarGender: respExt.avatarGender
+            ? normalizeGender(respExt.avatarGender)
             : null,
-          voiceGender: respWithGender.voiceGender
-            ? normalizeGender(respWithGender.voiceGender)
+          voiceGender: respExt.voiceGender
+            ? normalizeGender(respExt.voiceGender)
             : null,
+          voiceEmotion: respExt.voiceEmotion ?? null,
+          voiceLocale: respExt.voiceLocale ?? null,
+          voiceSpeed: respExt.voiceSpeed ?? null,
+          avatarExpressiveness: validExp,
+          avatarMotionPrompt: respExt.avatarMotionPrompt ?? null,
         });
         setSaveMessage('Saved ✓');
       }
@@ -712,6 +840,228 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
             </p>
           </div>
         </div>
+      </div>
+
+      {/* PR Sprint D-1 — Advanced tuning section. Collapsed by
+          default so the avatar/voice picker stays the primary
+          surface. Auto-expanded on first paint when any tuning
+          value is already set (the founder previously tuned it).
+          Every control is "Default" + an override — clearing a
+          field reverts to fire.ts's smart default. */}
+      <div
+        style={{
+          marginTop: '18px',
+          paddingTop: '18px',
+          borderTop: '1px solid var(--border)',
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => setAdvancedOpen((v) => !v)}
+          style={{
+            background: 'transparent',
+            border: 'none',
+            padding: 0,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            color: 'var(--text-2)',
+            fontSize: '13px',
+            fontFamily: 'inherit',
+          }}
+          aria-expanded={advancedOpen}
+        >
+          <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '10px', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--text-3)' }}>
+            Advanced
+          </span>
+          <span>Voice & avatar tuning</span>
+          <span style={{ marginLeft: 'auto', color: 'var(--text-3)', fontSize: '11px' }}>
+            {advancedOpen ? '▾' : '▸'}
+          </span>
+        </button>
+        {advancedOpen && (
+          <div
+            style={{
+              marginTop: '14px',
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr',
+              gap: '14px',
+            }}
+          >
+            {/* Emotion */}
+            <div>
+              <label
+                className="platform-field-label"
+                htmlFor="heygen-emotion"
+              >
+                Voice emotion
+              </label>
+              <select
+                id="heygen-emotion"
+                className="platform-field-input"
+                value={settings.voiceEmotion ?? ''}
+                onChange={(e) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    voiceEmotion: e.target.value || null,
+                  }))
+                }
+              >
+                <option value="">Default (HeyGen picks)</option>
+                {EMOTION_CHOICES.map((em: EmotionChoice) => (
+                  <option key={em} value={em}>
+                    {em}
+                  </option>
+                ))}
+              </select>
+              <p className="platform-field-help">
+                Friendly for casual UGC, Broadcaster for announcements.
+              </p>
+            </div>
+
+            {/* Locale */}
+            <div>
+              <label
+                className="platform-field-label"
+                htmlFor="heygen-locale"
+              >
+                Voice locale / accent
+              </label>
+              <select
+                id="heygen-locale"
+                className="platform-field-input"
+                value={settings.voiceLocale ?? ''}
+                onChange={(e) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    voiceLocale: e.target.value || null,
+                  }))
+                }
+              >
+                <option value="">Default (voice native)</option>
+                {LOCALE_CHOICES.map((l) => (
+                  <option key={l.value} value={l.value}>
+                    {l.label}
+                  </option>
+                ))}
+              </select>
+              <p className="platform-field-help">
+                Match your audience&apos;s region — only takes effect
+                on multilingual voices.
+              </p>
+            </div>
+
+            {/* Speed */}
+            <div>
+              <label
+                className="platform-field-label"
+                htmlFor="heygen-speed"
+              >
+                Voice speed:{' '}
+                <span className="platform-field-value">
+                  {settings.voiceSpeed
+                    ? `${Number(settings.voiceSpeed).toFixed(2)}x`
+                    : '1.00x (default)'}
+                </span>
+              </label>
+              <input
+                id="heygen-speed"
+                type="range"
+                min={0.8}
+                max={1.2}
+                step={0.05}
+                value={settings.voiceSpeed ? Number(settings.voiceSpeed) : 1.0}
+                onChange={(e) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    voiceSpeed: Number(e.target.value).toFixed(2),
+                  }))
+                }
+                style={{ width: '100%' }}
+              />
+              <button
+                type="button"
+                onClick={() =>
+                  setSettings((prev) => ({ ...prev, voiceSpeed: null }))
+                }
+                className="platform-ghost-link"
+                style={{ marginTop: '4px', fontSize: '11px' }}
+              >
+                Reset to default
+              </button>
+            </div>
+
+            {/* Expressiveness — photo/talking_photo avatars only */}
+            <div>
+              <label
+                className="platform-field-label"
+                htmlFor="heygen-expressiveness"
+              >
+                Avatar expressiveness
+              </label>
+              <select
+                id="heygen-expressiveness"
+                className="platform-field-input"
+                value={settings.avatarExpressiveness ?? ''}
+                onChange={(e) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    avatarExpressiveness:
+                      (e.target.value as 'high' | 'medium' | 'low' | '') ||
+                      null,
+                  }))
+                }
+              >
+                <option value="">Default (high)</option>
+                {EXPRESSIVENESS_CHOICES.map((c) => (
+                  <option key={c.value} value={c.value}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+              <p className="platform-field-help">
+                {EXPRESSIVENESS_CHOICES.find(
+                  (c) => c.value === settings.avatarExpressiveness,
+                )?.hint ??
+                  'Higher = more head + facial motion. Best for UGC.'}
+              </p>
+            </div>
+
+            {/* Motion prompt — spans 2 columns */}
+            <div style={{ gridColumn: '1 / -1' }}>
+              <label
+                className="platform-field-label"
+                htmlFor="heygen-motion-prompt"
+              >
+                Avatar motion prompt{' '}
+                <span style={{ color: 'var(--text-3)', fontWeight: 400 }}>
+                  (optional)
+                </span>
+              </label>
+              <textarea
+                id="heygen-motion-prompt"
+                className="platform-field-input"
+                rows={2}
+                maxLength={500}
+                placeholder="e.g. founder speaking directly to camera, gentle hand gestures, no distracting background motion"
+                value={settings.avatarMotionPrompt ?? ''}
+                onChange={(e) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    avatarMotionPrompt: e.target.value || null,
+                  }))
+                }
+                style={{ resize: 'vertical', minHeight: '60px' }}
+              />
+              <p className="platform-field-help">
+                Natural-language body language hint for Avatar IV.
+                Only applies to photo / UGC avatars (not studio
+                catalog avatars).
+              </p>
+            </div>
+          </div>
+        )}
       </div>
 
       <div
