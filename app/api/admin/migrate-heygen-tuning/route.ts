@@ -66,10 +66,20 @@ export async function GET() {
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+    // PR Sprint D-1 hotfix — `sql\`ANY(${COLUMNS})\`` expanded the JS
+    // array into a 5-tuple of params (`ANY(($1,$2,$3,$4,$5))`),
+    // which is invalid Postgres syntax. ANY() needs a single
+    // array-typed param. Easiest fix here: an explicit IN-list
+    // built with sql.join, which expands to `IN ($1, $2, …)` —
+    // valid syntax and still parameterized.
+    const placeholders = sql.join(
+      COLUMNS.map((c) => sql`${c}`),
+      sql`, `,
+    );
     const rows = (await db.execute(sql`
       SELECT column_name FROM information_schema.columns
         WHERE table_name = 'projects'
-          AND column_name = ANY(${COLUMNS})
+          AND column_name IN (${placeholders})
     `)) as unknown as Array<{ column_name: string }>;
     const present = rows.map((r) => r.column_name).sort();
     return NextResponse.json({
