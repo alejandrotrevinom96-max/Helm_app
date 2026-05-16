@@ -69,17 +69,22 @@ export async function GET() {
     // PR Sprint D-1 hotfix — `sql\`ANY(${COLUMNS})\`` expanded the JS
     // array into a 5-tuple of params (`ANY(($1,$2,$3,$4,$5))`),
     // which is invalid Postgres syntax. ANY() needs a single
-    // array-typed param. Easiest fix here: an explicit IN-list
-    // built with sql.join, which expands to `IN ($1, $2, …)` —
-    // valid syntax and still parameterized.
-    const placeholders = sql.join(
-      COLUMNS.map((c) => sql`${c}`),
-      sql`, `,
-    );
+    // array-typed param.
+    //
+    // We build the Postgres array literal as a single string
+    // (`'{a,b,c}'`) and let `::text[]` cast it server-side. This
+    // sends ONE bound parameter — not five — exactly the shape
+    // ANY() expects. Drizzle's `sql` template would otherwise
+    // spread the JS array into N comma-separated placeholders.
+    //
+    // Safe to inline COLUMNS into the literal because the values
+    // are hard-coded constants at the top of this file, never
+    // user input.
+    const columnNames = `{${COLUMNS.join(',')}}`;
     const rows = (await db.execute(sql`
       SELECT column_name FROM information_schema.columns
         WHERE table_name = 'projects'
-          AND column_name IN (${placeholders})
+          AND column_name = ANY(${columnNames}::text[])
     `)) as unknown as Array<{ column_name: string }>;
     const present = rows.map((r) => r.column_name).sort();
     return NextResponse.json({
