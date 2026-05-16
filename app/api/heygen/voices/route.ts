@@ -16,6 +16,25 @@
 // HeyGen returns voice gender as 'Male' / 'Female' / 'Unknown' /
 // etc. with inconsistent casing. We lowercase + collapse anything
 // non-male/female to 'neutral' so the matcher logic is simple.
+//
+// PR Sprint D-6 — V3 engine filter (Starfish-capable voices only).
+//
+// HeyGen V3 doesn't ship a separate voice catalog endpoint — the
+// canonical list of ~700 pre-made voices still lives at /v2/voices.
+// What V3 changed is the RENDER engine: Starfish (V3) is the new
+// ElevenLabs-v3-native TTS pipeline, vs the legacy HeyGen-internal
+// TTS that V2 used by default. Voices flagged with
+// `emotion_support: true` are Starfish-capable (they accept the
+// emotion enum, locale override, speed control — the V3 quality
+// envelope). Voices without it are legacy TTS-only, lower quality,
+// monotone in feed. Founder feedback was that the rigid avatars
+// looked bad; legacy voices are the audio equivalent.
+//
+// We filter on emotion_support + language_code presence (newer
+// voices ship with locale codes, older ones often have just a
+// human-readable language string). The filter takes the catalog
+// from ~700 voices down to the ~250-300 Starfish-compatible ones
+// that render with V3 quality.
 
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
@@ -116,9 +135,30 @@ export async function GET() {
       );
     }
 
+    // PR Sprint D-6 — track totals so we can surface "filtered
+    // X legacy voices" in the picker UI later if useful.
+    let totalSeen = 0;
+    let droppedLegacy = 0;
     const collected: VoiceOption[] = [];
     for (const v of body.data?.voices ?? []) {
       if (!v.voice_id || !v.name) continue;
+      totalSeen += 1;
+
+      // V3-engine filter. A voice is considered "modern / Starfish-
+      // capable" if BOTH:
+      //   - emotion_support === true (V3 emotion enum compatibility)
+      //   - language_code is present (newer catalog metadata)
+      // Either signal alone has too many false positives — a few
+      // legacy voices have emotion_support tagged but render with
+      // the old TTS, and a few modern voices ship without
+      // language_code in this API version. The AND is conservative
+      // but stable.
+      const isModern = Boolean(v.emotion_support) && Boolean(v.language_code);
+      if (!isModern) {
+        droppedLegacy += 1;
+        continue;
+      }
+
       collected.push({
         voiceId: v.voice_id,
         name: v.name,
@@ -129,7 +169,11 @@ export async function GET() {
       });
     }
 
-    return NextResponse.json({ voices: collected });
+    return NextResponse.json({
+      voices: collected,
+      totalSeen,
+      droppedLegacy,
+    });
   } catch (e) {
     return NextResponse.json(
       {
