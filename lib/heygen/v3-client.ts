@@ -334,3 +334,125 @@ export async function getFinalVideo(
   if (!r.ok) return r;
   return { ok: true, video: r.data };
 }
+
+// ─────────────────────────────────────────────────────────────
+// Text-to-speech — Starfish engine
+// ─────────────────────────────────────────────────────────────
+//
+// POST /v3/voices/speech
+// Generates an audio file from text + voice_id. Required when
+// we want to pass audio (not a script) downstream — e.g. the
+// lipsync endpoint takes audio_url + video_url, not a script.
+
+export interface SpeechResult {
+  audio_url: string;
+  duration: number | null;
+}
+
+interface SpeechResponse {
+  audio_url?: string;
+  url?: string; // some HeyGen responses use 'url' instead
+  duration?: number;
+}
+
+export async function generateSpeech(args: {
+  script: string;
+  voiceId: string;
+  locale?: string;
+  speed?: number;
+}): Promise<
+  { ok: true; result: SpeechResult } | { ok: false; error: string }
+> {
+  const body: Record<string, unknown> = {
+    script: args.script,
+    voice_id: args.voiceId,
+  };
+  if (args.locale) body.locale = args.locale;
+  if (args.speed) body.speed = args.speed;
+  const r = await v3<SpeechResponse>('/voices/speech', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) return r;
+  const audioUrl = r.data.audio_url ?? r.data.url ?? null;
+  if (!audioUrl) {
+    return { ok: false, error: 'Speech response had no audio_url' };
+  }
+  return {
+    ok: true,
+    result: { audio_url: audioUrl, duration: r.data.duration ?? null },
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Lipsync — re-render audio on an existing video
+// ─────────────────────────────────────────────────────────────
+
+export type LipsyncMode = 'speed' | 'precision';
+
+export interface LipsyncJobView {
+  lipsync_id: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  video_url: string | null;
+  caption_url: string | null;
+  duration: number | null;
+  failure_code: string | null;
+  failure_message: string | null;
+}
+
+interface LipsyncCreateResponse {
+  lipsync_id?: string;
+}
+
+export async function createLipsync(args: {
+  videoUrl: string;
+  audioUrl: string;
+  mode?: LipsyncMode;
+  title?: string;
+  enableCaption?: boolean;
+  enableSpeechEnhancement?: boolean;
+  callbackId?: string;
+}): Promise<
+  { ok: true; lipsyncId: string } | { ok: false; error: string }
+> {
+  const body: Record<string, unknown> = {
+    video: { type: 'url', url: args.videoUrl },
+    audio: { type: 'url', url: args.audioUrl },
+    mode: args.mode ?? 'speed',
+    // Captions are table stakes for UGC on muted-by-default
+    // social platforms — flip them on by default for every
+    // lipsync re-render. Founder can opt out via the UI later.
+    enable_caption: args.enableCaption ?? true,
+    // Lifts perceived voice quality at no perceptible time
+    // cost in our experiments.
+    enable_speech_enhancement: args.enableSpeechEnhancement ?? true,
+    // Allow HeyGen to stretch / shrink the video to fit the
+    // new audio's natural duration. Without this, a longer
+    // script gets clipped and a shorter one leaves silence.
+    enable_dynamic_duration: true,
+  };
+  if (args.title) body.title = args.title;
+  if (args.callbackId) body.callback_id = args.callbackId;
+  const r = await v3<LipsyncCreateResponse>('/lipsyncs', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) return r;
+  if (!r.data.lipsync_id) {
+    return { ok: false, error: 'Lipsync response had no lipsync_id' };
+  }
+  return { ok: true, lipsyncId: r.data.lipsync_id };
+}
+
+export async function getLipsync(
+  lipsyncId: string,
+): Promise<
+  { ok: true; job: LipsyncJobView } | { ok: false; error: string }
+> {
+  const r = await v3<LipsyncJobView>(
+    `/lipsyncs/${encodeURIComponent(lipsyncId)}`,
+    { method: 'GET' },
+  );
+  if (!r.ok) return r;
+  return { ok: true, job: r.data };
+}

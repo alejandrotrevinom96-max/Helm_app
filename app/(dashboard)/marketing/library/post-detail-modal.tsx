@@ -17,6 +17,11 @@ import type { LibraryPost } from '@/app/api/marketing/library/route';
 import { ShareButton } from '@/components/share/share-button';
 import { ShipsWheelLoader, PulseMarkLoader } from '@/components/ui/loaders';
 import { ScheduleModal } from './schedule-modal';
+// PR Sprint D-4 — Lipsync re-render modal. Surfaced on UGC /
+// Reel rows that already have a completed HeyGen render — lets
+// the founder tweak the spoken script + re-render at 5-10x
+// lower cost than a full Avatar IV pass.
+import { LipsyncRerenderModal } from './lipsync-rerender-modal';
 
 // PR #86 — Sprint 7.10: HeyGen video job lifecycle types. Mirrors
 // the serializeJob() shape in /api/heygen/jobs.
@@ -190,6 +195,8 @@ export function PostDetailModal({
   const [heygenLoading, setHeygenLoading] = useState(false);
   const [heygenError, setHeygenError] = useState<string | null>(null);
   const [heygenStarting, setHeygenStarting] = useState(false);
+  // PR Sprint D-4 — lipsync re-render modal toggle.
+  const [lipsyncOpen, setLipsyncOpen] = useState(false);
   // Polling guard — only one interval per modal mount.
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -1221,6 +1228,20 @@ export function PostDetailModal({
                   >
                     ⬇ Download video
                   </a>
+                  {/* PR Sprint D-4 — re-render with edited script. Surfaces
+                      only when we have a heygenJob.id to anchor the
+                      lipsync to (siblings of an asset group don't have
+                      their own job row). Cheaper alternative to firing
+                      a full Avatar IV re-render through fire.ts. */}
+                  {heygenJob?.id && (
+                    <button
+                      type="button"
+                      onClick={() => setLipsyncOpen(true)}
+                      className="inline-flex items-center gap-2 px-3 py-1.5 bg-bg border border-border rounded-lg text-xs font-medium hover:bg-bg-elev hover:border-border-bright"
+                    >
+                      ↻ Edit script & re-render
+                    </button>
+                  )}
                   {/* PR #87 — Sprint 7.11: Send to TikTok inbox.
                       Surfaces only on scheduled rows because the
                       upload endpoint requires a scheduledPostId.
@@ -1809,6 +1830,24 @@ export function PostDetailModal({
           siblings={assetSiblings}
           onScheduled={handleScheduled}
           onClose={() => setShowSchedule(false)}
+        />
+      )}
+      {/* PR Sprint D-4 — lipsync re-render modal. Gated on
+          heygenJob.id being available (the parent block already
+          enforces this on the trigger button); the modal does
+          all polling + UI internally so this parent just owns
+          the open/close toggle. Initial script comes from the
+          asset's stored baseContent (the canonical script —
+          same value HeyGen's job was originally fired with). */}
+      {lipsyncOpen && heygenJob?.id && (
+        <LipsyncRerenderModal
+          sourceJobId={heygenJob.id}
+          initialScript={
+            (
+              post.structuredContent as { baseContent?: string } | null
+            )?.baseContent ?? post.content
+          }
+          onClose={() => setLipsyncOpen(false)}
         />
       )}
     </div>

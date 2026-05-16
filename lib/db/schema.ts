@@ -2152,3 +2152,65 @@ export type HeygenAgentSessionRow =
   typeof heygenAgentSessions.$inferSelect;
 export type NewHeygenAgentSessionRow =
   typeof heygenAgentSessions.$inferInsert;
+
+// ===== HeyGen Lipsync Jobs =====
+// PR Sprint D-4 — script-edit re-rendering via HeyGen V3 lipsync.
+//
+// When a founder wants to tweak a UGC's spoken text without
+// re-rendering the entire avatar pass (5-10x cheaper, 2-3x
+// faster), we:
+//   1. TTS the new script via /v3/voices/speech using the
+//      project's current voice_id.
+//   2. Pass the original video URL + the new audio URL to
+//      /v3/lipsyncs.
+//   3. Poll until completion, then replace the visible video
+//      on the Library card.
+//
+// Mode 'speed' is default — Avatar IV's diffusion path runs
+// cheaper at this mode and the quality is good enough for UGC.
+// 'precision' is available for high-stakes content.
+//
+// We keep the original heygen_jobs row intact + spawn this
+// lipsync row alongside it (sourceJobId FK). Lets the founder
+// see both the original render + the re-render in version
+// history, and we don't lose the original Avatar IV cost if
+// the lipsync fails.
+export const heygenLipsyncJobs = pgTable('heygen_lipsync_jobs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  projectId: uuid('project_id')
+    .notNull()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  // The original heygen_jobs render whose audio is being
+  // replaced. Cascade-delete: the lipsync is meaningless without
+  // the source video.
+  sourceJobId: uuid('source_job_id')
+    .notNull()
+    .references(() => heygenJobs.id, { onDelete: 'cascade' }),
+  // HeyGen's lipsync_id, returned from POST /v3/lipsyncs.
+  heygenLipsyncId: text('heygen_lipsync_id').notNull(),
+  // Mode: 'speed' (default) or 'precision'.
+  mode: text('mode').notNull().default('speed'),
+  // Edited script the founder submitted; we TTS this and
+  // hand the resulting audio URL to HeyGen's lipsync.
+  editedScript: text('edited_script').notNull(),
+  // 'pending' | 'processing' | 'completed' | 'failed'
+  status: text('status').notNull().default('pending'),
+  // URL of the resulting re-rendered video. Same shape as
+  // heygen_jobs.videoUrl so the library leftJoin can swap
+  // them in if we ever want lipsyncs to BECOME the asset's
+  // canonical render.
+  resultVideoUrl: text('result_video_url'),
+  resultCaptionUrl: text('result_caption_url'),
+  durationSec: numeric('duration_sec', { precision: 7, scale: 2 }),
+  errorMessage: text('error_message'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  completedAt: timestamp('completed_at'),
+});
+
+export type HeygenLipsyncJobRow = typeof heygenLipsyncJobs.$inferSelect;
+export type NewHeygenLipsyncJobRow =
+  typeof heygenLipsyncJobs.$inferInsert;
