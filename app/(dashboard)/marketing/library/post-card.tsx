@@ -182,16 +182,37 @@ export function LibraryPostCard({ post, onClick }: Props) {
         </span>
       </div>
 
-      {/* PR Sprint 7.24 — Prompt 4. Visual / placeholder. When the
-          row has a generated image, render it; otherwise show a
-          dashed-border placeholder that hints "+ Add visual". The
-          placeholder is purely visual (not a click handler) so the
-          card-level onClick still opens the detail modal where the
-          founder can trigger generation. UGC and Reel skip the
-          placeholder entirely — they don't carry cover images on
-          the card surface, the script preview below is the focal
-          element. */}
-      {post.visualUrl ? (
+      {/* PR Sprint 7.26 — Asset-based content flow. UGC / Reel
+          drafts now embed the rendered HeyGen video directly on
+          the card (not just a script preview). post.videoUrl is
+          hydrated by the library API's LEFT JOIN on
+          content_assets, so EVERY platform variant in an asset
+          group shows the same render. Falls through to the legacy
+          image / placeholder logic for non-video content types. */}
+      {post.videoUrl &&
+      (post.contentType === 'ugc' ||
+        post.contentType === 'reel' ||
+        post.isReel) ? (
+        <video
+          src={post.videoUrl}
+          controls
+          playsInline
+          // muted+loop so a hover preview feels natural without
+          // surprising audio. The user can unmute via the native
+          // controls when they want sound.
+          muted
+          loop
+          preload="metadata"
+          className="w-full aspect-video object-cover rounded-lg mb-3 bg-bg-elev"
+          poster={post.visualUrl ?? undefined}
+          onClick={(e) => {
+            // Native controls swallow clicks anyway, but
+            // stopPropagation here keeps the card-level onClick
+            // (open modal) from firing when the user pauses/plays.
+            e.stopPropagation();
+          }}
+        />
+      ) : post.visualUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={post.visualUrl}
@@ -210,6 +231,20 @@ export function LibraryPostCard({ post, onClick }: Props) {
             </div>
             <div className="text-[10px] font-mono uppercase tracking-[0.15em]">
               + Add visual
+            </div>
+          </div>
+        </div>
+      ) : (post.contentType === 'ugc' || post.contentType === 'reel') ? (
+        // Video pending — show a "rendering" placeholder so the
+        // founder knows the HeyGen render is in flight instead of
+        // staring at script-only chrome.
+        <div className="w-full aspect-video rounded-lg mb-3 bg-bg-elev border border-dashed border-purple-500/30 flex items-center justify-center text-purple-500">
+          <div className="text-center">
+            <div className="text-2xl mb-1 opacity-80" aria-hidden>
+              🎬
+            </div>
+            <div className="text-[10px] font-mono uppercase tracking-[0.15em]">
+              Video rendering…
             </div>
           </div>
         </div>

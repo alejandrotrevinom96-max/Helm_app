@@ -1128,23 +1128,50 @@ export function PostDetailModal({
               />
             )}
 
-            {heygenJob?.status === 'completed' && heygenJob.videoUrl && (
+            {/* PR Sprint 7.26 — Asset-based content flow.
+                videoUrl resolution order:
+                  1. heygenJob.videoUrl — present when this draft
+                     is the one a heygen_jobs row is keyed to (the
+                     "primary" of the asset group).
+                  2. post.videoUrl — hydrated by the library API's
+                     LEFT JOIN on content_assets, present for the
+                     SIBLING drafts in the same asset group that
+                     don't have their own heygen_jobs row.
+                We trust post.videoUrl alone as the readiness
+                signal when no heygenJob is loaded (i.e. for
+                siblings); the leftJoin only fills the column
+                AFTER the webhook flips status to completed. */}
+            {(() => {
+              const displayVideoUrl =
+                heygenJob?.videoUrl ?? post.videoUrl ?? null;
+              const videoReady =
+                (heygenJob?.status === 'completed' && !!heygenJob.videoUrl) ||
+                (!heygenJob && !!post.videoUrl);
+              if (!videoReady || !displayVideoUrl) return null;
+              return (
               <div className="space-y-3">
                 <div className="flex items-center gap-2 text-sm text-emerald-500">
                   <span>✓</span>
                   <span>Video ready</span>
                 </div>
-                {heygenJob.thumbnailUrl && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={heygenJob.thumbnailUrl}
-                    alt="Video thumbnail"
-                    className="rounded-lg w-full max-w-xs"
-                  />
-                )}
+                {/* PR Sprint 7.26 — actual <video> player. Pre-fix
+                    the modal only showed a thumbnail + download
+                    link; the founder had to download to preview,
+                    which is a friction point for a "is this the
+                    right take?" check. Native controls + muted
+                    autoplay-on-pause + loop matches the card-level
+                    preview UX. */}
+                <video
+                  src={displayVideoUrl}
+                  controls
+                  playsInline
+                  preload="metadata"
+                  poster={heygenJob?.thumbnailUrl ?? undefined}
+                  className="rounded-lg w-full max-w-md aspect-[9/16] object-cover bg-bg"
+                />
                 <div className="flex flex-wrap items-center gap-2">
                   <a
-                    href={heygenJob.videoUrl}
+                    href={displayVideoUrl}
                     download
                     target="_blank"
                     rel="noopener noreferrer"
@@ -1187,7 +1214,11 @@ export function PostDetailModal({
                       </a>
                     ))}
                 </div>
-                {heygenJob.durationSeconds !== null && (
+                {/* PR Sprint 7.26 — heygenJob may be null for
+                    sibling drafts (the heygen_jobs row is keyed
+                    to the FIRST draft only). Optional chain so
+                    the duration row simply omits for siblings. */}
+                {heygenJob?.durationSeconds != null && (
                   <div className="text-[10px] text-text-3">
                     Duration: {heygenJob.durationSeconds}s
                   </div>
@@ -1237,7 +1268,8 @@ export function PostDetailModal({
                   <div className="text-xs text-danger">{tiktokError}</div>
                 )}
               </div>
-            )}
+              );
+            })()}
 
             {heygenJob?.status === 'failed' && (
               <div className="space-y-2">

@@ -76,7 +76,16 @@ export function AssetGroupCard({ posts, onClick }: Props) {
   // from the first row for the chrome.
   const head = posts[0];
   const status = STATUS_STYLES[head.status];
+  // The library API hydrates videoUrl + visualUrl from
+  // content_assets via LEFT JOIN, so every post in the group has
+  // the same value — but `find` is defensive against an edge case
+  // where one row was inserted before the asset hydration shipped.
   const visualUrl = posts.find((p) => p.visualUrl)?.visualUrl ?? null;
+  const videoUrl = posts.find((p) => p.videoUrl)?.videoUrl ?? null;
+  const isVideoAsset =
+    head.contentType === 'ugc' ||
+    head.contentType === 'reel' ||
+    posts.some((p) => p.isReel);
   const dateLabel =
     head.status === 'draft'
       ? `Created ${formatRelativeDate(head.createdAt)}`
@@ -126,14 +135,41 @@ export function AssetGroupCard({ posts, onClick }: Props) {
         ))}
       </div>
 
-      {/* Cover image — any of the posts in the group can hold it */}
-      {visualUrl ? (
+      {/* Media preview — video for ugc/reel assets, image for
+          photo/carousel. PR Sprint 7.26: the asset's videoUrl /
+          imageUrls are mirrored across every platform variant via
+          the library leftJoin, so we can render the same media
+          here regardless of which post the founder clicks. */}
+      {videoUrl && isVideoAsset ? (
+        <video
+          src={videoUrl}
+          controls
+          playsInline
+          muted
+          loop
+          preload="metadata"
+          className="w-full aspect-video object-cover rounded-lg mb-3 bg-bg-elev"
+          poster={visualUrl ?? undefined}
+          onClick={(e) => e.stopPropagation()}
+        />
+      ) : visualUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={visualUrl}
           alt=""
           className="w-full aspect-video object-cover rounded-lg mb-3 bg-bg-elev"
         />
+      ) : isVideoAsset ? (
+        <div className="w-full aspect-video rounded-lg mb-3 bg-bg-elev border border-dashed border-purple-500/30 flex items-center justify-center text-purple-500">
+          <div className="text-center">
+            <div className="text-2xl mb-1 opacity-80" aria-hidden>
+              🎬
+            </div>
+            <div className="text-[10px] font-mono uppercase tracking-[0.15em]">
+              Video rendering…
+            </div>
+          </div>
+        </div>
       ) : null}
 
       {/* Body preview — shared asset baseContent */}
