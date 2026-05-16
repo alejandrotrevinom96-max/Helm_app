@@ -29,9 +29,22 @@ import {
   isAvatarUploadFailure,
   AVATAR_MAX_BYTES,
 } from '@/lib/storage/avatar-upload';
-import type { AvatarOption } from '@/app/api/heygen/avatars/route';
+import type {
+  AvatarOption,
+  AvatarCategory,
+} from '@/app/api/heygen/avatars/route';
 
-type AvatarType = 'stock' | 'photo' | 'twin';
+// PR Sprint 7.25 Phase 11.15 — 'talking_photo' joins the union as
+// the saved DB value for HeyGen's modern UGC/Instant Avatar
+// catalog. Visually it still uses the "Use a stock avatar" radio
+// (because from the founder's POV it's all "pick from our catalog"),
+// but the underlying saved avatarType differs so the fire helper
+// can build the correct character payload.
+type AvatarType = 'stock' | 'photo' | 'twin' | 'talking_photo';
+
+// Category filter for the picker modal. Matches the values
+// AvatarOption.category can take (plus 'all' for no filter).
+type CategoryFilter = 'all' | AvatarCategory;
 
 interface AvatarSettings {
   avatarType: AvatarType | null;
@@ -60,6 +73,11 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
   const [genderFilter, setGenderFilter] = useState<
     'all' | 'male' | 'female'
   >('all');
+  // PR Sprint 7.25 Phase 11.15 — category tabs in the picker.
+  // Defaults to 'all' so founders see the full mixed catalog; the
+  // route handler already sorts UGC > lifestyle > other >
+  // professional, so the modern avatars surface first regardless.
+  const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all');
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -82,11 +100,19 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
           voiceId: string | null;
         };
         if (!cancelled) {
+          // PR Sprint 7.25 Phase 11.15 — preserve 'talking_photo'
+          // as its own avatarType so the fire helper picks the
+          // right character payload, but both 'stock' and
+          // 'talking_photo' light up the same "Use a stock avatar"
+          // radio in the UI (they're both "pick from our catalog"
+          // from the founder's perspective).
           let derived: AvatarType | null = null;
           if (data.avatarType === 'photo' && data.photoUrl) {
             derived = 'photo';
           } else if (data.avatarType === 'twin') {
             derived = 'twin';
+          } else if (data.avatarType === 'talking_photo' && data.avatarId) {
+            derived = 'talking_photo';
           } else if (data.avatarType === 'stock' && data.avatarId) {
             derived = 'stock';
           }
@@ -133,7 +159,14 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
   }, []);
 
   useEffect(() => {
-    if (settings.avatarType === 'stock' && avatars.length === 0) {
+    // PR Sprint 7.25 Phase 11.15 — also auto-load the catalog when
+    // the saved avatarType is 'talking_photo' since both share the
+    // same "stock" radio + picker modal.
+    if (
+      (settings.avatarType === 'stock' ||
+        settings.avatarType === 'talking_photo') &&
+      avatars.length === 0
+    ) {
       void loadAvatars();
     }
   }, [settings.avatarType, avatars.length, loadAvatars]);
@@ -168,7 +201,14 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
       }> = {
         avatarType: settings.avatarType,
       };
-      if (settings.avatarType === 'stock') {
+      // PR Sprint 7.25 Phase 11.15 — both 'stock' and 'talking_photo'
+      // store their ID in heygenAvatarId; only 'photo' uses
+      // heygenPhotoUrl (legacy column name from when 'photo' was
+      // the only talking_photo path).
+      if (
+        settings.avatarType === 'stock' ||
+        settings.avatarType === 'talking_photo'
+      ) {
         body.avatarId = settings.avatarId;
       }
       if (settings.avatarType === 'photo') {
@@ -191,6 +231,8 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
         let derived: AvatarType | null = null;
         if (savedType === 'photo' && data.photoUrl) derived = 'photo';
         else if (savedType === 'twin') derived = 'twin';
+        else if (savedType === 'talking_photo' && data.avatarId)
+          derived = 'talking_photo';
         else if (savedType === 'stock' && data.avatarId) derived = 'stock';
         setSettings({
           avatarType: derived,
@@ -240,11 +282,17 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
       )}
 
       <div style={{ marginTop: '14px' }}>
-        {/* Option A — Stock */}
+        {/* Option A — Stock (covers both 'stock' studio avatars
+            and 'talking_photo' UGC/Instant avatars — same picker,
+            same radio, the underlying saved type just differs
+            based on which catalog the picked avatar came from). */}
         <div
           role="radio"
           tabIndex={0}
-          aria-checked={settings.avatarType === 'stock'}
+          aria-checked={
+            settings.avatarType === 'stock' ||
+            settings.avatarType === 'talking_photo'
+          }
           onClick={() => pickRadio('stock')}
           onKeyDown={(e) => {
             if (e.key === 'Enter' || e.key === ' ') {
@@ -253,7 +301,8 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
             }
           }}
           className={`platform-avatar-option${
-            settings.avatarType === 'stock'
+            settings.avatarType === 'stock' ||
+            settings.avatarType === 'talking_photo'
               ? ' platform-avatar-option-on'
               : ''
           }`}
@@ -262,11 +311,12 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
           <div className="platform-avatar-body">
             <h4>Use a stock avatar</h4>
             <p>
-              Pick from our curated catalog. Fastest path — videos render in
-              ~2 minutes.
+              Pick from our curated catalog — including modern UGC styles.
+              Fastest path: videos render in ~2 minutes.
             </p>
 
-            {settings.avatarType === 'stock' && (
+            {(settings.avatarType === 'stock' ||
+              settings.avatarType === 'talking_photo') && (
               <div className="platform-avatar-body-inner">
                 {avatarsLoading && (
                   <div className="platform-field-help">Loading catalog…</div>
@@ -554,18 +604,28 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
           selectedId={settings.avatarId}
           genderFilter={genderFilter}
           onGenderFilterChange={setGenderFilter}
-          onSelect={(id) => {
+          categoryFilter={categoryFilter}
+          onCategoryFilterChange={setCategoryFilter}
+          onSelect={(picked) => {
             // PR Sprint 7.25 Phase 11.12 — also stamp the avatar's
             // recommended voice so the next HeyGen call has a
             // valid voice_id. The /v2 API rejects payloads without
             // one. AvatarOption.defaultVoiceId comes from HeyGen's
             // own per-avatar default; falls back to null and the
             // server then uses DEFAULT_HEYGEN_VOICE_ID.
-            const picked = avatars.find((a) => a.avatarId === id);
+            //
+            // PR Sprint 7.25 Phase 11.15 — stamp avatarType from
+            // the AvatarOption's `kind` so the save endpoint and
+            // fire helper know whether to build an /v2/avatars or
+            // /v2/talking_photo payload. The "Stock" radio is the
+            // visual UI; the saved DB value carries the catalog
+            // origin so the right HeyGen API is called downstream.
             setSettings((prev) => ({
               ...prev,
-              avatarId: id,
-              voiceId: picked?.defaultVoiceId ?? prev.voiceId,
+              avatarType:
+                picked.kind === 'talking_photo' ? 'talking_photo' : 'stock',
+              avatarId: picked.avatarId,
+              voiceId: picked.defaultVoiceId ?? prev.voiceId,
             }));
             setPickerOpen(false);
           }}
@@ -587,6 +647,8 @@ function AvatarPickerModal({
   selectedId,
   genderFilter,
   onGenderFilterChange,
+  categoryFilter,
+  onCategoryFilterChange,
   onSelect,
   onClose,
 }: {
@@ -594,7 +656,16 @@ function AvatarPickerModal({
   selectedId: string | null;
   genderFilter: 'all' | 'male' | 'female';
   onGenderFilterChange: (v: 'all' | 'male' | 'female') => void;
-  onSelect: (id: string) => void;
+  // PR Sprint 7.25 Phase 11.15 — category tabs (All / UGC /
+  // Professional / Lifestyle). Driven by AvatarOption.category
+  // which the route handler heuristically assigns from name +
+  // tags + kind (talking_photo always lands in 'ugc').
+  categoryFilter: CategoryFilter;
+  onCategoryFilterChange: (v: CategoryFilter) => void;
+  // onSelect now receives the full AvatarOption so the caller can
+  // read both `kind` (drives avatarType) and `defaultVoiceId`
+  // (stamps voice).
+  onSelect: (picked: AvatarOption) => void;
   onClose: () => void;
 }) {
   useEffect(() => {
@@ -645,10 +716,18 @@ function AvatarPickerModal({
   }, []);
   if (!mounted) return null;
 
+  // PR Sprint 7.25 Phase 11.15 — compound filter: category × gender.
+  // Both default to 'all' so the modal opens with the unfiltered
+  // catalog (already pre-sorted UGC-first by the route).
   const filtered = avatars.filter((a) => {
-    if (genderFilter === 'all') return true;
-    const g = (a.gender ?? '').toLowerCase();
-    return g.startsWith(genderFilter[0]);
+    if (categoryFilter !== 'all' && a.category !== categoryFilter) {
+      return false;
+    }
+    if (genderFilter !== 'all') {
+      const g = (a.gender ?? '').toLowerCase();
+      if (!g.startsWith(genderFilter[0])) return false;
+    }
+    return true;
   });
 
   return createPortal(
@@ -684,7 +763,44 @@ function AvatarPickerModal({
           </button>
         </div>
 
-        <div className="px-5 md:px-7 py-3 border-b border-border flex flex-wrap gap-2 shrink-0">
+        {/* PR Sprint 7.25 Phase 11.15 — category tabs. UGC surfaces
+            the modern talking_photo styles (Annie, Terry, Christina
+            etc); Professional is the legacy studio catalog;
+            Lifestyle is the in-between casual-but-not-UGC bucket.
+            Sits ABOVE the gender row because category is the
+            primary axis founders care about — gender is a refinement
+            within a vibe. */}
+        <div className="px-5 md:px-7 py-3 border-b border-border flex flex-wrap items-center gap-2 shrink-0">
+          <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mr-1">
+            Vibe
+          </span>
+          {(
+            [
+              ['all', 'All'],
+              ['ugc', 'UGC'],
+              ['professional', 'Professional'],
+              ['lifestyle', 'Lifestyle'],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => onCategoryFilterChange(key)}
+              className={`px-3 py-1.5 rounded text-[11px] font-mono uppercase tracking-[0.1em] transition-colors ${
+                categoryFilter === key
+                  ? 'bg-accent text-white'
+                  : 'bg-bg border border-border text-text-2 hover:border-border-bright'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div className="px-5 md:px-7 py-3 border-b border-border flex flex-wrap items-center gap-2 shrink-0">
+          <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mr-1">
+            Gender
+          </span>
           {(
             [
               ['all', 'All'],
@@ -729,7 +845,7 @@ function AvatarPickerModal({
                   <button
                     key={a.avatarId}
                     type="button"
-                    onClick={() => onSelect(a.avatarId)}
+                    onClick={() => onSelect(a)}
                     className={`group relative aspect-[3/4] rounded-xl overflow-hidden border-2 transition-all text-left ${
                       selected
                         ? 'border-accent ring-2 ring-accent/40 scale-[0.98]'

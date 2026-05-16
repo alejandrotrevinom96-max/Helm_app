@@ -151,6 +151,19 @@ export async function fireHeygenForJob(
   project: Project,
 ): Promise<HeygenFireResult> {
   const avatarType = project.heygenAvatarType ?? 'stock';
+  // PR Sprint 7.25 Phase 11.15 — three character shapes now:
+  //   - 'photo'          → founder-uploaded talking_photo, ID is
+  //                        stored in project.heygenPhotoUrl
+  //                        (legacy column name; pre-dates the
+  //                        Instant Avatar catalog).
+  //   - 'talking_photo'  → HeyGen catalog Instant/UGC avatar from
+  //                        /v2/talking_photo, ID stored in
+  //                        project.heygenAvatarId.
+  //   - everything else  → 'stock' (legacy /v2/avatars), studio
+  //                        avatar with avatar_style='normal'.
+  // Both talking_photo branches need `use_avatar_iv_model: true`
+  // so HeyGen renders the modern Instant Avatar pipeline (not the
+  // older static-image lipsync).
   const character: HeygenGenerateRequest['video_inputs'][number]['character'] =
     avatarType === 'photo'
       ? {
@@ -158,11 +171,17 @@ export async function fireHeygenForJob(
           talking_photo_id: project.heygenPhotoUrl!,
           use_avatar_iv_model: true,
         }
-      : {
-          type: 'avatar',
-          avatar_id: project.heygenAvatarId!,
-          avatar_style: 'normal',
-        };
+      : avatarType === 'talking_photo'
+        ? {
+            type: 'talking_photo',
+            talking_photo_id: project.heygenAvatarId!,
+            use_avatar_iv_model: true,
+          }
+        : {
+            type: 'avatar',
+            avatar_id: project.heygenAvatarId!,
+            avatar_style: 'normal',
+          };
 
   // PR Sprint 7.25 Phase 11.12 — voice_id is mandatory now. Order
   // of preference:

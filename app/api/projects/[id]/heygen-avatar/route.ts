@@ -21,8 +21,21 @@ import { NextResponse } from 'next/server';
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-type AvatarType = 'stock' | 'photo' | 'twin';
-const AVATAR_TYPES: AvatarType[] = ['stock', 'photo', 'twin'];
+// PR Sprint 7.25 Phase 11.15 — 'talking_photo' is a new avatarType
+// for HeyGen's modern UGC/Instant Avatar catalog. The picker can
+// now save IDs from /v2/talking_photo (kind='talking_photo' on the
+// AvatarOption); lib/heygen/fire.ts reads heygenAvatarId as the
+// talking_photo_id and builds the matching `character` payload.
+// The DB column `projects.heygen_avatar_type` is a plain `text`
+// column with no CHECK constraint, so no migration is needed —
+// we just expand the API's allowlist.
+type AvatarType = 'stock' | 'photo' | 'twin' | 'talking_photo';
+const AVATAR_TYPES: AvatarType[] = [
+  'stock',
+  'photo',
+  'twin',
+  'talking_photo',
+];
 
 async function loadOwnedProject(
   userId: string,
@@ -105,7 +118,10 @@ export async function PATCH(
       !AVATAR_TYPES.includes(body.avatarType as AvatarType)
     ) {
       return NextResponse.json(
-        { error: 'avatarType must be one of: stock, photo, twin' },
+        {
+          error:
+            'avatarType must be one of: stock, photo, twin, talking_photo',
+        },
         { status: 400 },
       );
     }

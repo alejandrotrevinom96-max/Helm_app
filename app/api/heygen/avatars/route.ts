@@ -1,14 +1,32 @@
 // PR #86 — Sprint 7.10: HeyGen stock avatar list proxy.
+// PR Sprint 7.25 Phase 11.15 — surface HeyGen's modern UGC /
+// Instant Avatar catalog alongside the legacy stock catalog.
 //
 // GET /api/heygen/avatars
-// Returns the trimmed list of stock avatars HeyGen offers under
-// the founder's account. We proxy (instead of having the browser
-// call HeyGen directly) because:
-//   1. The HeyGen API key must stay server-side.
-//   2. We filter the upstream payload to the three fields the
-//      Settings dropdown actually renders (avatar_id, name,
-//      preview_image_url) — keeps the page payload tiny.
-//   3. We can cache per-deploy in front of HeyGen's quota.
+// Returns a unified list of:
+//   - GET /v2/avatars?include_public=true   (own + public stock)
+//   - GET /v2/talking_photo                (Instant / UGC avatars)
+//
+// Why two endpoints: HeyGen's account-scoped /v2/avatars only
+// returned the legacy "studio" catalog (Annelore in Red sweater
+// etc). The modern UGC-style avatars (Annie, Terry, Christina,
+// the colorful selfie-cam ones founders actually want) live
+// under /v2/talking_photo AND in the public catalog flag on
+// /v2/avatars. Founders kept asking why their "stock catalog"
+// only showed corporate avatars; this PR is the answer.
+//
+// Each item gets two new metadata fields:
+//   - kind: 'avatar' | 'talking_photo' — which HeyGen API the
+//     id came from. The avatar save endpoint stores this so
+//     lib/heygen/fire.ts can build the right `character` payload
+//     ('avatar' → {type:'avatar', avatar_id}, 'talking_photo' →
+//     {type:'talking_photo', talking_photo_id, use_avatar_iv_model}).
+//   - category: 'ugc' | 'professional' | 'lifestyle' | 'other' —
+//     heuristic from name + HeyGen tags. Drives the picker UI
+//     tabs ([All | UGC | Professional | Lifestyle]).
+//
+// Sort: ugc > lifestyle > other > professional (so the modern
+// UGC styles surface first in the default 'All' view).
 //
 // Auth: any logged-in user can list — the picker drives a
 // settings choice scoped to their own active project later.
@@ -24,20 +42,44 @@ interface HeygenAvatarRaw {
   preview_url?: string;
   gender?: string;
   premium?: boolean;
-  // PR Sprint 7.25 Phase 11.12 — HeyGen exposes each avatar's
-  // recommended voice. We pass it through to the picker so the
-  // avatar-save endpoint can stamp the project with a working
-  // voice_id automatically (the V2 API now rejects payloads that
-  // omit voice_id).
   default_voice?: string;
+  // Some HeyGen responses include tags / type per avatar. We
+  // capture both opportunistically — neither is strictly typed
+  // on their side.
+  tags?: string[];
+  type?: string;
+}
+
+interface HeygenTalkingPhotoRaw {
+  talking_photo_id?: string;
+  talking_photo_name?: string;
+  name?: string;
+  preview_image_url?: string;
+  status?: string;
+  // Talking photos also occasionally surface gender / tags in
+  // newer API versions.
+  gender?: string;
+  tags?: string[];
 }
 
 interface HeygenAvatarsResponse {
   error?: { message?: string } | null;
   data?: {
     avatars?: HeygenAvatarRaw[];
+    // Some HeyGen API versions return talking_photos in the
+    // /v2/avatars response when include_public=true. Capture
+    // both shapes.
+    talking_photos?: HeygenTalkingPhotoRaw[];
   };
 }
+
+interface HeygenTalkingPhotoResponse {
+  error?: { message?: string } | null;
+  data?: HeygenTalkingPhotoRaw[];
+}
+
+export type AvatarKind = 'avatar' | 'talking_photo';
+export type AvatarCategory = 'ugc' | 'professional' | 'lifestyle' | 'other';
 
 export interface AvatarOption {
   avatarId: string;
@@ -45,15 +87,67 @@ export interface AvatarOption {
   previewImageUrl: string | null;
   gender: string | null;
   premium: boolean;
-  // PR Sprint 7.25 Phase 11.12 — passes through to the picker UI
-  // so the avatar save can stamp project.heygenVoiceId with the
-  // avatar's recommended voice on selection.
   defaultVoiceId: string | null;
+  // PR Sprint 7.25 Phase 11.15
+  kind: AvatarKind;
+  category: AvatarCategory;
 }
 
-// 10-minute cache — HeyGen's avatar catalog changes rarely; we
-// don't need to hammer their API on every Settings page load.
+// 10-minute cache — HeyGen's catalog changes rarely; we don't
+// need to hammer their API on every Settings page load.
 export const revalidate = 600;
+
+// Heuristic categorization. Looks at name + tags for keywords
+// that HeyGen uses for their modern styles. Talking photos
+// always default to 'ugc' because they ARE the UGC/Instant
+// Avatar category by definition.
+function categorize(
+  kind: AvatarKind,
+  name: string,
+  tags: ReadonlyArray<string>,
+): AvatarCategory {
+  if (kind === 'talking_photo') return 'ugc';
+  const haystack = (name + ' ' + tags.join(' ')).toLowerCase();
+  if (
+    /\b(ugc|casual|selfie|social|gen[-_ ]?z|tiktok|reels?|creator)\b/.test(
+      haystack,
+    )
+  ) {
+    return 'ugc';
+  }
+  if (
+    /\b(lifestyle|outdoor|coffee|cafe|park|nature|home|kitchen|beach)\b/.test(
+      haystack,
+    )
+  ) {
+    return 'lifestyle';
+  }
+  if (
+    /\b(professional|studio|suit|business|corporate|office|formal|news)\b/.test(
+      haystack,
+    )
+  ) {
+    return 'professional';
+  }
+  return 'other';
+}
+
+// Sort priority so the modern UGC styles surface first in the
+// 'All' view. Within a category, alphabetical by name for
+// stable scanning.
+const CATEGORY_PRIORITY: Record<AvatarCategory, number> = {
+  ugc: 0,
+  lifestyle: 1,
+  other: 2,
+  professional: 3,
+};
+
+function sortAvatars(a: AvatarOption, b: AvatarOption): number {
+  const ap = CATEGORY_PRIORITY[a.category];
+  const bp = CATEGORY_PRIORITY[b.category];
+  if (ap !== bp) return ap - bp;
+  return a.name.localeCompare(b.name);
+}
 
 export async function GET() {
   const supabase = await createClient();
@@ -76,42 +170,149 @@ export async function GET() {
   }
 
   try {
-    const res = await fetch('https://api.heygen.com/v2/avatars', {
-      method: 'GET',
-      headers: {
-        'x-api-key': process.env.HEYGEN_API_KEY!,
-        accept: 'application/json',
-      },
-      // Match the route-level revalidate so Next's fetch cache is
-      // the source of truth (revalidate-on-build / on-cache-tag).
-      next: { revalidate: 600 },
-    });
-    const body = (await res.json().catch(
-      () => ({}),
-    )) as HeygenAvatarsResponse;
+    // PR Sprint 7.25 Phase 11.15 — fetch BOTH catalogs in
+    // parallel. Promise.allSettled so one endpoint failing
+    // (e.g. talking_photo deprecated on some accounts) doesn't
+    // hide the other. Same Next.js fetch cache TTL on each.
+    const headers = {
+      'x-api-key': process.env.HEYGEN_API_KEY!,
+      accept: 'application/json',
+    } as const;
+    const [stockSettled, talkingSettled] = await Promise.allSettled([
+      fetch('https://api.heygen.com/v2/avatars?include_public=true', {
+        method: 'GET',
+        headers,
+        next: { revalidate: 600 },
+      }),
+      fetch('https://api.heygen.com/v2/talking_photo', {
+        method: 'GET',
+        headers,
+        next: { revalidate: 600 },
+      }),
+    ]);
 
-    if (!res.ok || body.error) {
+    const errors: string[] = [];
+    const collected: AvatarOption[] = [];
+    const seenIds = new Set<string>();
+
+    // ---- Stock avatars (/v2/avatars?include_public=true) ----
+    if (stockSettled.status === 'fulfilled' && stockSettled.value.ok) {
+      const body = (await stockSettled.value
+        .json()
+        .catch(() => ({}))) as HeygenAvatarsResponse;
+      if (body.error) {
+        errors.push(body.error.message ?? 'avatars endpoint reported error');
+      } else {
+        for (const a of body.data?.avatars ?? []) {
+          const id = a.avatar_id ?? '';
+          if (!id || seenIds.has(id)) continue;
+          seenIds.add(id);
+          const name = a.avatar_name ?? a.name ?? 'Untitled avatar';
+          collected.push({
+            avatarId: id,
+            name,
+            previewImageUrl: a.preview_image_url ?? a.preview_url ?? null,
+            gender: a.gender ?? null,
+            premium: Boolean(a.premium),
+            defaultVoiceId: a.default_voice ?? null,
+            kind: 'avatar',
+            category: categorize('avatar', name, a.tags ?? []),
+          });
+        }
+        // Some HeyGen API versions inline talking_photos under
+        // /v2/avatars when include_public=true is set. Capture
+        // them too.
+        for (const tp of body.data?.talking_photos ?? []) {
+          const id = tp.talking_photo_id ?? '';
+          if (!id || seenIds.has(id)) continue;
+          seenIds.add(id);
+          const name =
+            tp.talking_photo_name ?? tp.name ?? 'Untitled talking photo';
+          collected.push({
+            avatarId: id,
+            name,
+            previewImageUrl: tp.preview_image_url ?? null,
+            gender: tp.gender ?? null,
+            premium: false,
+            defaultVoiceId: null,
+            kind: 'talking_photo',
+            category: 'ugc',
+          });
+        }
+      }
+    } else if (stockSettled.status === 'rejected') {
+      errors.push(
+        stockSettled.reason instanceof Error
+          ? stockSettled.reason.message
+          : String(stockSettled.reason),
+      );
+    } else {
+      // fulfilled but !res.ok
+      errors.push(`avatars endpoint HTTP ${stockSettled.value.status}`);
+    }
+
+    // ---- Talking photos (/v2/talking_photo) ----
+    if (talkingSettled.status === 'fulfilled' && talkingSettled.value.ok) {
+      const body = (await talkingSettled.value
+        .json()
+        .catch(() => ({}))) as HeygenTalkingPhotoResponse;
+      if (body.error) {
+        errors.push(
+          body.error.message ?? 'talking_photo endpoint reported error',
+        );
+      } else {
+        for (const tp of body.data ?? []) {
+          const id = tp.talking_photo_id ?? '';
+          if (!id || seenIds.has(id)) continue;
+          // Skip non-completed talking photos — they can't render
+          // a video yet. HeyGen sometimes returns 'processing'
+          // rows for the user's own enrollments.
+          if (tp.status && tp.status !== 'completed') continue;
+          seenIds.add(id);
+          const name =
+            tp.talking_photo_name ?? tp.name ?? 'Untitled talking photo';
+          collected.push({
+            avatarId: id,
+            name,
+            previewImageUrl: tp.preview_image_url ?? null,
+            gender: tp.gender ?? null,
+            premium: false,
+            defaultVoiceId: null,
+            kind: 'talking_photo',
+            category: 'ugc',
+          });
+        }
+      }
+    } else if (talkingSettled.status === 'rejected') {
+      errors.push(
+        talkingSettled.reason instanceof Error
+          ? talkingSettled.reason.message
+          : String(talkingSettled.reason),
+      );
+    } else {
+      errors.push(`talking_photo endpoint HTTP ${talkingSettled.value.status}`);
+    }
+
+    // If BOTH endpoints failed, surface a 502 so the UI knows
+    // the catalog couldn't be loaded.
+    if (collected.length === 0 && errors.length > 0) {
       return NextResponse.json(
         {
-          error: body.error?.message ?? `HeyGen returned HTTP ${res.status}`,
+          error: errors.join('; '),
           avatars: [],
         },
         { status: 502 },
       );
     }
 
-    const trimmed: AvatarOption[] = (body.data?.avatars ?? [])
-      .map((a) => ({
-        avatarId: a.avatar_id ?? '',
-        name: a.avatar_name ?? a.name ?? 'Untitled avatar',
-        previewImageUrl: a.preview_image_url ?? a.preview_url ?? null,
-        gender: a.gender ?? null,
-        premium: Boolean(a.premium),
-        defaultVoiceId: a.default_voice ?? null,
-      }))
-      .filter((a) => a.avatarId);
+    collected.sort(sortAvatars);
 
-    return NextResponse.json({ avatars: trimmed });
+    return NextResponse.json({
+      avatars: collected,
+      // Surface non-fatal errors so the UI can show "some
+      // sources couldn't load" if one endpoint dropped.
+      partialErrors: errors.length > 0 ? errors : undefined,
+    });
   } catch (e) {
     return NextResponse.json(
       {

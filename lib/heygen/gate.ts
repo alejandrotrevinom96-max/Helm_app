@@ -92,11 +92,17 @@ export function getHeygenEnvDiagnostic() {
  * 'twin' is treated as not-yet-configured because the enrollment
  * flow isn't shipped — selecting twin in Settings keeps the
  * project in an un-generatable state by design.
+ *
+ * PR Sprint 7.25 Phase 11.15 — 'talking_photo' is the new
+ * HeyGen Instant/UGC avatar shape; it's ready as soon as
+ * heygenAvatarId is set (lib/heygen/fire.ts uses that column as
+ * the talking_photo_id for the V2 payload).
  */
 export function isHeygenReadyForProject(project: AvatarConfig): boolean {
   if (!isHeygenEnvConfigured()) return false;
   const t = project.heygenAvatarType ?? 'stock';
   if (t === 'stock') return Boolean(project.heygenAvatarId);
+  if (t === 'talking_photo') return Boolean(project.heygenAvatarId);
   if (t === 'photo') return Boolean(project.heygenPhotoUrl);
   return false; // 'twin' or unknown → not ready
 }
