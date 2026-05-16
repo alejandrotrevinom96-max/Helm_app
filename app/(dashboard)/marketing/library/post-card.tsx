@@ -250,27 +250,56 @@ export function LibraryPostCard({ post, onClick }: Props) {
         </div>
       ) : null}
 
-      {/* PR Sprint 7.24 — Prompt 4. UGC body preview. Pre-fix the
-          card showed the raw script with timecodes and director
-          notes — useful for the founder but visually identical to
-          a narrative post, defeating the point of distinguishing
-          UGC at a glance. Now UGC + Reel cards lead with a
-          one-line script-mode label; the detail modal still
-          renders the full UgcBundleView teleprompter. */}
-      {post.contentType === 'ugc' || post.contentType === 'reel' ? (
-        <div className="mb-3">
-          <div className="text-xs font-mono uppercase tracking-[0.15em] text-amber-500 mb-1">
-            🎥 Recordable script
-          </div>
-          <p className="text-sm text-text-1 line-clamp-2 whitespace-pre-wrap italic">
-            {post.content.slice(0, 140) || 'Script ready — open to view teleprompter.'}
+      {/* PR Sprint 7.26 / 7.27 — for UGC+Reel show TWO blocks:
+          (1) the SCRIPT (asset.baseContent — what the avatar
+              actually speaks), sourced from structuredContent.
+              This is the founder's pick from the A/B step or the
+              auto-generated single script.
+          (2) the platform CAPTION (post.content) — what gets
+              posted alongside the video.
+          Keeping them visually distinct so the founder doesn't
+          mistake the caption for the script (the most common
+          confusion before this change). Non-video types render
+          a single body preview as before. */}
+      {(() => {
+        const isVideo =
+          post.contentType === 'ugc' || post.contentType === 'reel';
+        const script =
+          isVideo && post.structuredContent
+            ? (
+                post.structuredContent as { baseContent?: string } | null
+              )?.baseContent
+            : null;
+        if (isVideo) {
+          return (
+            <div className="space-y-2 mb-3">
+              {script && (
+                <div className="p-2.5 rounded-lg border border-amber-500/30 bg-amber-500/5">
+                  <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-amber-500 mb-1">
+                    🎥 Script
+                  </div>
+                  <p className="text-xs text-text-1 line-clamp-3 whitespace-pre-wrap leading-relaxed">
+                    {script}
+                  </p>
+                </div>
+              )}
+              <div>
+                <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-accent mb-1">
+                  ✏️ {post.platform} caption
+                </div>
+                <p className="text-xs text-text-1 line-clamp-2 whitespace-pre-wrap">
+                  {post.content}
+                </p>
+              </div>
+            </div>
+          );
+        }
+        return (
+          <p className="text-sm text-text-1 line-clamp-3 mb-3 whitespace-pre-wrap">
+            {post.content}
           </p>
-        </div>
-      ) : (
-        <p className="text-sm text-text-1 line-clamp-3 mb-3 whitespace-pre-wrap">
-          {post.content}
-        </p>
-      )}
+        );
+      })()}
 
       {/* PR #55 — Sprint 6.9: surface consistencyScore when set.
           Sprint 7.13 (BUG 2) — pre-fix this rendered as subtle

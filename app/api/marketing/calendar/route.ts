@@ -44,6 +44,16 @@ export interface CalendarPost {
   // Null for legacy plain-text scheduled posts (rows created
   // before this column existed).
   contentType: string | null;
+  // PR Sprint 7.27 — Asset-based content flow surfaces.
+  //   videoUrl       → rendered HeyGen video URL (UGC / Reel).
+  //                    Was already on scheduled_posts; just not
+  //                    exposed by this API.
+  //   structuredContent → carries { assetType, baseContent } for
+  //                    UGC / Reel rows so the calendar modal can
+  //                    surface the SCRIPT (what the avatar speaks)
+  //                    above the platform caption.
+  videoUrl: string | null;
+  structuredContent: unknown;
 }
 
 export async function GET(request: Request) {
@@ -125,6 +135,9 @@ export async function GET(request: Request) {
     reelProcessingStatus: r.reelProcessingStatus ?? null,
     // PR #63 — Sprint 7.0.6: now reads the propagated column.
     contentType: r.contentType ?? null,
+    // PR Sprint 7.27 — surface video + structuredContent.
+    videoUrl: r.videoUrl ?? null,
+    structuredContent: r.structuredContent ?? null,
   }));
 
   return NextResponse.json({ posts });

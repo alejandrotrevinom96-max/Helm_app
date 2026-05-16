@@ -896,6 +896,39 @@ export function PostDetailModal({
           </button>
         </div>
 
+        {/* PR Sprint 7.27 — UGC/Reel script block. For video
+            assets we show the SCRIPT (asset.baseContent — what the
+            HeyGen avatar actually speaks) ABOVE the per-platform
+            caption block, so the founder doesn't confuse the two.
+            Sourced from structuredContent which generate-asset
+            stamps as {assetType, baseContent}. Skipped silently
+            for non-video types so legacy single-caption rows
+            render unchanged. */}
+        {(() => {
+          if (post.contentType !== 'ugc' && post.contentType !== 'reel') {
+            return null;
+          }
+          const script = (
+            post.structuredContent as { baseContent?: string } | null
+          )?.baseContent;
+          if (!script) return null;
+          return (
+            <div className="mb-4 p-4 rounded-lg border border-amber-500/30 bg-amber-500/5">
+              <div className="flex items-baseline justify-between mb-2">
+                <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-amber-500">
+                  🎥 Script · spoken by avatar
+                </div>
+                <span className="text-[10px] font-mono text-text-3">
+                  {script.split(/\s+/).filter(Boolean).length} words
+                </span>
+              </div>
+              <p className="text-sm text-text-1 whitespace-pre-wrap leading-relaxed">
+                {script}
+              </p>
+            </div>
+          );
+        })()}
+
         {/* Content
             PR Sprint 7.17 — drafts (source='generated') can now
             be edited inline. The "Edit" toggle swaps the
@@ -904,8 +937,17 @@ export function PostDetailModal({
             record-edit hook so the heuristic classifier turns
             (original, edited) into learning signals. Scheduled
             / published rows stay read-only here (they go
-            through the publisher's lane, not the engine's). */}
+            through the publisher's lane, not the engine's).
+
+            PR Sprint 7.27 — for UGC/Reel this block now shows the
+            per-platform CAPTION (not the script — the script block
+            sits above). A small mono label clarifies which is which. */}
         <div className="mb-4 p-4 bg-bg border border-border rounded-lg space-y-2">
+          {(post.contentType === 'ugc' || post.contentType === 'reel') && (
+            <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-accent">
+              ✏️ {post.platform} caption
+            </div>
+          )}
           {editing && isDraft ? (
             <>
               <textarea

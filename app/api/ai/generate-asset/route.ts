@@ -67,6 +67,14 @@ interface RequestBody {
   prompt?: string;
   variantLabel?: 'A' | 'B' | null;
   variantGroupId?: string;
+  // PR Sprint 7.27 — UGC A/B script picker. When the founder
+  // committed a script from the /api/ai/generate-ugc-scripts
+  // picker, the panel passes it back here so we skip the
+  // baseContent generation step entirely and use the chosen
+  // script verbatim. Only honored for ugc_video / reel —
+  // bypassed for other types because their baseContent shape is
+  // different (carousel slides, photo concept, long-form body).
+  baseContentOverride?: string;
 }
 
 interface CaptionResult {
@@ -406,24 +414,38 @@ export async function POST(request: Request) {
       (project.brandContext as BrandBible | null) ?? null,
     );
 
-    // Step 1 — generate the shared base content.
+    // Step 1 — resolve the shared base content. PR Sprint 7.27:
+    // when the caller passed baseContentOverride (the founder
+    // picked a script from the UGC A/B picker), we use it verbatim
+    // and skip the Haiku call. Only honored for ugc_video / reel
+    // — every other asset type runs the in-endpoint generator
+    // because their baseContent shape is type-specific and the
+    // override only makes sense for the talking-head script case.
     let baseContent: string;
-    try {
-      baseContent = await generateBaseContent({
-        assetType,
-        prompt,
-        brand,
-      });
-    } catch (e) {
-      return NextResponse.json(
-        {
-          error:
-            e instanceof Error
-              ? `Base content generation failed: ${e.message}`
-              : 'Base content generation failed',
-        },
-        { status: 502 },
-      );
+    const honorOverride =
+      typeof body.baseContentOverride === 'string' &&
+      body.baseContentOverride.trim().length > 0 &&
+      (assetType === 'ugc_video' || assetType === 'reel');
+    if (honorOverride) {
+      baseContent = body.baseContentOverride!.trim();
+    } else {
+      try {
+        baseContent = await generateBaseContent({
+          assetType,
+          prompt,
+          brand,
+        });
+      } catch (e) {
+        return NextResponse.json(
+          {
+            error:
+              e instanceof Error
+                ? `Base content generation failed: ${e.message}`
+                : 'Base content generation failed',
+          },
+          { status: 502 },
+        );
+      }
     }
     if (!baseContent) {
       return NextResponse.json(

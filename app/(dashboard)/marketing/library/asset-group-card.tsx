@@ -172,10 +172,25 @@ export function AssetGroupCard({ posts, onClick }: Props) {
         </div>
       ) : null}
 
-      {/* Body preview — shared asset baseContent */}
-      <p className="text-sm text-text-1 line-clamp-3 mb-3 whitespace-pre-wrap">
-        {body}
-      </p>
+      {/* PR Sprint 7.27 — Body preview. For UGC/reel groups we
+          show the SCRIPT (asset.baseContent) in an amber card so
+          the founder sees what the avatar speaks before opening
+          the detail modal. For other types it's the asset's
+          baseContent / first post's content as before. */}
+      {head.contentType === 'ugc' || head.contentType === 'reel' ? (
+        <div className="mb-3 p-2.5 rounded-lg border border-amber-500/30 bg-amber-500/5">
+          <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-amber-500 mb-1">
+            🎥 Script
+          </div>
+          <p className="text-xs text-text-1 line-clamp-4 whitespace-pre-wrap leading-relaxed">
+            {body}
+          </p>
+        </div>
+      ) : (
+        <p className="text-sm text-text-1 line-clamp-3 mb-3 whitespace-pre-wrap">
+          {body}
+        </p>
+      )}
 
       <div className="flex items-center justify-between text-xs text-text-3 gap-2">
         <span className="truncate">{dateLabel}</span>

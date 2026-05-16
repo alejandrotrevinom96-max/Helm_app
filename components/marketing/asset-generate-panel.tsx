@@ -1,31 +1,36 @@
 'use client';
 
 // PR Sprint 7.26 — Asset-based content flow.
+// PR Sprint 7.27 — UGC A/B script picker + live render polling.
 //
 // Replaces StructuredGeneratePanel (PR #76) as the primary generate
 // surface. The old panel still exists in the repo for revertability
 // — but /marketing/generate now renders this one.
 //
-// Mental model shift:
-//   OLD: pick a platform, pick content types, generate N drafts
-//        (one row per content type, one image / video per row,
-//        N×cost).
-//   NEW: pick what KIND of asset you want (UGC Video / Reel /
-//        Carousel / Photo / Long-form Text). Pick the platforms
-//        to publish to (filtered by what's compatible with the
-//        asset type). Helm generates the asset ONCE and adapts a
-//        caption per platform.
-//
-// Three sequential steps shown stacked:
+// Mental model:
 //   1) Asset type — 5 large cards.
 //   2) Platforms — checkboxes for the asset's allowed networks
-//      (incompatible networks shown grayed-out with a tooltip).
+//      (incompatible networks grayed-out with a tooltip).
 //   3) Prompt — what the asset should cover.
-//   4) Generate — fires POST /api/ai/generate-asset.
+//   4) Generate.
 //
-// On success: rows land in /marketing/library grouped by asset.
+// UGC / Reel branch (Sprint 7.27): generation is a two-step flow:
+//   a) POST /api/ai/generate-ugc-scripts → returns 2 Haiku script
+//      variants (DIRECT vs STORY hook). Founder picks one.
+//   b) POST /api/ai/generate-asset with `baseContentOverride` =
+//      the chosen script. Endpoint skips its own script generator,
+//      adapts captions per platform, queues HeyGen.
+//   c) Panel polls /api/heygen/jobs?draftId=<firstId> every 5s
+//      so the founder watches the render progress LIVE (queued →
+//      processing → completed) and the final video embeds inline
+//      when ready. Pre-fix the founder stared at "view in library"
+//      with no signal HeyGen was even called.
+//
+// Other asset types stay on the single-step flow (they were never
+// blocking — image / carousel renders are minutes-fast and the
+// long-form path has no media at all).
 
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { GlassCard } from '@/components/ui/glass-card';
 import { Button } from '@/components/ui/button';
@@ -80,12 +85,36 @@ function incompatibilityReason(
 interface GeneratedAsset {
   assetId: string;
   assetType: AssetType;
+  baseContent: string;
   posts: Array<{
     id: string;
     platform: string;
     caption: string;
   }>;
 }
+
+interface ScriptVariant {
+  label: 'A' | 'B';
+  text: string;
+}
+
+interface RenderStatus {
+  status: 'queued' | 'processing' | 'completed' | 'failed';
+  videoUrl: string | null;
+  thumbnailUrl: string | null;
+  errorMessage: string | null;
+}
+
+// State machine. Non-UGC types skip 'loading-scripts' and
+// 'picking-script' — they jump straight from 'idle' to 'generating'
+// on the Generate click.
+type Phase =
+  | 'idle'
+  | 'loading-scripts'
+  | 'picking-script'
+  | 'generating'
+  | 'rendering'
+  | 'complete';
 
 export function AssetGeneratePanel({ projectId }: Props) {
   const router = useRouter();
@@ -95,9 +124,24 @@ export function AssetGeneratePanel({ projectId }: Props) {
   const [assetType, setAssetType] = useState<AssetType | null>(null);
   const [selectedPlatforms, setSelectedPlatforms] = useState<Platform[]>([]);
   const [prompt, setPrompt] = useState<string>(() => incomingPrompt);
-  const [generating, setGenerating] = useState(false);
+  const [phase, setPhase] = useState<Phase>('idle');
   const [error, setError] = useState<string | null>(null);
+
+  // UGC A/B picker state — populated by POST
+  // /api/ai/generate-ugc-scripts in 'loading-scripts' phase.
+  const [scriptVariants, setScriptVariants] = useState<ScriptVariant[]>([]);
+
+  // Final generation result (asset + per-platform captions). For
+  // UGC this is set AFTER the founder picks a script. For others
+  // it lands on the single-step generate path.
   const [result, setResult] = useState<GeneratedAsset | null>(null);
+
+  // Live render polling state. Only meaningful when
+  // phase === 'rendering' or 'complete' for ugc_video / reel.
+  const [renderStatus, setRenderStatus] = useState<RenderStatus | null>(null);
+
+  const isVideoAsset =
+    assetType === 'ugc_video' || assetType === 'reel';
 
   // When the asset type changes, prune any selected platforms that
   // are no longer compatible — and pre-select all compatible ones
@@ -108,6 +152,9 @@ export function AssetGeneratePanel({ projectId }: Props) {
     setSelectedPlatforms([...PLATFORM_RULES[next]]);
     setError(null);
     setResult(null);
+    setScriptVariants([]);
+    setRenderStatus(null);
+    setPhase('idle');
   };
 
   const togglePlatform = (p: Platform) => {
@@ -122,20 +169,60 @@ export function AssetGeneratePanel({ projectId }: Props) {
     assetType !== null &&
     selectedPlatforms.length > 0 &&
     prompt.trim().length > 0 &&
-    !generating;
+    (phase === 'idle' || phase === 'complete');
 
-  const buttonLabel = useMemo(() => {
-    if (generating) return 'Generating asset…';
-    if (!assetType) return 'Pick an asset type first';
-    if (selectedPlatforms.length === 0) return 'Pick at least one platform';
-    if (prompt.trim().length === 0) return 'Tell Helm what it\'s about';
-    const n = selectedPlatforms.length;
-    return `Generate · ${n} caption${n === 1 ? '' : 's'} adapted`;
-  }, [generating, assetType, selectedPlatforms.length, prompt]);
+  // ─── Step 1a (UGC only): fetch A/B script variants ─────────────
+  const loadScripts = async () => {
+    if (!assetType || !isVideoAsset) return;
+    setPhase('loading-scripts');
+    setError(null);
+    setScriptVariants([]);
+    setResult(null);
+    setRenderStatus(null);
+    try {
+      const res = await fetch('/api/ai/generate-ugc-scripts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId,
+          prompt: prompt.trim(),
+          assetType,
+        }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        success?: boolean;
+        variants?: ScriptVariant[];
+        error?: string;
+      };
+      if (!res.ok || !data.success || !data.variants?.length) {
+        setError(data.error ?? `Script generation failed (${res.status})`);
+        setPhase('idle');
+        return;
+      }
+      setScriptVariants(data.variants);
+      setPhase('picking-script');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Network error');
+      setPhase('idle');
+    }
+  };
 
-  const generate = async () => {
-    if (!canGenerate || !assetType) return;
-    setGenerating(true);
+  // ─── Step 1b (UGC only): commit the chosen script + run the
+  //     full asset generation ───────────────────────────────────
+  const commitScript = async (chosen: ScriptVariant) => {
+    await runAssetGeneration(chosen.text);
+  };
+
+  // ─── Step 1 (non-UGC) OR Step 2 (UGC): create the asset row +
+  //     captions, then start polling render for video assets.
+  //     `baseContentOverride` is set ONLY for UGC committed
+  //     scripts; non-UGC types pass undefined and let
+  //     generate-asset run its own type-specific generator.
+  const runAssetGeneration = async (baseContentOverride?: string) => {
+    if (!assetType || selectedPlatforms.length === 0 || !prompt.trim()) {
+      return;
+    }
+    setPhase('generating');
     setError(null);
     setResult(null);
     try {
@@ -147,33 +234,154 @@ export function AssetGeneratePanel({ projectId }: Props) {
           assetType,
           platforms: selectedPlatforms,
           prompt: prompt.trim(),
+          ...(baseContentOverride
+            ? { baseContentOverride }
+            : {}),
         }),
       });
       const data = (await res.json().catch(() => ({}))) as {
         success?: boolean;
-        asset?: { id: string; assetType: AssetType };
+        asset?: { id: string; assetType: AssetType; baseContent?: string };
         posts?: Array<{ id: string; platform: string; caption: string }>;
         error?: string;
       };
       if (!res.ok || !data.success || !data.asset) {
-        setError(data.error ?? `Generation failed (HTTP ${res.status})`);
+        setError(data.error ?? `Generation failed (${res.status})`);
+        setPhase('idle');
         return;
       }
-      setResult({
+      const newResult: GeneratedAsset = {
         assetId: data.asset.id,
         assetType: data.asset.assetType,
+        baseContent: data.asset.baseContent ?? baseContentOverride ?? '',
         posts: data.posts ?? [],
-      });
-      // Push the Library view to refresh in the background so by
-      // the time the founder navigates over, the new asset is
-      // already there.
+      };
+      setResult(newResult);
       router.refresh();
+
+      if (isVideoAsset && newResult.posts.length > 0) {
+        // Move to rendering phase — the polling effect below picks
+        // it up and starts the heygen status poll.
+        setRenderStatus({
+          status: 'queued',
+          videoUrl: null,
+          thumbnailUrl: null,
+          errorMessage: null,
+        });
+        setPhase('rendering');
+      } else {
+        setPhase('complete');
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Network error');
-    } finally {
-      setGenerating(false);
+      setPhase('idle');
     }
   };
+
+  // Single entry-point for the Generate button. UGC kicks the A/B
+  // flow; everything else goes straight to asset generation.
+  const onGenerateClick = () => {
+    if (!canGenerate) return;
+    if (isVideoAsset) {
+      void loadScripts();
+    } else {
+      void runAssetGeneration();
+    }
+  };
+
+  // ─── Polling: heygen job status ────────────────────────────────
+  //
+  // Active during phase === 'rendering'. Polls every 5s against
+  // /api/heygen/jobs?draftId=<firstPostId>. Stops on 'completed'
+  // or 'failed'. Cleans up on unmount / phase change to avoid
+  // leaking intervals.
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (phase !== 'rendering' || !result || result.posts.length === 0) {
+      stopPolling();
+      return;
+    }
+    const firstId = result.posts[0].id;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const res = await fetch(
+          `/api/heygen/jobs?draftId=${encodeURIComponent(firstId)}`,
+          { cache: 'no-store' },
+        );
+        if (!res.ok) return;
+        const data = (await res.json().catch(() => ({}))) as {
+          job?: {
+            status?: string;
+            videoUrl?: string | null;
+            thumbnailUrl?: string | null;
+            errorMessage?: string | null;
+          } | null;
+        };
+        if (cancelled) return;
+        const job = data.job;
+        if (!job) return;
+        const status =
+          job.status === 'completed' ||
+          job.status === 'failed' ||
+          job.status === 'processing' ||
+          job.status === 'queued'
+            ? job.status
+            : 'queued';
+        setRenderStatus({
+          status,
+          videoUrl: job.videoUrl ?? null,
+          thumbnailUrl: job.thumbnailUrl ?? null,
+          errorMessage: job.errorMessage ?? null,
+        });
+        if (status === 'completed' || status === 'failed') {
+          stopPolling();
+          setPhase('complete');
+        }
+      } catch {
+        /* transient — keep polling */
+      }
+    };
+    // Fire immediately AND every 5s after.
+    void tick();
+    pollRef.current = setInterval(tick, 5000);
+    return () => {
+      cancelled = true;
+      stopPolling();
+    };
+  }, [phase, result, stopPolling]);
+
+  // Cleanup on unmount.
+  useEffect(() => () => stopPolling(), [stopPolling]);
+
+  const buttonLabel = useMemo(() => {
+    if (phase === 'loading-scripts') return 'Drafting 2 script variants…';
+    if (phase === 'picking-script') return 'Pick a script below';
+    if (phase === 'generating') return 'Generating asset…';
+    if (phase === 'rendering') return 'Rendering video…';
+    if (!assetType) return 'Pick an asset type first';
+    if (selectedPlatforms.length === 0) return 'Pick at least one platform';
+    if (prompt.trim().length === 0)
+      return 'Tell Helm what it\'s about';
+    const n = selectedPlatforms.length;
+    if (isVideoAsset) {
+      return `Draft 2 scripts → choose → render video`;
+    }
+    return `Generate · ${n} caption${n === 1 ? '' : 's'} adapted`;
+  }, [
+    phase,
+    assetType,
+    selectedPlatforms.length,
+    prompt,
+    isVideoAsset,
+  ]);
 
   return (
     <section className="space-y-6">
@@ -303,16 +511,104 @@ export function AssetGeneratePanel({ projectId }: Props) {
       {/* STEP 4 — Generate */}
       {assetType && (
         <div>
-          <Button onClick={generate} disabled={!canGenerate}>
+          <Button onClick={onGenerateClick} disabled={!canGenerate}>
             {buttonLabel}
           </Button>
-          {assetType && selectedPlatforms.length > 0 && !generating && (
-            <p className="text-xs text-text-3 mt-2">
-              1 asset generated · {selectedPlatforms.length} caption
-              {selectedPlatforms.length === 1 ? '' : 's'} adapted per
-              platform.
+          {assetType &&
+            selectedPlatforms.length > 0 &&
+            phase === 'idle' && (
+              <p className="text-xs text-text-3 mt-2">
+                {isVideoAsset
+                  ? '2 script variants drafted first — you pick before HeyGen burns a $0.10 render.'
+                  : `1 asset generated · ${selectedPlatforms.length} caption${selectedPlatforms.length === 1 ? '' : 's'} adapted per platform.`}
+              </p>
+            )}
+        </div>
+      )}
+
+      {/* Inline progress while scripts are loading */}
+      {phase === 'loading-scripts' && (
+        <div className="p-4 rounded-lg border border-border bg-bg-elev">
+          <div className="flex items-center gap-3">
+            <div className="w-5 h-5 rounded-full border-2 border-accent border-t-transparent animate-spin" />
+            <div>
+              <div className="text-sm text-text-1">
+                Drafting 2 script variants…
+              </div>
+              <div className="text-xs text-text-3 mt-0.5">
+                Haiku × 2 in parallel · usually 5-8s
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* A/B SCRIPT PICKER — only renders when phase is 'picking-script' */}
+      {phase === 'picking-script' && scriptVariants.length > 0 && (
+        <div className="space-y-3 pt-2 border-t border-border">
+          <div>
+            <h3 className="font-display text-lg font-light">
+              Pick a script · A or B
+            </h3>
+            <p className="text-xs text-text-3 mt-1">
+              Both pass our UGC prompt engineering (hook in 3s, one
+              insight, 70-90 words). They differ in HOOK STYLE —
+              direct vs story. Choose the take that fits your voice;
+              the other gets dropped.
             </p>
-          )}
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            {scriptVariants.map((v) => (
+              <button
+                key={v.label}
+                type="button"
+                onClick={() => void commitScript(v)}
+                className="text-left p-4 rounded-xl border-2 border-border hover:border-accent hover:bg-accent/5 transition-all bg-bg"
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[10px] font-mono uppercase tracking-[0.15em] font-bold px-2 py-0.5 rounded bg-accent/15 text-accent border border-accent/30">
+                    Option {v.label} ·{' '}
+                    {v.label === 'A' ? 'Direct hook' : 'Story hook'}
+                  </span>
+                  <span className="text-[10px] font-mono uppercase tracking-[0.1em] text-text-3">
+                    {v.text.split(/\s+/).length} words
+                  </span>
+                </div>
+                <p className="text-sm text-text-1 whitespace-pre-wrap leading-relaxed">
+                  {v.text}
+                </p>
+                <div className="mt-3 text-[11px] font-mono uppercase tracking-[0.1em] text-accent">
+                  → Use this script
+                </div>
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => void loadScripts()}
+            className="text-xs text-text-3 hover:text-text-1 underline"
+          >
+            ↻ Re-draft both
+          </button>
+        </div>
+      )}
+
+      {/* GENERATING — captions being adapted (after script committed
+          for UGC, or directly after Generate click for other types). */}
+      {phase === 'generating' && (
+        <div className="p-4 rounded-lg border border-border bg-bg-elev">
+          <div className="flex items-center gap-3">
+            <div className="w-5 h-5 rounded-full border-2 border-accent border-t-transparent animate-spin" />
+            <div>
+              <div className="text-sm text-text-1">
+                Adapting captions per platform…
+              </div>
+              <div className="text-xs text-text-3 mt-0.5">
+                {selectedPlatforms.length} parallel Haiku call
+                {selectedPlatforms.length === 1 ? '' : 's'}
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -327,7 +623,7 @@ export function AssetGeneratePanel({ projectId }: Props) {
           </p>
           <button
             type="button"
-            onClick={generate}
+            onClick={onGenerateClick}
             className="text-xs text-accent underline hover:no-underline mt-2"
           >
             Retry
@@ -335,9 +631,9 @@ export function AssetGeneratePanel({ projectId }: Props) {
         </div>
       )}
 
-      {/* Success preview */}
-      {result && (
-        <div className="space-y-3 pt-2 border-t border-border">
+      {/* SUCCESS PREVIEW + LIVE VIDEO RENDER */}
+      {result && (phase === 'rendering' || phase === 'complete') && (
+        <div className="space-y-4 pt-2 border-t border-border">
           <div className="flex items-baseline justify-between">
             <h3 className="font-display text-lg font-light">
               Asset generated · {result.posts.length} caption
@@ -351,14 +647,118 @@ export function AssetGeneratePanel({ projectId }: Props) {
             </a>
           </div>
 
-          {/* Media-generation status. The caption text returns in
-              the POST response, but media (image / carousel slides
-              / HeyGen video) is rendered asynchronously by other
-              services — this banner tells the founder where each
-              type lives + how long it usually takes so they don't
-              think the flow is broken when the preview shows
-              captions only. */}
-          {(() => {
+          {/* SCRIPT — surfaces for UGC/reel so the founder sees what
+              gets spoken on screen, separate from the platform
+              captions below. */}
+          {isVideoAsset && result.baseContent && (
+            <div className="p-4 rounded-lg border border-amber-500/30 bg-amber-500/5">
+              <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-amber-500 mb-2">
+                🎥 Script · {result.baseContent.split(/\s+/).length} words
+              </div>
+              <p className="text-sm text-text-1 whitespace-pre-wrap leading-relaxed">
+                {result.baseContent}
+              </p>
+            </div>
+          )}
+
+          {/* LIVE RENDER STATUS — UGC / reel only. The polling effect
+              above keeps renderStatus fresh until HeyGen completes
+              or fails. */}
+          {isVideoAsset && renderStatus && (
+            <div
+              className={`p-4 rounded-lg border ${
+                renderStatus.status === 'completed'
+                  ? 'border-emerald-500/30 bg-emerald-500/5'
+                  : renderStatus.status === 'failed'
+                    ? 'border-danger/30 bg-danger/5'
+                    : 'border-purple-500/30 bg-purple-500/5'
+              }`}
+            >
+              {renderStatus.status === 'queued' && (
+                <div className="flex items-center gap-3">
+                  <div className="w-4 h-4 rounded-full border-2 border-purple-500 border-t-transparent animate-spin" />
+                  <div>
+                    <div className="text-sm text-purple-500">
+                      Video queued
+                    </div>
+                    <div className="text-xs text-text-3 mt-0.5">
+                      HeyGen pickup usually within 60s — the worker
+                      cron runs every minute.
+                    </div>
+                  </div>
+                </div>
+              )}
+              {renderStatus.status === 'processing' && (
+                <div className="flex items-center gap-3">
+                  <div className="w-4 h-4 rounded-full border-2 border-purple-500 border-t-transparent animate-spin" />
+                  <div>
+                    <div className="text-sm text-purple-500">
+                      HeyGen rendering your video
+                    </div>
+                    <div className="text-xs text-text-3 mt-0.5">
+                      Typically 2-5 minutes · the same render is
+                      shared across all {result.posts.length} platforms.
+                    </div>
+                  </div>
+                </div>
+              )}
+              {renderStatus.status === 'completed' && renderStatus.videoUrl && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 text-sm text-emerald-500">
+                    <span>✓</span>
+                    <span>Video ready</span>
+                  </div>
+                  <video
+                    src={renderStatus.videoUrl}
+                    controls
+                    playsInline
+                    preload="metadata"
+                    poster={renderStatus.thumbnailUrl ?? undefined}
+                    className="rounded-lg w-full max-w-md aspect-[9/16] object-cover bg-bg"
+                  />
+                  <div className="flex gap-2">
+                    <a
+                      href={renderStatus.videoUrl}
+                      download
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 px-3 py-1.5 bg-accent text-white rounded-lg text-xs font-medium hover:opacity-90"
+                    >
+                      ⬇ Download
+                    </a>
+                    <a
+                      href="/marketing/library"
+                      className="inline-flex items-center gap-2 px-3 py-1.5 bg-bg border border-border rounded-lg text-xs font-medium hover:bg-bg-elev"
+                    >
+                      Open in Library →
+                    </a>
+                  </div>
+                </div>
+              )}
+              {renderStatus.status === 'failed' && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-sm text-danger">
+                    <span>⚠</span>
+                    <span>Render failed</span>
+                  </div>
+                  {renderStatus.errorMessage && (
+                    <div className="text-xs text-text-3 font-mono break-words">
+                      {renderStatus.errorMessage}
+                    </div>
+                  )}
+                  <a
+                    href="/marketing/library"
+                    className="inline-block text-xs text-accent underline"
+                  >
+                    Retry from Library →
+                  </a>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Media-generation status for non-video asset types. */}
+          {!isVideoAsset && phase === 'complete' && (() => {
             if (result.assetType === 'long_form_text') {
               return (
                 <div className="p-3 rounded-lg border border-emerald-500/30 bg-emerald-500/5 text-xs text-emerald-500">
@@ -397,28 +797,10 @@ export function AssetGeneratePanel({ projectId }: Props) {
                 </div>
               );
             }
-            if (
-              result.assetType === 'ugc_video' ||
-              result.assetType === 'reel'
-            ) {
-              return (
-                <div className="p-3 rounded-lg border border-purple-500/30 bg-purple-500/5 text-xs text-purple-500">
-                  🎬 Video queued with HeyGen — typically 2-5
-                  minutes per render. Track progress in{' '}
-                  <a
-                    href="/marketing/library"
-                    className="underline hover:no-underline"
-                  >
-                    Library
-                  </a>{' '}
-                  · the same render is shared across all platforms
-                  in this asset.
-                </div>
-              );
-            }
             return null;
           })()}
 
+          {/* PER-PLATFORM CAPTIONS */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
             {result.posts.map((p) => (
               <div

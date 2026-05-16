@@ -111,17 +111,83 @@ export function CalendarPostModal({ post, onClose }: Props) {
         </div>
 
         <div className="p-5 space-y-4">
-          {post.visualUrl && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={post.visualUrl}
-              alt=""
-              className="w-full rounded-lg max-h-80 object-cover bg-bg"
-            />
-          )}
-          <div className="text-sm text-text-1 whitespace-pre-wrap leading-relaxed">
-            {post.content}
-          </div>
+          {/* PR Sprint 7.27 — Video preview for UGC/Reel rows.
+              videoUrl + structuredContent.baseContent are now
+              carried by the calendar API so the modal can show
+              the rendered take + the script the avatar speaks. */}
+          {(() => {
+            const isVideo =
+              post.contentType === 'ugc' ||
+              post.contentType === 'reel' ||
+              post.isReel;
+            const script = (
+              post.structuredContent as { baseContent?: string } | null
+            )?.baseContent;
+            return (
+              <>
+                {isVideo && post.videoUrl ? (
+                  <video
+                    src={post.videoUrl}
+                    controls
+                    playsInline
+                    preload="metadata"
+                    poster={post.visualUrl ?? undefined}
+                    className="w-full rounded-lg max-h-96 object-cover bg-bg aspect-[9/16]"
+                  />
+                ) : post.visualUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={post.visualUrl}
+                    alt=""
+                    className="w-full rounded-lg max-h-80 object-cover bg-bg"
+                  />
+                ) : isVideo ? (
+                  <div className="w-full aspect-video rounded-lg bg-bg-elev border border-dashed border-purple-500/30 flex items-center justify-center text-purple-500">
+                    <div className="text-center">
+                      <div className="text-2xl mb-1" aria-hidden>
+                        🎬
+                      </div>
+                      <div className="text-[10px] font-mono uppercase tracking-[0.15em]">
+                        Video rendering…
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
+                {/* SCRIPT — what the avatar speaks. Distinct from
+                    the caption below so the founder doesn't mix
+                    them up. */}
+                {isVideo && script && (
+                  <div className="p-3 rounded-lg border border-amber-500/30 bg-amber-500/5">
+                    <div className="flex items-baseline justify-between mb-1.5">
+                      <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-amber-500">
+                        🎥 Script · spoken by avatar
+                      </div>
+                      <span className="text-[10px] font-mono text-text-3">
+                        {script.split(/\s+/).filter(Boolean).length} words
+                      </span>
+                    </div>
+                    <p className="text-sm text-text-1 whitespace-pre-wrap leading-relaxed">
+                      {script}
+                    </p>
+                  </div>
+                )}
+
+                {/* PLATFORM CAPTION */}
+                <div>
+                  {isVideo && (
+                    <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-accent mb-1.5">
+                      ✏️ {post.platform} caption
+                    </div>
+                  )}
+                  <div className="text-sm text-text-1 whitespace-pre-wrap leading-relaxed">
+                    {post.content}
+                  </div>
+                </div>
+              </>
+            );
+          })()}
+
           {post.publishStatus === 'published' && (
             <div className="text-xs text-emerald-500 inline-flex items-center gap-1">
               ✓ Published
