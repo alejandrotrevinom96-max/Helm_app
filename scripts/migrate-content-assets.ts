@@ -115,28 +115,35 @@ async function main() {
 
   // Pull the user_id for each project up front — content_assets
   // requires it but generated_posts doesn't have it directly.
+  //
+  // NOTE: db.execute() with drizzle-orm/postgres-js returns the row
+  // array DIRECTLY (extends `RowList<T[]>` from postgres-js), NOT a
+  // `{ rows: T[] }` wrapper like node-postgres. Initial cut of this
+  // script used `.rows` and broke at runtime. Canonical pattern is
+  // visible in scripts/migrate-brand-context.ts +
+  // scripts/dedupe-metric-snapshots.ts.
   console.log('[migrate] 4/4 Backfilling 1:1 content_assets…');
   const projectOwners = (await db.execute(sql`
     SELECT id, user_id FROM projects
-  `)) as unknown as { rows: Array<{ id: string; user_id: string }> };
+  `)) as unknown as Array<{ id: string; user_id: string }>;
   const ownerByProject = new Map<string, string>();
-  for (const row of projectOwners.rows) {
+  for (const row of projectOwners) {
     ownerByProject.set(row.id, row.user_id);
   }
 
-  const legacyRowsRes = (await db.execute(sql`
+  const legacyRows = (await db.execute(sql`
     SELECT
       id, project_id, platform, content, prompt, content_type,
       structured_content, image_url, visual_urls, video_url,
       variant_label, variant_group_id, created_at
     FROM generated_posts
     WHERE asset_id IS NULL
-  `)) as unknown as { rows: LegacyPost[] };
+  `)) as unknown as LegacyPost[];
 
-  console.log(`[migrate]   ${legacyRowsRes.rows.length} legacy rows to backfill`);
+  console.log(`[migrate]   ${legacyRows.length} legacy rows to backfill`);
 
   let backfilled = 0;
-  for (const row of legacyRowsRes.rows) {
+  for (const row of legacyRows) {
     const userId = ownerByProject.get(row.project_id);
     if (!userId) {
       console.warn(
@@ -183,7 +190,7 @@ async function main() {
     `);
     backfilled++;
     if (backfilled % 25 === 0) {
-      console.log(`[migrate]   …${backfilled}/${legacyRowsRes.rows.length}`);
+      console.log(`[migrate]   …${backfilled}/${legacyRows.length}`);
     }
   }
 

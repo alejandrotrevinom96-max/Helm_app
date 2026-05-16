@@ -135,26 +135,35 @@ export async function POST() {
     });
 
     // 4) Backfill 1:1 content_assets for legacy rows.
-    const ownersRes = (await db.execute(sql`
+    //
+    // db.execute() with drizzle-orm/postgres-js returns the row
+    // array DIRECTLY (extends `RowList<T[]>` from the postgres-js
+    // driver) — NOT a `{ rows: T[] }` wrapper like node-postgres /
+    // pg's `Result`. Initial cut of this endpoint mistakenly used
+    // `.rows` and exploded at runtime with "d.rows is not iterable"
+    // / "Cannot read properties of undefined (reading '0')". See
+    // scripts/migrate-brand-context.ts + scripts/dedupe-metric-
+    // snapshots.ts for the canonical pattern this repo uses.
+    const owners = (await db.execute(sql`
       SELECT id, user_id FROM projects
-    `)) as unknown as { rows: Array<{ id: string; user_id: string }> };
+    `)) as unknown as Array<{ id: string; user_id: string }>;
     const ownerByProject = new Map<string, string>();
-    for (const r of ownersRes.rows) {
+    for (const r of owners) {
       ownerByProject.set(r.id, r.user_id);
     }
 
-    const legacyRes = (await db.execute(sql`
+    const legacyRows = (await db.execute(sql`
       SELECT
         id, project_id, platform, content, prompt, content_type,
         structured_content, image_url, visual_urls, video_url,
         variant_label, variant_group_id, created_at
       FROM generated_posts
       WHERE asset_id IS NULL
-    `)) as unknown as { rows: LegacyPost[] };
+    `)) as unknown as LegacyPost[];
 
     let backfilled = 0;
     let skipped = 0;
-    for (const row of legacyRes.rows) {
+    for (const row of legacyRows) {
       const userId = ownerByProject.get(row.project_id);
       if (!userId) {
         skipped++;
@@ -196,7 +205,7 @@ export async function POST() {
     steps.push({
       step: 'Backfill content_assets 1:1',
       ok: true,
-      note: `backfilled=${backfilled}, skipped=${skipped}, total_pending=${legacyRes.rows.length}`,
+      note: `backfilled=${backfilled}, skipped=${skipped}, total_pending=${legacyRows.length}`,
     });
 
     return NextResponse.json({
@@ -231,31 +240,40 @@ export async function GET() {
         { status: 401 },
       );
     }
-    const tableRes = (await db.execute(sql`
+    // drizzle-orm/postgres-js: db.execute() returns the row array
+    // directly. See POST handler comment for the full explanation.
+    const tableRows = (await db.execute(sql`
       SELECT to_regclass('public.content_assets') AS exists
-    `)) as unknown as { rows: Array<{ exists: string | null }> };
-    const hasTable = Boolean(tableRes.rows[0]?.exists);
-    const colRes = (await db.execute(sql`
+    `)) as unknown as Array<{ exists: string | null }>;
+    const hasTable = Boolean(tableRows[0]?.exists);
+    const colRows = (await db.execute(sql`
       SELECT column_name FROM information_schema.columns
         WHERE table_name = 'generated_posts'
           AND column_name IN ('asset_id', 'caption', 'hashtags', 'cta_text')
-    `)) as unknown as { rows: Array<{ column_name: string }> };
-    const cols = colRes.rows.map((r) => r.column_name);
-    const countRes = hasTable
+    `)) as unknown as Array<{ column_name: string }>;
+    const cols = colRows.map((r) => r.column_name);
+    // Only count when the table actually exists — querying a non-
+    // existent table would throw and force a 500 even for a
+    // pre-migration status check.
+    const countRows = hasTable
       ? ((await db.execute(sql`
           SELECT COUNT(*)::int AS n FROM content_assets
-        `)) as unknown as { rows: Array<{ n: number }> })
-      : { rows: [{ n: 0 }] };
-    const pendingRes = (await db.execute(sql`
-      SELECT COUNT(*)::int AS n FROM generated_posts WHERE asset_id IS NULL
-    `).catch(() => ({ rows: [{ n: -1 }] }))) as unknown as {
-      rows: Array<{ n: number }>;
-    };
+        `)) as unknown as Array<{ n: number }>)
+      : ([{ n: 0 }] as Array<{ n: number }>);
+    // Same defensive guard for the pending-backfill count: the
+    // `asset_id` column has to exist before this query is safe.
+    const pendingRows = cols.includes('asset_id')
+      ? ((await db
+          .execute(
+            sql`SELECT COUNT(*)::int AS n FROM generated_posts WHERE asset_id IS NULL`,
+          )
+          .catch(() => [{ n: -1 }])) as unknown as Array<{ n: number }>)
+      : ([{ n: -1 }] as Array<{ n: number }>);
     return NextResponse.json({
       hasTable,
       newColumns: cols.sort(),
-      assetCount: countRes.rows[0]?.n ?? 0,
-      pendingBackfill: pendingRes.rows[0]?.n ?? null,
+      assetCount: countRows[0]?.n ?? 0,
+      pendingBackfill: pendingRows[0]?.n ?? null,
       migrationApplied:
         hasTable &&
         cols.includes('asset_id') &&
