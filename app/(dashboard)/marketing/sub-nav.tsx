@@ -17,6 +17,11 @@ const SUB_NAV_ITEMS: SubNavItem[] = [
     description: 'Create new posts',
   },
   {
+    name: 'Studio',
+    href: '/marketing/studio',
+    description: 'Chat with the video agent',
+  },
+  {
     name: 'Calendar',
     href: '/marketing/calendar',
     description: 'Schedule and review',

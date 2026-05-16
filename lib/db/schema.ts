@@ -2074,3 +2074,81 @@ export type UserIntegrationOptOutRow =
   typeof userIntegrationOptOuts.$inferSelect;
 export type NewUserIntegrationOptOutRow =
   typeof userIntegrationOptOuts.$inferInsert;
+
+// ===== HeyGen Agent Sessions =====
+// PR Sprint D-2 — interactive Studio sessions backed by HeyGen
+// V3 Video Agent.
+//
+// Each row is one chat-mode session: founder prompts the agent,
+// agent drafts storyboard, founder iterates via messages, then
+// approves → renders → final video. We mirror enough state
+// locally that the /marketing/studio UI never has to round-trip
+// to HeyGen on every page load (saves quota + keeps the list view
+// fast).
+//
+// Lifecycle mirrors HeyGen's `status`:
+//   thinking → reviewing → generating → completed (or failed)
+//
+// We poll the session on a 5s tick while it's "live" (anything
+// before completed/failed). Messages + the `lastResources` jsonb
+// are refreshed on every poll so the founder sees agent
+// follow-ups + new storyboard renders without a manual refresh.
+//
+// finalVideoId joins back to the final-video poll endpoint
+// (/v3/videos/{id}); when set + status='completed' we have a
+// playable URL the founder can publish or save into the library.
+export const heygenAgentSessions = pgTable('heygen_agent_sessions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  projectId: uuid('project_id')
+    .notNull()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  // HeyGen's session_id (their primary key). Unique per row so
+  // re-creating a session for the same project + prompt always
+  // gets a new local row — no accidental cross-talk.
+  heygenSessionId: text('heygen_session_id').notNull(),
+  status: text('status').notNull().default('thinking'),
+  // Founder's original prompt. Stored verbatim for re-use ("clone
+  // this session" affordance) and for the Library card preview.
+  prompt: text('prompt').notNull(),
+  // Agent-chosen title (after a few seconds of "thinking" HeyGen
+  // names the session). Falls back to prompt slice for the UI.
+  title: text('title'),
+  // Optional overrides the founder set at create time. Nullable —
+  // when null, the agent picked autonomously.
+  styleId: text('style_id'),
+  avatarId: text('avatar_id'),
+  voiceId: text('voice_id'),
+  orientation: text('orientation'), // 'landscape' | 'portrait' | null
+  // Latest snapshot of messages from HeyGen. Refreshed on every
+  // poll. Truncated to the most recent ~40 entries server-side
+  // (HeyGen caps this too).
+  messages: jsonb('messages').$type<unknown[]>(),
+  // Resource refs (storyboard PNGs, draft video URLs, picked
+  // avatar / voice metadata). Cached so the UI can render
+  // thumbnails without re-fetching each resource_id.
+  lastResources: jsonb('last_resources').$type<unknown[]>(),
+  // Once the storyboard is approved + render starts, HeyGen
+  // assigns a video_id. We poll /v3/videos/{video_id} from here
+  // until status='completed' / 'failed'.
+  finalVideoId: text('final_video_id'),
+  finalVideoUrl: text('final_video_url'),
+  finalVideoThumbnailUrl: text('final_video_thumbnail_url'),
+  finalVideoCaptionedUrl: text('final_video_captioned_url'),
+  finalVideoSubtitleUrl: text('final_video_subtitle_url'),
+  finalVideoDurationSec: numeric('final_video_duration_sec', {
+    precision: 7,
+    scale: 2,
+  }),
+  errorMessage: text('error_message'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  completedAt: timestamp('completed_at'),
+});
+
+export type HeygenAgentSessionRow =
+  typeof heygenAgentSessions.$inferSelect;
+export type NewHeygenAgentSessionRow =
+  typeof heygenAgentSessions.$inferInsert;
