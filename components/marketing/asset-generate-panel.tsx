@@ -95,7 +95,21 @@ interface GeneratedAsset {
 
 interface ScriptVariant {
   label: 'A' | 'B';
+  // Flat spoken text (what HeyGen reads + what shows in the
+  // preview / library script block). For canonical-pipeline
+  // variants this is the concatenation of UGCBundle.hook +
+  // body[].text + cta.
   text: string;
+  // PR Sprint 7.28 — extra metadata from the canonical pipeline.
+  // wordCount + durationSeconds are surfaced in the picker chip;
+  // bundle is forwarded back to /api/ai/generate-asset via
+  // baseUgcBundleOverride so the structured bundle persists on
+  // each generated_post.structuredContent for future surfaces.
+  wordCount?: number;
+  durationSeconds?: number;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  bundle?: any;
+  parseKind?: 'ok' | 'repaired';
 }
 
 interface RenderStatus {
@@ -209,8 +223,13 @@ export function AssetGeneratePanel({ projectId }: Props) {
 
   // ─── Step 1b (UGC only): commit the chosen script + run the
   //     full asset generation ───────────────────────────────────
+  //
+  // Forward both the spoken text (becomes asset.baseContent +
+  // HeyGen scriptText) AND the structured UGCBundle (persisted
+  // on each generated_post.structuredContent so future surfaces
+  // can render overlays / hashtags / caption from it).
   const commitScript = async (chosen: ScriptVariant) => {
-    await runAssetGeneration(chosen.text);
+    await runAssetGeneration(chosen.text, chosen.bundle);
   };
 
   // ─── Step 1 (non-UGC) OR Step 2 (UGC): create the asset row +
@@ -218,7 +237,17 @@ export function AssetGeneratePanel({ projectId }: Props) {
   //     `baseContentOverride` is set ONLY for UGC committed
   //     scripts; non-UGC types pass undefined and let
   //     generate-asset run its own type-specific generator.
-  const runAssetGeneration = async (baseContentOverride?: string) => {
+  const runAssetGeneration = async (
+    baseContentOverride?: string,
+    // PR Sprint 7.28 — when the override came from the A/B
+    // picker, ALSO forward the structured UGCBundle so the
+    // server persists it on each generated_post.structuredContent.
+    // The bundle carries overlays + caption + hashtags that
+    // would otherwise be discarded when we flatten to spoken
+    // text for HeyGen.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    baseUgcBundleOverride?: any,
+  ) => {
     if (!assetType || selectedPlatforms.length === 0 || !prompt.trim()) {
       return;
     }
@@ -236,6 +265,9 @@ export function AssetGeneratePanel({ projectId }: Props) {
           prompt: prompt.trim(),
           ...(baseContentOverride
             ? { baseContentOverride }
+            : {}),
+          ...(baseUgcBundleOverride
+            ? { baseUgcBundleOverride }
             : {}),
         }),
       });
@@ -570,8 +602,15 @@ export function AssetGeneratePanel({ projectId }: Props) {
                     Option {v.label} ·{' '}
                     {v.label === 'A' ? 'Direct hook' : 'Story hook'}
                   </span>
+                  {/* PR Sprint 7.28 — when the canonical pipeline
+                      ran, wordCount + durationSeconds come from
+                      the server (computed off the parsed bundle).
+                      Fall back to a client-side split for safety. */}
                   <span className="text-[10px] font-mono uppercase tracking-[0.1em] text-text-3">
-                    {v.text.split(/\s+/).length} words
+                    {(v.wordCount ?? v.text.split(/\s+/).length)} words
+                    {v.durationSeconds !== undefined && (
+                      <span> · ~{v.durationSeconds}s</span>
+                    )}
                   </span>
                 </div>
                 <p className="text-sm text-text-1 whitespace-pre-wrap leading-relaxed">

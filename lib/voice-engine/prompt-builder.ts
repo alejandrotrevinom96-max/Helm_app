@@ -277,7 +277,17 @@ function validateCombination(
 
 // Render the per-client context block as a string for the
 // prompt. 1:1 with the Python source's _format_dynamic_context.
-function formatDynamicContext(
+//
+// PR Sprint 7.28 — exported so the asset-based content flow
+// (generate-asset, generate-ugc-scripts) can reuse the SAME
+// dynamic context block when its caption-adaptation step builds
+// a custom prompt that doesn't go through the full
+// buildAdaptivePrompt machinery. Keeps every Haiku call site
+// reading from the same VoiceEngine intelligence (brand bible
+// + voice fingerprint samples + winning/losing patterns +
+// learned overrides + anti-samples) without duplicating the
+// formatting logic.
+export function formatDynamicContext(
   ctx: ClientContext,
   platform: Platform,
 ): string {
