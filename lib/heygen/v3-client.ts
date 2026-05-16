@@ -456,3 +456,105 @@ export async function getLipsync(
   if (!r.ok) return r;
   return { ok: true, job: r.data };
 }
+
+// ─────────────────────────────────────────────────────────────
+// Video Translation — V3
+// ─────────────────────────────────────────────────────────────
+//
+// POST /v3/video-translations
+//   Translates a video into one or more target languages with
+//   voice cloning + lip-sync. Returns one translation_id per
+//   language.
+//
+// GET /v3/video-translations/{id}
+//   Polls a single translation job.
+//
+// GET /v3/video-translations/languages
+//   Lists supported target language NAMES (e.g. "Spanish (Spain)",
+//   "Portuguese (Brazil)"). HeyGen wants the NAMES, not BCP-47
+//   codes — passing 'es-MX' fails.
+
+export type TranslationMode = 'speed' | 'precision';
+
+export interface TranslationJobView {
+  video_translation_id: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  output_language: string | null;
+  video_url: string | null;
+  caption_url: string | null;
+  duration: number | null;
+  failure_code: string | null;
+  failure_message: string | null;
+}
+
+interface TranslationCreateResponse {
+  video_translation_ids?: string[];
+}
+
+export async function createVideoTranslation(args: {
+  videoUrl: string;
+  outputLanguages: string[];
+  mode?: TranslationMode;
+  title?: string;
+  enableCaption?: boolean;
+  enableSpeechEnhancement?: boolean;
+  inputLanguage?: string;
+  callbackId?: string;
+}): Promise<
+  | { ok: true; translationIds: string[] }
+  | { ok: false; error: string }
+> {
+  if (args.outputLanguages.length === 0) {
+    return { ok: false, error: 'At least one output language required' };
+  }
+  const body: Record<string, unknown> = {
+    video: { type: 'url', url: args.videoUrl },
+    output_languages: args.outputLanguages,
+    mode: args.mode ?? 'speed',
+    enable_caption: args.enableCaption ?? true,
+    enable_speech_enhancement: args.enableSpeechEnhancement ?? true,
+    enable_dynamic_duration: true,
+  };
+  if (args.title) body.title = args.title;
+  if (args.inputLanguage) body.input_language = args.inputLanguage;
+  if (args.callbackId) body.callback_id = args.callbackId;
+  const r = await v3<TranslationCreateResponse>('/video-translations', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) return r;
+  const ids = r.data.video_translation_ids ?? [];
+  if (ids.length === 0) {
+    return { ok: false, error: 'Translation response had no IDs' };
+  }
+  return { ok: true, translationIds: ids };
+}
+
+export async function getVideoTranslation(
+  translationId: string,
+): Promise<
+  | { ok: true; job: TranslationJobView }
+  | { ok: false; error: string }
+> {
+  const r = await v3<TranslationJobView>(
+    `/video-translations/${encodeURIComponent(translationId)}`,
+    { method: 'GET' },
+  );
+  if (!r.ok) return r;
+  return { ok: true, job: r.data };
+}
+
+interface LanguagesResponse {
+  languages?: string[];
+}
+
+export async function listTranslationLanguages(): Promise<
+  { ok: true; languages: string[] } | { ok: false; error: string }
+> {
+  const r = await v3<LanguagesResponse>(
+    '/video-translations/languages',
+    { method: 'GET' },
+  );
+  if (!r.ok) return r;
+  return { ok: true, languages: r.data.languages ?? [] };
+}

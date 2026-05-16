@@ -22,6 +22,11 @@ import { ScheduleModal } from './schedule-modal';
 // the founder tweak the spoken script + re-render at 5-10x
 // lower cost than a full Avatar IV pass.
 import { LipsyncRerenderModal } from './lipsync-rerender-modal';
+// PR Sprint D-5 — Video Translation modal. Surfaced alongside the
+// Lipsync button on rows with a completed HeyGen render — kicks
+// off multi-language translations of the same source video via
+// HeyGen's V3 video-translations endpoint.
+import { TranslateModal } from './translate-modal';
 
 // PR #86 — Sprint 7.10: HeyGen video job lifecycle types. Mirrors
 // the serializeJob() shape in /api/heygen/jobs.
@@ -197,6 +202,8 @@ export function PostDetailModal({
   const [heygenStarting, setHeygenStarting] = useState(false);
   // PR Sprint D-4 — lipsync re-render modal toggle.
   const [lipsyncOpen, setLipsyncOpen] = useState(false);
+  // PR Sprint D-5 — translation modal toggle.
+  const [translateOpen, setTranslateOpen] = useState(false);
   // Polling guard — only one interval per modal mount.
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -1242,6 +1249,19 @@ export function PostDetailModal({
                       ↻ Edit script & re-render
                     </button>
                   )}
+                  {/* PR Sprint D-5 — translate the completed render
+                      into up to 8 languages. Same gating as lipsync:
+                      requires a real heygenJob.id (and the job must
+                      be completed — server enforces this on POST). */}
+                  {heygenJob?.id && heygenJob.status === 'completed' && (
+                    <button
+                      type="button"
+                      onClick={() => setTranslateOpen(true)}
+                      className="inline-flex items-center gap-2 px-3 py-1.5 bg-bg border border-border rounded-lg text-xs font-medium hover:bg-bg-elev hover:border-border-bright"
+                    >
+                      🌐 Translate
+                    </button>
+                  )}
                   {/* PR #87 — Sprint 7.11: Send to TikTok inbox.
                       Surfaces only on scheduled rows because the
                       upload endpoint requires a scheduledPostId.
@@ -1848,6 +1868,16 @@ export function PostDetailModal({
             )?.baseContent ?? post.content
           }
           onClose={() => setLipsyncOpen(false)}
+        />
+      )}
+      {/* PR Sprint D-5 — translation modal. Same gating as the
+          lipsync modal — heygenJob.id has to be live so the
+          modal can hit /api/heygen/translate?sourceJobId=...
+          to list existing translations and POST new ones. */}
+      {translateOpen && heygenJob?.id && (
+        <TranslateModal
+          sourceJobId={heygenJob.id}
+          onClose={() => setTranslateOpen(false)}
         />
       )}
     </div>

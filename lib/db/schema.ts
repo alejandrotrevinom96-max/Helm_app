@@ -2214,3 +2214,55 @@ export const heygenLipsyncJobs = pgTable('heygen_lipsync_jobs', {
 export type HeygenLipsyncJobRow = typeof heygenLipsyncJobs.$inferSelect;
 export type NewHeygenLipsyncJobRow =
   typeof heygenLipsyncJobs.$inferInsert;
+
+// ===== HeyGen Translation Jobs =====
+// PR Sprint D-5 — multi-language UGC video distribution via
+// HeyGen V3 video translation.
+//
+// A single founder-driven translation request creates one row
+// PER target language. HeyGen returns one translation_id per
+// language; we poll each independently. When status='completed',
+// resultVideoUrl is the dubbed + lip-synced video in that
+// language — the founder can download it, share it, or
+// (future) schedule it as a new generated_post for a locale-
+// specific platform.
+//
+// Translation is voice-cloned: HeyGen clones the source video's
+// voice into the target language, then re-renders lipsync. The
+// avatar appears to speak the new language naturally. The same
+// row therefore captures both the audio dub + the visual
+// re-render in one artifact.
+export const heygenTranslationJobs = pgTable('heygen_translation_jobs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  projectId: uuid('project_id')
+    .notNull()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  // The original heygen_jobs render whose audio + visual is
+  // being translated. Cascade-delete: a translation is
+  // meaningless without the source.
+  sourceJobId: uuid('source_job_id')
+    .notNull()
+    .references(() => heygenJobs.id, { onDelete: 'cascade' }),
+  // HeyGen's video_translation_id.
+  heygenTranslationId: text('heygen_translation_id').notNull(),
+  // Target language NAME (HeyGen's vocabulary), e.g.
+  // 'Spanish (Spain)', 'Portuguese (Brazil)'.
+  targetLanguage: text('target_language').notNull(),
+  mode: text('mode').notNull().default('speed'),
+  status: text('status').notNull().default('pending'),
+  resultVideoUrl: text('result_video_url'),
+  resultCaptionUrl: text('result_caption_url'),
+  durationSec: numeric('duration_sec', { precision: 7, scale: 2 }),
+  errorMessage: text('error_message'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  completedAt: timestamp('completed_at'),
+});
+
+export type HeygenTranslationJobRow =
+  typeof heygenTranslationJobs.$inferSelect;
+export type NewHeygenTranslationJobRow =
+  typeof heygenTranslationJobs.$inferInsert;
