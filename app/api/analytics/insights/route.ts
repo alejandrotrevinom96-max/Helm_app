@@ -72,7 +72,7 @@ function asInsight(v: unknown): Insight | null {
   return { type, text: text.slice(0, 200) };
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -80,6 +80,13 @@ export async function GET() {
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+
+  // PR Sprint B-finish — `?refresh=true` lets the UI's Refresh
+  // button force-regenerate even when a cached row is still
+  // within its 24h TTL. We don't bypass the auth or scope
+  // checks, just the cache short-circuit.
+  const { searchParams } = new URL(request.url);
+  const forceRefresh = searchParams.get('refresh') === 'true';
 
   // Resolve the user's projects so the metrics aggregate matches
   // what /analytics renders in "All projects" mode. The insights
@@ -105,20 +112,27 @@ export async function GET() {
     .slice(0, 32);
 
   const now = new Date();
-  const cached = await db
-    .select({
-      insights: analyticsInsightsCache.insights,
-      expiresAt: analyticsInsightsCache.expiresAt,
-    })
-    .from(analyticsInsightsCache)
-    .where(
-      and(
-        eq(analyticsInsightsCache.userId, user.id),
-        eq(analyticsInsightsCache.projectsHash, projectsHash),
-        gte(analyticsInsightsCache.expiresAt, now),
-      ),
-    )
-    .limit(1);
+  // PR Sprint B-finish — skip the cache read when the founder
+  // explicitly asked for fresh insights (Refresh button). Cache
+  // WRITES still happen so the next page load gets the new bullets
+  // from cache.
+  const cached = forceRefresh
+    ? []
+    : await db
+        .select({
+          insights: analyticsInsightsCache.insights,
+          generatedAt: analyticsInsightsCache.generatedAt,
+          expiresAt: analyticsInsightsCache.expiresAt,
+        })
+        .from(analyticsInsightsCache)
+        .where(
+          and(
+            eq(analyticsInsightsCache.userId, user.id),
+            eq(analyticsInsightsCache.projectsHash, projectsHash),
+            gte(analyticsInsightsCache.expiresAt, now),
+          ),
+        )
+        .limit(1);
 
   if (cached[0]) {
     // Defensive: the column is jsonb so it round-trips as the
@@ -127,7 +141,13 @@ export async function GET() {
     const insights = Array.isArray(cached[0].insights)
       ? (cached[0].insights as Insight[])
       : [];
-    return NextResponse.json({ insights, cached: true });
+    return NextResponse.json({
+      insights,
+      cached: true,
+      // PR Sprint B-finish — surface generatedAt so the UI can
+      // render "Last refreshed X min ago".
+      generatedAt: cached[0].generatedAt.toISOString(),
+    });
   }
 
   const sevenDaysAgo = new Date(Date.now() - 7 * 86400000);
@@ -313,7 +333,15 @@ Return 2–3 insights now. JSON only.`;
       }
     }
 
-    return NextResponse.json({ insights });
+    // PR Sprint B-finish — return generatedAt so the UI can show
+    // "Last refreshed X min ago" against a fresh generation too
+    // (not just the cached path). `now` was captured at the top
+    // of the handler and is what the cache write used.
+    return NextResponse.json({
+      insights,
+      cached: false,
+      generatedAt: now.toISOString(),
+    });
   } catch (err) {
     console.error('[analytics-insights] generation failed:', err);
     // Fail silently — the client treats empty insights array as

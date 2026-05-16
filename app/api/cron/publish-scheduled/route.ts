@@ -30,6 +30,10 @@ import {
 // Voice Engine via the server-side hook. Fire-and-forget; an
 // engine failure never blocks the cron pass.
 import { recordPublishOnSuccess } from '@/lib/voice-engine/hooks';
+// PR Sprint B-finish — cron publish meaningfully changes the
+// metrics that drive analytics insights. Drop the founder's
+// cached bullets so the next /analytics visit regenerates.
+import { invalidateAnalyticsInsightsCache } from '@/lib/analytics/invalidate-insights-cache';
 
 export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
@@ -177,6 +181,10 @@ export async function GET(request: Request) {
             }).catch(() => {
               /* already logged in hooks.ts */
             });
+            // PR Sprint B-finish — drop the analytics insights
+            // cache so the founder's next /analytics visit
+            // regenerates with the new post-count reflected.
+            void invalidateAnalyticsInsightsCache(post.userId);
             // PR #30 — separate counter for Stories so the response
             // surfaces "X feed posts + Y stories" instead of one
             // amalgamated number.

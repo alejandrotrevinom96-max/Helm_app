@@ -275,7 +275,7 @@ export default async function AdminOverviewPage() {
       {/* HEYGEN */}
       <section>
         <h2 className="text-xs font-mono uppercase tracking-[0.15em] text-text-3 mb-3">
-          HeyGen video jobs
+          Video render jobs
         </h2>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <Stat

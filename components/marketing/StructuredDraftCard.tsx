@@ -476,7 +476,7 @@ export function StructuredDraftCard({
           data.errorKind === 'not_configured'
             ? 'No avatar set. Open Settings → Video Avatar to pick one.'
             : data.errorKind === 'feature_disabled'
-              ? 'HeyGen integration is off on this deployment. Queue will process when it ships.'
+              ? 'Video generation is off on this deployment. Queue will process when it ships.'
               : data.errorKind === 'voice_config'
                 ? 'Voice configuration issue. If you just updated your avatar, the queue auto-retries in ~60s. Otherwise check the upstream message below.'
                 : (data.hint ?? data.error ?? 'Video generation failed to start');
@@ -769,7 +769,7 @@ export function StructuredDraftCard({
             {heygenUpstreamError && (
               <details className="mt-2">
                 <summary className="text-[10px] font-mono uppercase tracking-[0.12em] text-text-3 cursor-pointer hover:text-text-2">
-                  HeyGen said
+                  Renderer said
                 </summary>
                 <div className="mt-1 p-2 rounded bg-bg-elev border border-border font-mono text-[11px] text-text-2 break-words">
                   {heygenUpstreamError}

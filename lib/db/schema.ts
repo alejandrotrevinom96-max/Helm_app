@@ -1996,3 +1996,44 @@ export type AnalyticsInsightsCacheRow =
   typeof analyticsInsightsCache.$inferSelect;
 export type NewAnalyticsInsightsCacheRow =
   typeof analyticsInsightsCache.$inferInsert;
+
+// ===== User Integration Opt-Outs =====
+// PR Sprint B-finish — per-user soft disconnect for integrations
+// that use deploy-wide credentials (X / Twitter currently — its
+// OAuth 1.0a creds live in env vars at the deploy level, not per
+// user). Founders need a Disconnect button for consistency with
+// Vercel / Supabase / LinkedIn (each of which DOES have per-user
+// tokens we can drop from `integrations`), but we can't actually
+// drop env vars on their behalf.
+//
+// The compromise: this table records that user X has chosen to
+// not have Helm publish to X on their behalf. The publish
+// dispatcher (lib/meta/publisher.ts) and the integration's
+// status check (/api/integrations/x/test) both consult it before
+// reporting "connected" / firing API calls. Reconnecting deletes
+// the row.
+//
+// Unique on (userId, provider) so re-disconnect is idempotent
+// and reconnect is unambiguous.
+export const userIntegrationOptOuts = pgTable(
+  'user_integration_opt_outs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    // 'x' currently; more providers can be added as Helm gains
+    // deploy-wide integrations. NOT a FK — providers are a
+    // string vocabulary, not a table.
+    provider: text('provider').notNull(),
+    optedOutAt: timestamp('opted_out_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    uniqueUserProvider: unique().on(t.userId, t.provider),
+  }),
+);
+
+export type UserIntegrationOptOutRow =
+  typeof userIntegrationOptOuts.$inferSelect;
+export type NewUserIntegrationOptOutRow =
+  typeof userIntegrationOptOuts.$inferInsert;

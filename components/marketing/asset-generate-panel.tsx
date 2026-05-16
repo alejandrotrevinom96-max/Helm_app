@@ -551,7 +551,7 @@ export function AssetGeneratePanel({ projectId }: Props) {
             phase === 'idle' && (
               <p className="text-xs text-text-3 mt-2">
                 {isVideoAsset
-                  ? '2 script variants drafted first — you pick before HeyGen burns a $0.10 render.'
+                  ? '2 script variants drafted first — you pick before we render the video.'
                   : `1 asset generated · ${selectedPlatforms.length} caption${selectedPlatforms.length === 1 ? '' : 's'} adapted per platform.`}
               </p>
             )}
@@ -721,8 +721,8 @@ export function AssetGeneratePanel({ projectId }: Props) {
                       Video queued
                     </div>
                     <div className="text-xs text-text-3 mt-0.5">
-                      HeyGen pickup usually within 60s — the worker
-                      cron runs every minute.
+                      Pickup usually within 60s — the worker runs
+                      every minute.
                     </div>
                   </div>
                 </div>
@@ -732,7 +732,7 @@ export function AssetGeneratePanel({ projectId }: Props) {
                   <div className="w-4 h-4 rounded-full border-2 border-purple-500 border-t-transparent animate-spin" />
                   <div>
                     <div className="text-sm text-purple-500">
-                      HeyGen rendering your video
+                      Rendering your video
                     </div>
                     <div className="text-xs text-text-3 mt-0.5">
                       Typically 2-5 minutes · the same render is
@@ -832,7 +832,7 @@ export function AssetGeneratePanel({ projectId }: Props) {
                   >
                     Library
                   </a>{' '}
-                  once Flux finishes the batch.
+                  once the image generator finishes the batch.
                 </div>
               );
             }

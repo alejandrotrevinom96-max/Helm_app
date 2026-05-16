@@ -20,6 +20,11 @@ import { eq, and } from 'drizzle-orm';
 import { MetaGraphClient, MetaApiError } from './graph-client';
 import { decryptToken } from '@/lib/crypto/token-encryption';
 import { isXConfigured, postTweet, postThread } from '@/lib/x/client';
+// PR Sprint B-finish — per-user soft-disconnect for deploy-wide
+// providers. publishToX consults this before firing any X API
+// call so an opted-out founder can't accidentally re-trigger a
+// publish from a re-queued scheduled row.
+import { isUserOptedOut } from '@/lib/integrations/opt-outs';
 import {
   publishLinkedInText,
   publishLinkedInImage,
@@ -674,6 +679,18 @@ async function publishToX(
       success: false,
       error:
         'X (Twitter) credentials not configured. Set X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_TOKEN_SECRET.',
+      isTransient: false,
+    };
+  }
+  // PR Sprint B-finish — soft-disconnect gate. If the founder
+  // opted out via /api/integrations/x/disconnect, refuse the
+  // publish even though the deploy-wide creds are live. Not
+  // transient — re-attempting the same row makes no sense until
+  // the founder clicks "Connect X" in /integrations.
+  if (await isUserOptedOut(post.userId, 'x')) {
+    return {
+      success: false,
+      error: 'X (Twitter) is disconnected for this account. Reconnect in /integrations to resume auto-publishing.',
       isTransient: false,
     };
   }

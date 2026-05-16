@@ -55,6 +55,11 @@ import { publishPost } from '@/lib/meta/publisher';
 // Direct function call (not HTTP loopback) keeps the path
 // synchronous + cheap.
 import { recordPublishOnSuccess } from '@/lib/voice-engine/hooks';
+// PR Sprint B-finish — successful publish meaningfully changes
+// the analytics metrics (posts-this-week count, latest publish
+// timestamp). Invalidate the cached insights so the next page
+// load shows fresh bullets reflecting the new state.
+import { invalidateAnalyticsInsightsCache } from '@/lib/analytics/invalidate-insights-cache';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -328,6 +333,11 @@ async function dispatchPublish(scheduledId: string): Promise<Response> {
     }).catch(() => {
       /* already logged in hooks.ts */
     });
+    // PR Sprint B-finish — drop the analytics insights cache so
+    // the next /analytics visit regenerates with the new
+    // post-count reflected. Fire-and-forget; failure is silently
+    // swallowed inside the helper.
+    void invalidateAnalyticsInsightsCache(published.userId);
   }
 
   return NextResponse.json({

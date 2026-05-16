@@ -99,6 +99,12 @@ import {
   type AssetType,
   type Platform,
 } from '@/lib/marketing/platform-rules';
+// PR Sprint B-finish — new asset rows + a queued HeyGen job are
+// meaningful signal for the "This week" insights bullets ("you
+// generated 3 assets this week — schedule them"). Drop the
+// analytics insights cache after a successful generation so the
+// next /analytics visit regenerates with the new state.
+import { invalidateAnalyticsInsightsCache } from '@/lib/analytics/invalidate-insights-cache';
 
 // Vercel: Anthropic Haiku is fast (~5-8s for typical caption
 // length), but N parallel adaptations + a primary content call
@@ -735,6 +741,12 @@ export async function POST(request: Request) {
         /* fire-and-forget — visible in Library on next refresh */
       });
     }
+
+    // PR Sprint B-finish — drop the analytics insights cache so
+    // the founder's next /analytics visit reflects the new asset.
+    // Fire-and-forget; failure is silently swallowed inside the
+    // helper.
+    void invalidateAnalyticsInsightsCache(user.id);
 
     return NextResponse.json({
       success: true,
