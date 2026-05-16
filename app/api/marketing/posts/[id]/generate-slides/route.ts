@@ -41,6 +41,43 @@ export const maxDuration = 300;
 // quota and increases the chance of mid-batch throttling.
 const SLIDE_CONCURRENCY = 4;
 
+// PR Sprint 7.25 Phase 11.14 — explicit per-slide timeout. The
+// founder was still hitting Vercel's "An error occurred"
+// plaintext page even after parallel chunking + 300s
+// maxDuration. Symptom: fal.subscribe() hangs indefinitely when
+// fal.ai's worker queue is congested — the SDK has no built-in
+// timeout, so a stuck call ties up the lambda until Vercel
+// force-kills it (and then returns plain text BEFORE our
+// try/catch can return JSON). 75s per slide is generous
+// (typical Flux completion is 8-15s, p99 ~30s); anything past
+// 75s is almost certainly hung. We Promise.race against an
+// AbortController so the timeout actually frees the lambda
+// instead of just resolving our promise while the underlying
+// fetch keeps holding the event loop.
+const SLIDE_TIMEOUT_MS = 75_000;
+
+function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  label: string,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s`));
+    }, ms);
+    promise.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(t);
+        reject(e);
+      },
+    );
+  });
+}
+
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -317,17 +354,28 @@ async function handle(
     const hint = buildSlidePromptHint(slide, i, slides.length);
     let result: Awaited<ReturnType<typeof generateVisual>> | null = null;
     try {
-      result = await generateVisual({
-        platform,
-        postContent: hint,
-        brandBible: bible,
-        style,
-        aspectRatio: 'square', // IG carousels = 1:1
-        // PR Sprint 7.24 IR inputs; PR Sprint 7.25 Phase 9 per-
-        // slide painPoint for varied subject extraction.
-        painPoint: buildSlidePainPoint(slide, draftPainPoint),
-        contentType: 'carousel',
-      });
+      // PR Sprint 7.25 Phase 11.14 — wrapped in withTimeout so a
+      // hung fal.subscribe call can't drag the whole batch over
+      // Vercel's lambda ceiling. fal occasionally hangs when its
+      // worker queue is congested; without this the lambda would
+      // wait 300s, get force-killed, and return Vercel's
+      // plaintext error page (founder saw "Server didn't respond
+      // with JSON" repeatedly even with 300s budget).
+      result = await withTimeout(
+        generateVisual({
+          platform,
+          postContent: hint,
+          brandBible: bible,
+          style,
+          aspectRatio: 'square', // IG carousels = 1:1
+          // PR Sprint 7.24 IR inputs; PR Sprint 7.25 Phase 9 per-
+          // slide painPoint for varied subject extraction.
+          painPoint: buildSlidePainPoint(slide, draftPainPoint),
+          contentType: 'carousel',
+        }),
+        SLIDE_TIMEOUT_MS,
+        `slide ${i + 1} generateVisual`,
+      );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(
@@ -356,10 +404,13 @@ async function handle(
     // panic doesn't kill the slide.
     let permanentUrl: string;
     try {
-      const uploaded = await uploadVisualFromUrl(
-        result.url,
-        user.id,
-        `${id}-slide-${i}`,
+      // PR Sprint 7.25 Phase 11.14 — same timeout protection as
+      // the generateVisual call above. Supabase Storage upload
+      // shouldn't normally hang but defense-in-depth.
+      const uploaded = await withTimeout(
+        uploadVisualFromUrl(result.url, user.id, `${id}-slide-${i}`),
+        30_000,
+        `slide ${i + 1} rehost`,
       );
       permanentUrl = uploaded?.publicUrl ?? result.url;
       if (!uploaded) {
