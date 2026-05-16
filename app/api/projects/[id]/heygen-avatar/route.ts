@@ -76,6 +76,10 @@ export async function GET(
     avatarId: project.heygenAvatarId,
     photoUrl: project.heygenPhotoUrl,
     voiceId: project.heygenVoiceId,
+    // PR Sprint C — return saved gender pairs so the picker can
+    // render the match indicator without a second round-trip.
+    avatarGender: project.heygenAvatarGender,
+    voiceGender: project.heygenVoiceGender,
   });
 }
 
@@ -104,6 +108,12 @@ export async function PATCH(
     avatarId?: unknown;
     photoUrl?: unknown;
     voiceId?: unknown;
+    // PR Sprint C — gender fields. Both optional; the picker
+    // stamps them when it knows the gender (from the avatars +
+    // voices catalogs). Stored normalized to lowercase
+    // 'male' | 'female' | 'neutral'.
+    avatarGender?: unknown;
+    voiceGender?: unknown;
   };
   try {
     body = (await request.json()) as typeof body;
@@ -156,6 +166,23 @@ export async function PATCH(
       typeof body.voiceId === 'string' && body.voiceId.length > 0
         ? body.voiceId
         : null;
+  }
+  // PR Sprint C — gender fields. Normalize at write time so the
+  // DB never holds 'Male' / 'MALE' / 'female ' / etc. — fire.ts
+  // and the UI both expect strict lowercase.
+  const normalizeGender = (raw: unknown): string | null => {
+    if (typeof raw !== 'string') return null;
+    const lower = raw.toLowerCase().trim();
+    if (lower === 'male' || lower === 'female' || lower === 'neutral') {
+      return lower;
+    }
+    return null;
+  };
+  if (body.avatarGender !== undefined) {
+    updates.heygenAvatarGender = normalizeGender(body.avatarGender);
+  }
+  if (body.voiceGender !== undefined) {
+    updates.heygenVoiceGender = normalizeGender(body.voiceGender);
   }
 
   if (Object.keys(updates).length === 0) {
@@ -225,6 +252,11 @@ export async function PATCH(
     avatarId: refreshed?.heygenAvatarId ?? null,
     photoUrl: refreshed?.heygenPhotoUrl ?? null,
     voiceId: refreshed?.heygenVoiceId ?? null,
+    // PR Sprint C — return persisted genders so the picker UI
+    // re-renders the match indicator off the same source of
+    // truth fire.ts reads from.
+    avatarGender: refreshed?.heygenAvatarGender ?? null,
+    voiceGender: refreshed?.heygenVoiceGender ?? null,
     requeuedFailedJobs: requeuedCount,
   });
 }

@@ -33,6 +33,10 @@ import type {
   AvatarOption,
   AvatarCategory,
 } from '@/app/api/heygen/avatars/route';
+import type {
+  VoiceOption,
+  VoiceGender,
+} from '@/app/api/heygen/voices/route';
 
 // PR Sprint 7.25 Phase 11.15 — 'talking_photo' joins the union as
 // the saved DB value for HeyGen's modern UGC/Instant Avatar
@@ -51,6 +55,22 @@ interface AvatarSettings {
   avatarId: string | null;
   photoUrl: string | null;
   voiceId: string | null;
+  // PR Sprint C — tracked alongside the IDs so the picker can
+  // render the match indicator + auto-pick a gender-matched
+  // voice when the founder swaps avatars. Hydrated from
+  // /api/projects/{id}/heygen-avatar.
+  avatarGender: VoiceGender | null;
+  voiceGender: VoiceGender | null;
+}
+
+// Normalize an arbitrary string (HeyGen returns 'Male' / 'Female'
+// / 'Unknown' / '' / null) into the strict 'male' | 'female' |
+// 'neutral' shape we store + match against.
+function normalizeGender(raw: string | null | undefined): VoiceGender {
+  const lower = (raw ?? '').toLowerCase().trim();
+  if (lower === 'male') return 'male';
+  if (lower === 'female') return 'female';
+  return 'neutral';
 }
 
 interface Props {
@@ -64,12 +84,20 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
     avatarId: null,
     photoUrl: null,
     voiceId: null,
+    avatarGender: null,
+    voiceGender: null,
   });
   const [pickerOpen, setPickerOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [avatars, setAvatars] = useState<AvatarOption[]>([]);
   const [avatarsLoading, setAvatarsLoading] = useState(false);
   const [avatarsError, setAvatarsError] = useState<string | null>(null);
+  // PR Sprint C — voices catalog for auto-matching gender to the
+  // selected avatar. We lazy-load on first picker open + on first
+  // hydrate of a saved talking_photo avatar (whose default voice
+  // was probably null when saved, leaving us no gender to display).
+  const [voices, setVoices] = useState<VoiceOption[]>([]);
+  const [voicesLoading, setVoicesLoading] = useState(false);
   const [genderFilter, setGenderFilter] = useState<
     'all' | 'male' | 'female'
   >('all');
@@ -98,6 +126,11 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
           avatarId: string | null;
           photoUrl: string | null;
           voiceId: string | null;
+          // PR Sprint C — server may return null for legacy rows
+          // whose genders were never stamped. The picker fills
+          // them in on next save.
+          avatarGender: string | null;
+          voiceGender: string | null;
         };
         if (!cancelled) {
           // PR Sprint 7.25 Phase 11.15 — preserve 'talking_photo'
@@ -121,6 +154,12 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
             avatarId: data.avatarId,
             photoUrl: data.photoUrl,
             voiceId: data.voiceId,
+            avatarGender: data.avatarGender
+              ? normalizeGender(data.avatarGender)
+              : null,
+            voiceGender: data.voiceGender
+              ? normalizeGender(data.voiceGender)
+              : null,
           });
           setLoading(false);
         }
@@ -157,6 +196,31 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
       setAvatarsLoading(false);
     }
   }, []);
+
+  // PR Sprint C — voice catalog loader. Used both to auto-match
+  // a gender-correct voice when the founder picks an avatar AND
+  // to resolve the gender of a saved voiceId that came from
+  // HeyGen's per-avatar `default_voice` (we know the id but not
+  // its gender without looking it up). Idempotent — short-
+  // circuits once the catalog is in memory.
+  const loadVoices = useCallback(async (): Promise<VoiceOption[]> => {
+    if (voices.length > 0) return voices;
+    setVoicesLoading(true);
+    try {
+      const res = await fetch('/api/heygen/voices');
+      const data = (await res.json().catch(() => ({}))) as {
+        voices?: VoiceOption[];
+        error?: string;
+      };
+      const list = data.voices ?? [];
+      setVoices(list);
+      return list;
+    } catch {
+      return [];
+    } finally {
+      setVoicesLoading(false);
+    }
+  }, [voices]);
 
   useEffect(() => {
     // PR Sprint 7.25 Phase 11.15 — also auto-load the catalog when
@@ -198,6 +262,11 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
         avatarId: string | null;
         photoUrl: string | null;
         voiceId: string | null;
+        // PR Sprint C — gender pairs travel with the rest of
+        // the avatar config so fire.ts has the data it needs
+        // for gender-aware fallbacks + mismatch warnings.
+        avatarGender: VoiceGender | null;
+        voiceGender: VoiceGender | null;
       }> = {
         avatarType: settings.avatarType,
       };
@@ -215,6 +284,8 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
         body.photoUrl = settings.photoUrl;
       }
       body.voiceId = settings.voiceId;
+      body.avatarGender = settings.avatarGender;
+      body.voiceGender = settings.voiceGender;
 
       const res = await fetch(`/api/projects/${projectId}/heygen-avatar`, {
         method: 'PATCH',
@@ -234,11 +305,23 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
         else if (savedType === 'talking_photo' && data.avatarId)
           derived = 'talking_photo';
         else if (savedType === 'stock' && data.avatarId) derived = 'stock';
+        // PR Sprint C — the PATCH response now returns
+        // avatarGender + voiceGender too. Normalize and persist.
+        const respWithGender = data as typeof data & {
+          avatarGender?: string | null;
+          voiceGender?: string | null;
+        };
         setSettings({
           avatarType: derived,
           avatarId: data.avatarId ?? null,
           photoUrl: data.photoUrl ?? null,
           voiceId: data.voiceId ?? null,
+          avatarGender: respWithGender.avatarGender
+            ? normalizeGender(respWithGender.avatarGender)
+            : null,
+          voiceGender: respWithGender.voiceGender
+            ? normalizeGender(respWithGender.voiceGender)
+            : null,
         });
         setSaveMessage('Saved ✓');
       }
@@ -405,10 +488,72 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
                               {selected.gender}
                             </div>
                           )}
+                          {/* PR Sprint C — Avatar + voice gender
+                              match indicator. Three states:
+                                ✓ match — both genders known +
+                                  equal (or one side neutral)
+                                ⚠ mismatch — both known + opposite
+                                ? unknown — at least one side null
+                                  (legacy save without gender)
+                              Sits above the "Change avatar" link
+                              so the founder sees it as part of
+                              the selected avatar summary. */}
+                          {(() => {
+                            const a = settings.avatarGender;
+                            const v = settings.voiceGender;
+                            const voicePending = voicesLoading && !v;
+                            if (voicePending) {
+                              return (
+                                <div
+                                  style={{
+                                    fontFamily:
+                                      'JetBrains Mono, monospace',
+                                    fontSize: '10px',
+                                    letterSpacing: '0.12em',
+                                    textTransform: 'uppercase',
+                                    color: 'var(--text-3)',
+                                    marginTop: '4px',
+                                  }}
+                                >
+                                  Matching voice…
+                                </div>
+                              );
+                            }
+                            if (!a || !v) return null;
+                            const mismatch =
+                              a !== v && a !== 'neutral' && v !== 'neutral';
+                            return (
+                              <div
+                                style={{
+                                  fontFamily:
+                                    'JetBrains Mono, monospace',
+                                  fontSize: '10px',
+                                  letterSpacing: '0.12em',
+                                  textTransform: 'uppercase',
+                                  marginTop: '4px',
+                                  color: mismatch
+                                    ? 'var(--d-red-2)'
+                                    : 'var(--d-green-2)',
+                                }}
+                                title={
+                                  mismatch
+                                    ? 'Avatar and voice gender differ. The rendered video may sound off.'
+                                    : 'Avatar and voice gender match.'
+                                }
+                              >
+                                {mismatch ? '⚠ Voice gender mismatch' : '✓ Voice match'}
+                              </div>
+                            );
+                          })()}
                           <button
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
+                              // PR Sprint C — pre-warm voices
+                              // catalog so when the founder
+                              // picks a new avatar the gender
+                              // match resolves instantly.
+                              void loadVoices();
                               setPickerOpen(true);
                             }}
                             className="platform-ghost-link"
@@ -440,6 +585,10 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
+                        // PR Sprint C — pre-warm voices catalog
+                        // so the gender match resolves the
+                        // instant the founder picks an avatar.
+                        void loadVoices();
                         setPickerOpen(true);
                       }}
                       className="platform-btn platform-btn-ghost"
@@ -607,27 +756,88 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
           categoryFilter={categoryFilter}
           onCategoryFilterChange={setCategoryFilter}
           onSelect={(picked) => {
-            // PR Sprint 7.25 Phase 11.12 — also stamp the avatar's
-            // recommended voice so the next HeyGen call has a
-            // valid voice_id. The /v2 API rejects payloads without
-            // one. AvatarOption.defaultVoiceId comes from HeyGen's
-            // own per-avatar default; falls back to null and the
-            // server then uses DEFAULT_HEYGEN_VOICE_ID.
+            // PR Sprint C — gender-aware voice auto-match.
             //
-            // PR Sprint 7.25 Phase 11.15 — stamp avatarType from
-            // the AvatarOption's `kind` so the save endpoint and
-            // fire helper know whether to build an /v2/avatars or
-            // /v2/talking_photo payload. The "Stock" radio is the
-            // visual UI; the saved DB value carries the catalog
-            // origin so the right HeyGen API is called downstream.
+            // The bug this fixes: talking_photo (UGC) avatars
+            // arrive with `defaultVoiceId: null` from HeyGen, so
+            // the legacy line `voiceId: picked.defaultVoiceId ??
+            // prev.voiceId` left voiceId untouched. fire.ts then
+            // silently fell back to DEFAULT_HEYGEN_VOICE_ID (a
+            // female en-US voice) → male avatar speaking with a
+            // female voice. The uncanny-valley breaker.
+            //
+            // New behavior:
+            //   - Stamp avatarGender from the AvatarOption.
+            //   - If avatar has a defaultVoiceId, use it AND
+            //     look up that voice's gender from the catalog
+            //     (load on demand). We trust HeyGen's per-avatar
+            //     default — it's gender-matched on their side.
+            //   - If avatar has NO defaultVoiceId, load the
+            //     voices catalog and pick the first
+            //     en-US-speaking voice matching the avatar's
+            //     gender. That's our auto-match.
+            //   - Optimistic UI: stamp the local state
+            //     immediately with what we know, then update
+            //     once the voice lookup resolves.
+            const pickedGender = normalizeGender(picked.gender);
+            // Optimistic stamp — gender + ids, voice gender
+            // unknown until we resolve below.
             setSettings((prev) => ({
               ...prev,
               avatarType:
                 picked.kind === 'talking_photo' ? 'talking_photo' : 'stock',
               avatarId: picked.avatarId,
+              avatarGender: pickedGender,
+              // Tentatively keep the avatar's default voice (if
+              // any); the async block below either confirms its
+              // gender or replaces both id + gender with a
+              // matched pick.
               voiceId: picked.defaultVoiceId ?? prev.voiceId,
+              voiceGender: null,
             }));
             setPickerOpen(false);
+
+            // Async resolution. Don't await — keep the picker
+            // close instant. The save button surfaces a soft
+            // "matching voice…" hint via voicesLoading until
+            // this resolves.
+            void (async () => {
+              const catalog = await loadVoices();
+              if (catalog.length === 0) return; // no signal to use
+              if (picked.defaultVoiceId) {
+                const match = catalog.find(
+                  (v) => v.voiceId === picked.defaultVoiceId,
+                );
+                if (match) {
+                  setSettings((prev) => ({
+                    ...prev,
+                    voiceGender: match.gender,
+                  }));
+                  return;
+                }
+                // Fall through — the per-avatar default isn't
+                // in the catalog we got back. Re-pick by gender.
+              }
+              // No defaultVoiceId (or it wasn't in the catalog):
+              // find a gender-matched voice. Prefer English; if
+              // none, take any voice that matches gender.
+              const sameGender = catalog.filter(
+                (v) => v.gender === pickedGender,
+              );
+              const candidates =
+                sameGender.length > 0 ? sameGender : catalog;
+              const english = candidates.find((v) =>
+                v.language.toLowerCase().includes('english'),
+              );
+              const auto = english ?? candidates[0];
+              if (auto) {
+                setSettings((prev) => ({
+                  ...prev,
+                  voiceId: auto.voiceId,
+                  voiceGender: auto.gender,
+                }));
+              }
+            })();
           }}
           onClose={() => setPickerOpen(false)}
         />

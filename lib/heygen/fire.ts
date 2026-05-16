@@ -27,24 +27,40 @@ import { db } from '@/lib/db';
 import { heygenJobs, projects } from '@/lib/db/schema';
 import { eq, sql } from 'drizzle-orm';
 
-// PR Sprint 7.25 Phase 11.12 — HeyGen's V2 API now requires a
-// `voice_id` for every type='text' voice payload. The previous
-// "omit voice_id and HeyGen uses the avatar's bundled voice"
-// behavior was deprecated. When the project hasn't picked a
-// voice (or its old voice_id was nulled by the voice-fallback
-// path), we fall back to this constant — a stable en-US voice
-// from HeyGen's public catalog that's compatible with every
-// stock avatar. The env override lets the founder swap the
-// default at deploy time if they prefer a different voice.
+// PR Sprint 7.25 Phase 11.12 / PR Sprint C — voice_id is mandatory
+// on every HeyGen V2 generate call. We persist the founder's
+// chosen voice on the project row (heygen_voice_id) when they
+// pick an avatar, and we capture the gender pair (avatar +
+// voice) so the upstream-error fallback can pick a gender-
+// correct safety net instead of silently flipping male →
+// female (the uncanny-valley bug that motivated Sprint C).
 //
-// Long-term the avatar save endpoint also captures `default_voice`
-// per avatar (PR Sprint 7.25 Phase 11.12 in /api/heygen/avatars)
-// so new avatar selections store the avatar's recommended voice
-// and don't fall back to this constant. The constant is the
-// safety net for legacy saves and for projects mid-migration.
-const DEFAULT_HEYGEN_VOICE_ID =
+// Two defaults — one per gender — so a failed render never
+// produces a male avatar with a female voice (or vice versa).
+// Env overrides exist so the founder can swap to any voice in
+// HeyGen's catalog at deploy time without re-deploying code.
+const DEFAULT_HEYGEN_VOICE_ID_MALE =
+  process.env.HEYGEN_DEFAULT_VOICE_ID_MALE ??
+  // Adam — stable en-US male voice from HeyGen's public catalog.
+  // Update via env when HeyGen rotates the public catalog.
+  '5403a745860347beae34c80a8bbfe24c';
+const DEFAULT_HEYGEN_VOICE_ID_FEMALE =
+  process.env.HEYGEN_DEFAULT_VOICE_ID_FEMALE ??
   process.env.HEYGEN_DEFAULT_VOICE_ID ??
+  // Existing deploy-wide default. Kept as the female fallback
+  // so projects that already worked don't regress.
   '2d5b0e6cf36f460aa7fc47e3eee4ba54';
+
+function defaultVoiceForGender(
+  gender: 'male' | 'female' | 'neutral' | null | undefined,
+): string {
+  if (gender === 'male') return DEFAULT_HEYGEN_VOICE_ID_MALE;
+  // 'female' AND 'neutral' AND null all land here. We bias toward
+  // the female default because that's what shipped pre-Sprint-C
+  // and we want backward compatibility for projects whose gender
+  // is null (legacy rows that pre-date the migration).
+  return DEFAULT_HEYGEN_VOICE_ID_FEMALE;
+}
 
 const HEYGEN_API = 'https://api.heygen.com';
 
@@ -73,6 +89,13 @@ interface HeygenGenerateRequest {
   }>;
   dimension: { width: number; height: number };
   callback_id: string;
+  // PR Sprint C — HeyGen V2 caption flag. When true the
+  // rendered video gets hardcoded auto-captions overlaid (the
+  // SRT-style on-screen text social-media UGC posts always
+  // ship with). Helm flips this on for every UGC / Reel render
+  // since captioned video lifts retention ~30% on muted-by-
+  // default TikTok / IG Reels playback.
+  caption?: boolean;
 }
 
 interface HeygenGenerateResponse {
@@ -183,19 +206,63 @@ export async function fireHeygenForJob(
             avatar_style: 'normal',
           };
 
-  // PR Sprint 7.25 Phase 11.12 — voice_id is mandatory now. Order
-  // of preference:
-  //   1. project.heygenVoiceId (set by the avatar save endpoint
-  //      from HeyGen's per-avatar default_voice, or by a future
-  //      voice picker UI).
-  //   2. DEFAULT_HEYGEN_VOICE_ID (env-overridable hardcoded
-  //      fallback) — kicks in for legacy projects whose row was
-  //      saved before Phase 11.12 wired up the default capture.
+  // PR Sprint C — refuse to fire when the project has no
+  // voice_id. Pre-fix we silently fell back to a deploy-wide
+  // default voice; for projects whose avatar was male and whose
+  // default was female that produced the "male avatar speaking
+  // with female voice" uncanny-valley bug. Now: if the founder
+  // hasn't picked a voice we bail with errorKind='voice_config'
+  // so the Library surfaces the "fix it in Settings" affordance
+  // instead of producing a broken video.
+  const avatarGender = (project.heygenAvatarGender ??
+    null) as 'male' | 'female' | 'neutral' | null;
+  const voiceGender = (project.heygenVoiceGender ??
+    null) as 'male' | 'female' | 'neutral' | null;
+
+  if (!project.heygenVoiceId) {
+    await db
+      .update(heygenJobs)
+      .set({
+        status: 'failed',
+        errorMessage:
+          'No voice configured for this project. Pick an avatar in Settings — Helm now auto-matches a gender-appropriate voice.',
+        errorKind: 'voice_config',
+        attemptCount: sql`${heygenJobs.attemptCount} + 1`,
+        completedAt: new Date(),
+      })
+      .where(eq(heygenJobs.id, job.id));
+    return {
+      ok: false,
+      errorKind: 'voice_config',
+      error: 'No voice configured for this project',
+      retry: false,
+    };
+  }
+
+  // PR Sprint C — gender-mismatch warning. Doesn't block the
+  // render (the founder may have picked the mismatch on purpose,
+  // and the picker UI already surfaces the same warning at
+  // selection time) but loudly logs so we can attribute weird-
+  // sounding output later.
+  if (
+    avatarGender &&
+    voiceGender &&
+    avatarGender !== voiceGender &&
+    avatarGender !== 'neutral' &&
+    voiceGender !== 'neutral'
+  ) {
+    console.warn('[heygen/fire] gender mismatch', {
+      projectId: project.id,
+      avatarGender,
+      voiceGender,
+    });
+  }
+
   const voice: HeygenGenerateRequest['video_inputs'][number]['voice'] = {
     type: 'text',
     input_text: job.scriptText,
     speed: 1.0,
-    voice_id: project.heygenVoiceId ?? DEFAULT_HEYGEN_VOICE_ID,
+    voice_id: project.heygenVoiceId,
   };
 
   const payload: HeygenGenerateRequest = {
@@ -205,23 +272,29 @@ export async function fireHeygenForJob(
     // column.
     dimension: { width: 1080, height: 1920 },
     callback_id: job.id,
+    // PR Sprint C — Helm-wide caption-on default. Muted autoplay
+    // on TikTok / IG Reels / FB Reels makes captions table
+    // stakes; opting out per-job can be a future column if we
+    // ever ship a long-form explainer that doesn't want them.
+    caption: true,
   };
 
   let result = await callHeygenGenerate(payload);
   let voiceFallbackUsed = false;
-  // Voice-error fallback. PR Sprint 7.25 Phase 11.12: the previous
-  // fallback removed `voice_id` entirely; HeyGen V2 now rejects
-  // payloads without it ("video_inputs.0.voice.text.voice_id is
-  // invalid: Field required"). New fallback: if a voice_id was
-  // set + HeyGen complained, retry with DEFAULT_HEYGEN_VOICE_ID.
-  // The default is a stable en-US voice from HeyGen's catalog;
-  // a successful retry also clears the stale voice_id from the
-  // project so the next generation skips straight to the default.
+  // PR Sprint C — gender-aware voice fallback. When HeyGen
+  // rejects the saved voice_id ("invalid voice", "voice not
+  // found", etc.), we retry with our gender-matched DEFAULT.
+  // Pre-fix we used a single deploy-wide default that was
+  // female — so a male avatar with a broken voice_id silently
+  // got a female voice on retry. Now: defaultVoiceForGender
+  // picks the male OR female default based on the avatar's
+  // saved gender, so the fallback NEVER flips gender.
+  const fallbackVoiceId = defaultVoiceForGender(avatarGender);
   if (
     !result.ok &&
     isVoiceConfigError(result.error) &&
     project.heygenVoiceId &&
-    project.heygenVoiceId !== DEFAULT_HEYGEN_VOICE_ID
+    project.heygenVoiceId !== fallbackVoiceId
   ) {
     voiceFallbackUsed = true;
     const fallbackPayload: HeygenGenerateRequest = {
@@ -230,7 +303,7 @@ export async function fireHeygenForJob(
         ...vi,
         voice: {
           ...vi.voice,
-          voice_id: DEFAULT_HEYGEN_VOICE_ID,
+          voice_id: fallbackVoiceId,
         },
       })),
     };
@@ -266,12 +339,15 @@ export async function fireHeygenForJob(
     };
   }
 
-  // Successful voice fallback → clear the stale voice_id so the
-  // founder doesn't keep hitting the same error every time.
+  // Successful voice fallback → clear the stale voice_id +
+  // voiceGender so the founder doesn't keep hitting the same
+  // error every time. They'll re-pick a voice in Settings; the
+  // picker's auto-match guarantees the new pair lands gender-
+  // consistent.
   if (voiceFallbackUsed) {
     await db
       .update(projects)
-      .set({ heygenVoiceId: null })
+      .set({ heygenVoiceId: null, heygenVoiceGender: null })
       .where(eq(projects.id, project.id))
       .catch((err: unknown) => {
         console.warn(

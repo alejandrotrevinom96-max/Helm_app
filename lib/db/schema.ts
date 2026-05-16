@@ -155,6 +155,15 @@ export const projects = pgTable(
     heygenAvatarId: text('heygen_avatar_id'),
     heygenPhotoUrl: text('heygen_photo_url'),
     heygenVoiceId: text('heygen_voice_id'),
+    // PR Sprint C — track gender for both avatar and voice so the
+    // picker can auto-match (avoid the "male avatar speaking with
+    // the deploy-wide female default voice" uncanny-valley bug),
+    // and so fire.ts can pick a gender-correct fallback when
+    // HeyGen rejects the saved voice_id. Lowercase 'male' |
+    // 'female' | 'neutral' — HeyGen returns capitalized strings
+    // from /v2/avatars + /v2/voices; we normalize at write time.
+    heygenAvatarGender: text('heygen_avatar_gender'),
+    heygenVoiceGender: text('heygen_voice_gender'),
   },
   (t) => ({
     uniqueUserRepo: unique().on(t.userId, t.githubRepoId),
