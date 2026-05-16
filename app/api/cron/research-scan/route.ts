@@ -32,6 +32,13 @@ import { db } from '@/lib/db';
 import { projects, researchConfig } from '@/lib/db/schema';
 import { eq, and, lt, isNull, or } from 'drizzle-orm';
 import { scanProjectResearch } from '@/lib/research/scan';
+// PR Sprint B-finish-2 — YouTube channel scanning. Runs after
+// the keyword-search scan on every project that has connected
+// channels. Cheap on quota (~3 units per channel per day) so
+// we always attempt it; the helper itself bails fast when
+// YOUTUBE_API_KEY is missing or the project has zero connected
+// channels.
+import { scanProjectYouTube } from '@/lib/research/youtube-scan';
 
 export const dynamic = 'force-dynamic';
 // Each scanProjectResearch call: 3 fetches (Reddit/HN/IH) ~5s +
@@ -48,6 +55,11 @@ interface ScanSummary {
   scanned: number;
   totalInserted: number;
   totalScored: number;
+  // PR Sprint B-finish-2 — counter for YouTube findings ingested
+  // by the daily cron. Separate from totalInserted (which counts
+  // the keyword-search scanner's writes) so we can spot when the
+  // YouTube path is or isn't contributing.
+  totalYoutubeInserted: number;
   skippedNoKeywords: number;
   perProject: Array<{
     projectId: string;
@@ -99,6 +111,7 @@ export async function GET(request: Request) {
     scanned: 0,
     totalInserted: 0,
     totalScored: 0,
+    totalYoutubeInserted: 0,
     skippedNoKeywords: 0,
     perProject: [],
   };
@@ -121,6 +134,26 @@ export async function GET(request: Request) {
         sources: result.sources,
         errors: result.errors.length,
       });
+
+      // PR Sprint B-finish-2 — YouTube channel scan. Runs after
+      // the keyword-search pass so the founder's keyword
+      // findings + their connected-channel findings land in the
+      // same daily research_findings refresh. Bails fast (no
+      // API calls) when YOUTUBE_API_KEY is missing or the
+      // project has zero connected channels; we still call it
+      // unconditionally because the cost of a noop is one
+      // SELECT against project_sources.
+      try {
+        const yt = await scanProjectYouTube(project.id);
+        summary.totalYoutubeInserted += yt.findingsAdded;
+      } catch (ytErr) {
+        console.error(
+          `[cron/research-scan] youtube scan crashed for project=${project.id}:`,
+          ytErr instanceof Error ? ytErr.message : ytErr,
+        );
+        // Don't fail the whole project's run — keyword-scan
+        // results were already accumulated above.
+      }
     } catch (e) {
       console.error(
         `[cron/research-scan] project=${project.id} crashed:`,

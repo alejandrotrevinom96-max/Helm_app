@@ -98,6 +98,10 @@ export function SourcesClient({
   const [subredditInput, setSubredditInput] = useState('');
   const [addingSubreddit, setAddingSubreddit] = useState(false);
   const [scanning, setScanning] = useState(false);
+  // PR Sprint B-finish-2 — separate state from Reddit scanning so
+  // both buttons can spin independently and both feedback banners
+  // can coexist if a founder hits them back-to-back.
+  const [scanningYouTube, setScanningYouTube] = useState(false);
   const [rssFeedback, setRssFeedback] = useState<{
     kind: 'success' | 'error' | 'info';
     msg: string;
@@ -376,6 +380,67 @@ export function SourcesClient({
     }
   };
 
+  // PR Sprint B-finish-2 — channel-based YouTube scan, mirror of
+  // runScan above. Hits /api/research/scan-youtube which:
+  //   1) Resolves each connected channel's uploads playlist
+  //   2) Pulls the 10 most recent videos
+  //   3) Fetches top 5 comments per video
+  //   4) Writes research_findings rows for everything new
+  // Pain-point extraction runs lazily downstream so this scan
+  // pass is just ingestion + dedup.
+  const runYouTubeScan = async () => {
+    if (scanningYouTube) return;
+    setScanningYouTube(true);
+    setRssFeedback(null);
+    try {
+      const res = await fetch('/api/research/scan-youtube', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId: project.id }),
+      });
+      const data = (await res.json()) as {
+        success?: boolean;
+        findingsAdded?: number;
+        channelsScanned?: number;
+        configured?: boolean;
+        error?: string;
+        hint?: string;
+      };
+      if (!res.ok || !data.success) {
+        setRssFeedback({
+          kind: 'error',
+          msg: data.error ?? data.hint ?? 'YouTube scan failed',
+        });
+        return;
+      }
+      // Soft-failure path — endpoint returns success=true with a
+      // hint when YouTube isn't configured or no channels are
+      // connected. Surface the hint so the founder knows why
+      // nothing happened.
+      if (data.configured === false || (data.channelsScanned ?? 0) === 0) {
+        setRssFeedback({
+          kind: 'info',
+          msg: data.hint ?? 'YouTube scan: nothing to do.',
+        });
+        return;
+      }
+      setRssFeedback({
+        kind: 'success',
+        msg: `Scanned ${data.channelsScanned ?? 0} YouTube channel${
+          (data.channelsScanned ?? 0) === 1 ? '' : 's'
+        }, ${data.findingsAdded ?? 0} new findings.`,
+      });
+      await refreshConnected();
+    } catch (e) {
+      setRssFeedback({
+        kind: 'error',
+        msg: e instanceof Error ? e.message : 'Network error',
+      });
+    } finally {
+      setScanningYouTube(false);
+    }
+  };
+
   // PR #62 — Sprint 7.0.5: auto-connect top-5 from the latest
   // brand_analysis row. Endpoint enforces predictedRelevance >= 80,
   // caps at 5, and skips Reddit when opt-in is off.
@@ -430,6 +495,10 @@ export function SourcesClient({
   const redditConnectedCount = connectedList.filter(
     (s) => s.platform === 'reddit',
   ).length;
+  // PR Sprint B-finish-2 — YouTube channel-based scanning.
+  const youtubeConnectedCount = connectedList.filter(
+    (s) => s.platform === 'youtube',
+  ).length;
 
   return (
     <div className="p-4 md:p-8 space-y-8">
@@ -457,7 +526,22 @@ export function SourcesClient({
               source — otherwise it has nothing to scan. */}
           {redditOptin && redditConnectedCount > 0 && (
             <Button variant="secondary" onClick={runScan} disabled={scanning}>
-              {scanning ? 'Scanning…' : 'Scan now ↻'}
+              {scanning ? 'Scanning…' : 'Scan Reddit ↻'}
+            </Button>
+          )}
+          {/* PR Sprint B-finish-2 — YouTube channel scan. No
+              opt-in equivalent because YouTube comment data is
+              public + we only ingest top-relevance comments (not
+              every reply); same low-risk profile as Reddit RSS.
+              Surfaces only when there's at least one connected
+              YouTube channel. */}
+          {youtubeConnectedCount > 0 && (
+            <Button
+              variant="secondary"
+              onClick={runYouTubeScan}
+              disabled={scanningYouTube}
+            >
+              {scanningYouTube ? 'Scanning…' : 'Scan YouTube ↻'}
             </Button>
           )}
           <Button onClick={runDiscovery} disabled={busy !== null}>
