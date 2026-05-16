@@ -1064,6 +1064,31 @@ export function HeygenAvatarConfig({ projectId, userId }: Props) {
         )}
       </div>
 
+      {/* PR Sprint D-3 — Voice Design. Lives below the avatar
+          + tuning sections because it produces a voice_id you
+          could just as well plug into the existing picker. The
+          flow: describe the voice you want, get up to 3 matches
+          from HeyGen's catalog, click "Use this voice" to stamp
+          project.heygenVoiceId. Re-using the same voice picker
+          + match indicator above so the new voice shows up with
+          its gender automatically. */}
+      <VoiceDesignSection
+        projectId={projectId}
+        currentVoiceId={settings.voiceId}
+        avatarGender={settings.avatarGender}
+        onVoicePicked={(voice) => {
+          setSettings((prev) => ({
+            ...prev,
+            voiceId: voice.voice_id,
+            voiceGender: voice.gender,
+            voiceLocale: voice.language_hint ?? prev.voiceLocale,
+          }));
+          setSaveMessage(
+            `Voice "${voice.name}" selected. Click Save to apply.`,
+          );
+        }}
+      />
+
       <div
         className="platform-actions-row"
         style={{
@@ -1467,5 +1492,344 @@ function AvatarPickerModal({
       </div>
     </div>,
     document.body,
+  );
+}
+
+// ============================================================
+// PR Sprint D-3 — Voice Design section
+// ============================================================
+//
+// Sits at the bottom of HeyGenAvatarConfig. Collapsible — closed
+// by default so the picker stays the primary surface for
+// founders who haven't outgrown HeyGen's pre-made voices.
+//
+// Founder describes the voice they want in plain English; we hit
+// HeyGen's /v3/voices design endpoint, surface up to 3 matches
+// with preview-audio players, and let them click "Use this
+// voice" to stamp project.heygenVoiceId via the parent's
+// onVoicePicked callback. The Save button (parent) then PATCHes
+// the project.
+
+interface PickedVoice {
+  voice_id: string;
+  name: string;
+  gender: VoiceGender;
+  language_hint: string | null;
+}
+
+interface DesignedVoiceRaw {
+  voice_id: string;
+  name: string;
+  language: string;
+  gender: string;
+  preview_audio_url: string | null;
+  support_pause: boolean;
+  support_locale: boolean;
+  type: 'public' | 'private';
+}
+
+function VoiceDesignSection({
+  projectId,
+  currentVoiceId,
+  avatarGender,
+  onVoicePicked,
+}: {
+  projectId: string;
+  currentVoiceId: string | null;
+  avatarGender: VoiceGender | null;
+  onVoicePicked: (v: PickedVoice) => void;
+}) {
+  void projectId; // currently unused; reserved for per-project favorites in a follow-up
+  const [open, setOpen] = useState(false);
+  const [prompt, setPrompt] = useState('');
+  // Pre-fill the gender filter from the avatar so the founder
+  // doesn't accidentally re-introduce a gender mismatch via this
+  // surface. The select is still overridable.
+  const [genderFilter, setGenderFilter] = useState<'any' | 'male' | 'female'>(
+    avatarGender === 'male' || avatarGender === 'female'
+      ? avatarGender
+      : 'any',
+  );
+  const [localeFilter, setLocaleFilter] = useState<string>('');
+  const [seed, setSeed] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [results, setResults] = useState<DesignedVoiceRaw[]>([]);
+
+  const runDesign = async (nextSeed: number) => {
+    if (loading) return;
+    if (prompt.trim().length < 1) {
+      setError('Describe the voice you want.');
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const body: Record<string, unknown> = {
+        prompt: prompt.trim(),
+        seed: nextSeed,
+      };
+      if (genderFilter !== 'any') body.gender = genderFilter;
+      if (localeFilter) body.locale = localeFilter;
+      const res = await fetch('/api/heygen/voices/design', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        voices?: DesignedVoiceRaw[];
+        seed?: number;
+        error?: string;
+      };
+      if (!res.ok) {
+        setError(data.error ?? `Design failed (${res.status})`);
+        setResults([]);
+        return;
+      }
+      setResults(data.voices ?? []);
+      setSeed(data.seed ?? nextSeed);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Network error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div
+      style={{
+        marginTop: '18px',
+        paddingTop: '18px',
+        borderTop: '1px solid var(--border)',
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          background: 'transparent',
+          border: 'none',
+          padding: 0,
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          color: 'var(--text-2)',
+          fontSize: '13px',
+          fontFamily: 'inherit',
+          width: '100%',
+        }}
+        aria-expanded={open}
+      >
+        <span
+          style={{
+            fontFamily: 'JetBrains Mono, monospace',
+            fontSize: '10px',
+            letterSpacing: '0.12em',
+            textTransform: 'uppercase',
+            color: 'var(--text-3)',
+          }}
+        >
+          Design
+        </span>
+        <span>Custom voice from description</span>
+        <span
+          style={{
+            marginLeft: 'auto',
+            color: 'var(--text-3)',
+            fontSize: '11px',
+          }}
+        >
+          {open ? '▾' : '▸'}
+        </span>
+      </button>
+      {open && (
+        <div style={{ marginTop: '14px' }}>
+          <p
+            style={{
+              fontSize: '12px',
+              color: 'var(--text-3)',
+              marginBottom: '10px',
+            }}
+          >
+            Describe the voice you want. HeyGen returns up to 3
+            matches; click <em>Use this voice</em> to stamp it on
+            your project.
+          </p>
+          <textarea
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            placeholder="e.g. warm, confident male narrator with a slight Mexican accent"
+            rows={2}
+            maxLength={1000}
+            className="platform-field-input"
+            style={{ resize: 'vertical', minHeight: '52px' }}
+          />
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr',
+              gap: '10px',
+              marginTop: '8px',
+            }}
+          >
+            <select
+              value={genderFilter}
+              onChange={(e) =>
+                setGenderFilter(e.target.value as 'any' | 'male' | 'female')
+              }
+              className="platform-field-input"
+            >
+              <option value="any">Any gender</option>
+              <option value="male">Male</option>
+              <option value="female">Female</option>
+            </select>
+            <select
+              value={localeFilter}
+              onChange={(e) => setLocaleFilter(e.target.value)}
+              className="platform-field-input"
+            >
+              <option value="">Any locale</option>
+              <option value="en-US">English (US)</option>
+              <option value="en-GB">English (UK)</option>
+              <option value="es-MX">Spanish (Mexico)</option>
+              <option value="es-ES">Spanish (Spain)</option>
+              <option value="pt-BR">Portuguese (Brazil)</option>
+              <option value="fr-FR">French (France)</option>
+              <option value="de-DE">German</option>
+              <option value="it-IT">Italian</option>
+            </select>
+          </div>
+          <div
+            style={{
+              display: 'flex',
+              gap: '8px',
+              marginTop: '12px',
+              flexWrap: 'wrap',
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => void runDesign(0)}
+              disabled={loading || prompt.trim().length === 0}
+              className="platform-btn platform-btn-primary"
+            >
+              {loading ? 'Designing…' : 'Find voices'}
+            </button>
+            {results.length > 0 && (
+              <button
+                type="button"
+                onClick={() => void runDesign(seed + 1)}
+                disabled={loading}
+                className="platform-btn platform-btn-ghost"
+              >
+                ↻ Try different voices
+              </button>
+            )}
+          </div>
+
+          {error && (
+            <div
+              style={{
+                marginTop: '10px',
+                padding: '8px 12px',
+                borderRadius: '8px',
+                background: 'rgba(220,38,38,0.08)',
+                border: '1px solid rgba(220,38,38,0.3)',
+                color: 'var(--d-red-2)',
+                fontSize: '12px',
+              }}
+            >
+              {error}
+            </div>
+          )}
+
+          {results.length > 0 && (
+            <div
+              style={{
+                marginTop: '14px',
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+                gap: '10px',
+              }}
+            >
+              {results.map((v) => {
+                const isCurrent = v.voice_id === currentVoiceId;
+                return (
+                  <div
+                    key={v.voice_id}
+                    style={{
+                      padding: '12px',
+                      border: '1px solid',
+                      borderColor: isCurrent
+                        ? 'var(--d-orange)'
+                        : 'var(--border)',
+                      borderRadius: '10px',
+                      background: isCurrent
+                        ? 'rgba(249,115,22,0.06)'
+                        : 'var(--bg)',
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: '13px',
+                        fontWeight: 600,
+                        color: 'var(--text-1)',
+                      }}
+                    >
+                      {v.name}
+                    </div>
+                    <div
+                      style={{
+                        fontFamily: 'JetBrains Mono, monospace',
+                        fontSize: '10px',
+                        letterSpacing: '0.12em',
+                        textTransform: 'uppercase',
+                        color: 'var(--text-3)',
+                        marginTop: '2px',
+                      }}
+                    >
+                      {v.language} · {v.gender}
+                    </div>
+                    {v.preview_audio_url && (
+                      <audio
+                        src={v.preview_audio_url}
+                        controls
+                        preload="none"
+                        style={{
+                          width: '100%',
+                          marginTop: '8px',
+                          height: '32px',
+                        }}
+                      />
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onVoicePicked({
+                          voice_id: v.voice_id,
+                          name: v.name,
+                          gender: normalizeGender(v.gender),
+                          language_hint: v.language,
+                        });
+                      }}
+                      disabled={isCurrent}
+                      className="platform-btn platform-btn-ghost"
+                      style={{
+                        width: '100%',
+                        marginTop: '8px',
+                        fontSize: '11px',
+                      }}
+                    >
+                      {isCurrent ? '✓ In use' : 'Use this voice'}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
