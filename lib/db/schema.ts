@@ -175,6 +175,89 @@ export const metricSnapshots = pgTable('metric_snapshots', {
   syncedAt: timestamp('synced_at').defaultNow().notNull(),
 });
 
+// ===== Content Assets =====
+// PR Sprint 7.26 — Asset-based content flow.
+//
+// Helm's content model used to be "1 generated_post per platform" —
+// the founder picked a platform, the generator produced a post for
+// that platform, and shipping to 3 platforms meant generating 3
+// independent posts (3 image calls, 3 HeyGen renders, 3x cost).
+//
+// New model: ONE asset (video / carousel / photo / long-form text)
+// is generated ONCE. Then the SAME asset is published to N platforms
+// with platform-specific captions (TikTok hashtags vs. LinkedIn
+// professional opener vs. IG storytelling). content_assets stores
+// the asset; generated_posts becomes the per-platform variant
+// pointing back via assetId.
+//
+// Why a separate table (vs. a self-foreign-key on generated_posts):
+//   - Asset media (videoUrl, imageUrls) lives once, not duplicated
+//     across N rows.
+//   - HeyGen jobs / Flux renders link to the asset, not to one
+//     of the N captions.
+//   - Library + Calendar can group rows by asset cleanly.
+//   - The brand-bible snapshot at generation time travels with
+//     the asset for future audits, not duplicated per caption.
+//
+// Lifecycle:
+//   1. UI POST /api/ai/generate-asset {assetType, platforms[], prompt}.
+//   2. Backend creates the asset row first (status implicit:
+//      pending media gen if it's a video/carousel).
+//   3. Backend fires N parallel Haiku calls — one per platform —
+//      with platform-specific tone rules. Each returns a caption
+//      that we store in a new generated_posts row keyed to this
+//      asset by asset_id.
+//   4. Media generation (Flux for image/carousel, HeyGen for video)
+//      either runs synchronously or fires-and-forgets via the
+//      existing pipelines; the asset is the join point.
+//
+// Backfill: scripts/migrate-content-assets.ts creates 1 asset per
+// existing generated_post (1:1) so legacy data still groups
+// correctly under the new model. Old posts keep their existing
+// shape; the new flow uses asset_id + caption/hashtags/cta columns.
+export const contentAssets = pgTable('content_assets', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  projectId: uuid('project_id')
+    .notNull()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  // 'ugc_video' | 'reel' | 'carousel' | 'photo' | 'long_form_text'
+  // Drives platform allowlist (PLATFORM_RULES in
+  // lib/marketing/platform-rules.ts) and media-generation dispatch.
+  assetType: text('asset_type').notNull(),
+  // Media URLs. Exactly one of these is populated based on assetType:
+  //   ugc_video / reel → videoUrl (HeyGen render — may be null until
+  //                                the heygen-worker finishes).
+  //   carousel         → imageUrls (jsonb array, ~5-8 slides).
+  //   photo            → imageUrls (jsonb array of length 1).
+  //   long_form_text   → both null (baseContent IS the asset).
+  videoUrl: text('video_url'),
+  imageUrls: jsonb('image_urls').$type<string[]>(),
+  // The core content — for video that's the script; for long-form
+  // text that's the body; for visual types that's the seed prompt
+  // expanded by Claude into something Flux can consume.
+  baseContent: text('base_content').notNull(),
+  // Snapshot of the brand bible (and voice fingerprint) at the
+  // moment the asset was generated, so we can re-audit captions
+  // against the brand context that was live then — independent of
+  // later edits to projects.brandContext.
+  brandAnalysisSnapshot: jsonb('brand_analysis_snapshot'),
+  promptUsed: text('prompt_used').notNull(),
+  // Carried for forward-compat with the A/B-pair flow (PR Sprint
+  // 7.24). The new asset endpoint produces a SINGLE asset by
+  // default (variantLabel=null); future variants can co-exist via
+  // variantGroupId binding without a schema change.
+  variantLabel: text('variant_label'), // 'A' | 'B' | null
+  variantGroupId: uuid('variant_group_id'),
+  // HeyGen callback id for ugc_video / reel assets. The
+  // heygen-worker cron uses this to map upstream completion
+  // webhooks back to the right asset.
+  heygenJobId: text('heygen_job_id'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
 // ===== Generated Posts =====
 // Marketing tab — Claude-generated content
 export const generatedPosts = pgTable('generated_posts', {
@@ -182,8 +265,27 @@ export const generatedPosts = pgTable('generated_posts', {
   projectId: uuid('project_id')
     .notNull()
     .references(() => projects.id, { onDelete: 'cascade' }),
+  // PR Sprint 7.26 — Asset-based flow. When set, this row is the
+  // per-platform variant of a content_asset. The asset holds the
+  // shared media + base content; this row holds the per-platform
+  // caption + hashtags + cta. Null for legacy pre-7.26 posts (which
+  // act as their own implicit single-platform asset). After the
+  // migration runs every existing row gets a 1:1 backfilled
+  // asset_id, but we keep the column nullable so the type system
+  // doesn't force every code path through a "guaranteed asset".
+  assetId: uuid('asset_id').references(() => contentAssets.id, {
+    onDelete: 'cascade',
+  }),
   platform: text('platform').notNull(), // 'instagram' | 'facebook' | 'linkedin' | 'threads' | 'reddit'
   content: text('content').notNull(),
+  // PR Sprint 7.26 — Asset-based flow. For asset-linked rows these
+  // are the per-platform adapted strings (TikTok: hook + 3-5
+  // hashtags; LinkedIn: professional opener; etc). For legacy
+  // pre-7.26 rows these are null and `content` holds the entire
+  // post text.
+  caption: text('caption'),
+  hashtags: jsonb('hashtags').$type<string[]>(),
+  ctaText: text('cta_text'),
   prompt: text('prompt'), // What the user asked for
   status: text('status').notNull().default('draft'), // 'draft' | 'copied' | 'published'
   createdAt: timestamp('created_at').defaultNow().notNull(),

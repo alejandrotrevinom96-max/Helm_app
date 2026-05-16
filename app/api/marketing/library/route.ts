@@ -113,6 +113,17 @@ export interface LibraryPost {
   // generated_posts rows pre-7.24.
   variantLabel: 'A' | 'B' | null;
   variantGroupId: string | null;
+  // PR Sprint 7.26 — Asset-based content flow. Set for posts
+  // produced by /api/ai/generate-asset (and for legacy posts
+  // backfilled by scripts/migrate-content-assets.ts). Multiple
+  // LibraryPost rows can share the same assetId — they represent
+  // the SAME asset adapted for different platforms.
+  // The Library client groups by assetId before rendering so the
+  // founder sees one card per asset with platform badges instead
+  // of N near-duplicate cards. Null for any row whose backfill
+  // didn't run (e.g. a scheduled_posts row from a project deleted
+  // before the migration).
+  assetId: string | null;
 }
 
 const VALID_STATUSES: LibraryStatus[] = [
@@ -304,6 +315,8 @@ export async function GET(request: Request) {
           ? r.variantLabel
           : null,
       variantGroupId: r.variantGroupId ?? null,
+      // PR Sprint 7.26 — Asset-based content flow.
+      assetId: r.assetId ?? null,
     }));
   }
 
@@ -425,6 +438,12 @@ export async function GET(request: Request) {
         // the A/B framing is over. Both fields null here.
         variantLabel: null,
         variantGroupId: null,
+        // PR Sprint 7.26 — scheduled_posts doesn't track asset_id
+        // (the schedule endpoint pre-7.26 didn't carry it). Null
+        // for now; once /api/marketing/library/[id]/schedule
+        // copies asset_id from the draft on schedule, scheduled
+        // rows can group by asset too.
+        assetId: null,
       };
     });
   }

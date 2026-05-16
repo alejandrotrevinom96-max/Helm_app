@@ -29,7 +29,11 @@ import { getActiveProject } from '@/lib/active-project';
 import type { BrandBible } from '@/lib/types/brand';
 import type { VoiceFingerprint } from '@/lib/types/voice';
 import { CollapsibleBrandBible } from '@/components/marketing/collapsible-brand-bible';
-import { StructuredGeneratePanel } from '@/components/marketing/structured-generate-panel';
+// PR Sprint 7.26 — Asset-based content flow. AssetGeneratePanel
+// replaces StructuredGeneratePanel as the primary generate surface.
+// The old panel file isn't deleted (revertable in a single line
+// edit here) but the new flow is the one that ships.
+import { AssetGeneratePanel } from '@/components/marketing/asset-generate-panel';
 import { PerformanceInsights } from '../performance-insights';
 
 export default async function MarketingGeneratePage() {
@@ -72,10 +76,13 @@ export default async function MarketingGeneratePage() {
       {/* Brand bible — collapsible based on completion score. */}
       <CollapsibleBrandBible project={projectForCard} />
 
-      {/* Primary generation flow — promoted from the opt-in beta
-          panel. Handles platform select + content types (with
-          Flux/HeyGen badges) + prompt + categorized errors. */}
-      <StructuredGeneratePanel projectId={project.id} />
+      {/* PR Sprint 7.26 — Asset-based content flow. New mental
+          model: pick an asset TYPE (UGC video / reel / carousel /
+          photo / long-form text), pick the PLATFORMS to publish
+          to (filtered by what's compatible with the type), and
+          Helm generates the asset once + adapts a caption per
+          network. Cost drops Nx for multi-platform pushes. */}
+      <AssetGeneratePanel projectId={project.id} />
     </div>
   );
 }

@@ -93,6 +93,12 @@ interface Props {
   // list when delete or move-to-draft succeeds, so we don't need a
   // full page reload.
   onRemove: (id: string) => void;
+  // PR Sprint 7.26 — Asset-based content flow. Other posts in the
+  // same content_asset group, so the embedded ScheduleModal can
+  // offer "also schedule [other platforms]" + stagger-by-golden-
+  // time. Empty/undefined when the parent didn't find siblings
+  // (legacy single-platform post, or asset group of 1).
+  assetSiblings?: Array<{ id: string; platform: string }>;
 }
 
 const RATING_OPTIONS = [
@@ -122,6 +128,7 @@ export function PostDetailModal({
   onUpdate,
   onClone,
   onRemove,
+  assetSiblings,
 }: Props) {
   const [rating, setRating] = useState<string | null>(post.performanceRating);
   const [notes, setNotes] = useState(post.performanceNote ?? '');
@@ -1724,6 +1731,8 @@ export function PostDetailModal({
       {showSchedule && (
         <ScheduleModal
           postId={post.id}
+          platform={post.platform}
+          siblings={assetSiblings}
           onScheduled={handleScheduled}
           onClose={() => setShowSchedule(false)}
         />

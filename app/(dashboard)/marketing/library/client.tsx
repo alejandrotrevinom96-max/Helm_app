@@ -14,6 +14,12 @@ import { useEffect, useState, useCallback } from 'react';
 import type { LibraryPost, LibraryStatus } from '@/app/api/marketing/library/route';
 import { LibraryFilters } from './filters';
 import { LibraryPostCard } from './post-card';
+// PR Sprint 7.26 — Asset-based content flow. Multi-platform asset
+// groups render through AssetGroupCard; single-row groups fall
+// back to the legacy LibraryPostCard so the existing chrome stays
+// intact for posts that don't belong to an asset group (legacy
+// rows whose backfill failed, or scheduled rows pre-7.26).
+import { AssetGroupCard } from './asset-group-card';
 import { PostDetailModal } from './post-detail-modal';
 import { EmptyState } from '@/components/ui/empty-state';
 import { CardGridSkeleton } from '@/components/ui/skeleton';
@@ -68,6 +74,15 @@ export function LibraryClient({
     contentType: '',
   });
   const [selectedPost, setSelectedPost] = useState<LibraryPost | null>(null);
+  // PR Sprint 7.26 — Asset-based content flow. When the founder
+  // opens a card that belongs to a multi-platform asset group,
+  // we stash the other posts in the same group so PostDetailModal
+  // can pass them to ScheduleModal (enabling the "also schedule
+  // [Platform]" + stagger flow). Empty for legacy single-post
+  // cards.
+  const [selectedSiblings, setSelectedSiblings] = useState<
+    Array<{ id: string; platform: string }>
+  >([]);
 
   // Counts shown in tab labels. Computed from a separate "all" query so
   // the count for "Published (12)" doesn't disappear when you switch to
@@ -319,15 +334,65 @@ export function LibraryClient({
             />
           );
         }
+        // PR Sprint 7.26 — Asset-based content flow.
+        //
+        // Group visiblePosts by assetId before rendering. The map's
+        // key is the assetId; posts with NO assetId go into their
+        // own per-row group keyed by post.id (so legacy rows still
+        // get their own card). Groups of size > 1 render as one
+        // AssetGroupCard; groups of size 1 render as a legacy
+        // LibraryPostCard so the existing single-post chrome,
+        // badges, and click behavior stay identical to today.
+        //
+        // Insertion order is preserved by inserting into a Map (which
+        // iterates in insertion order). Since `visiblePosts` is
+        // already sorted by createdAt desc, the resulting card order
+        // is "newest asset first" which is what the founder expects.
+        const groups = new Map<string, typeof visiblePosts>();
+        for (const post of visiblePosts) {
+          const key = post.assetId ?? `solo:${post.source}:${post.id}`;
+          const existing = groups.get(key);
+          if (existing) existing.push(post);
+          else groups.set(key, [post]);
+        }
+        const groupedEntries = Array.from(groups.entries());
+
         return (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {visiblePosts.map((post) => (
-              <LibraryPostCard
-                key={`${post.source}-${post.id}`}
-                post={post}
-                onClick={() => setSelectedPost(post)}
-              />
-            ))}
+            {groupedEntries.map(([key, groupPosts]) => {
+              if (groupPosts.length > 1) {
+                // Multi-platform asset group. Click target opens the
+                // detail modal with the FIRST post pre-selected and
+                // the rest stashed as siblings so the embedded
+                // ScheduleModal can offer multi-platform stagger.
+                return (
+                  <AssetGroupCard
+                    key={`asset:${key}`}
+                    posts={groupPosts}
+                    onClick={() => {
+                      setSelectedPost(groupPosts[0]);
+                      setSelectedSiblings(
+                        groupPosts.slice(1).map((p) => ({
+                          id: p.id,
+                          platform: p.platform,
+                        })),
+                      );
+                    }}
+                  />
+                );
+              }
+              const post = groupPosts[0];
+              return (
+                <LibraryPostCard
+                  key={`${post.source}-${post.id}`}
+                  post={post}
+                  onClick={() => {
+                    setSelectedPost(post);
+                    setSelectedSiblings([]);
+                  }}
+                />
+              );
+            })}
           </div>
         );
       })()}
@@ -335,10 +400,14 @@ export function LibraryClient({
       {selectedPost && (
         <PostDetailModal
           post={selectedPost}
-          onClose={() => setSelectedPost(null)}
+          onClose={() => {
+            setSelectedPost(null);
+            setSelectedSiblings([]);
+          }}
           onUpdate={handlePostUpdate}
           onClone={handleClone}
           onRemove={handleRemove}
+          assetSiblings={selectedSiblings}
         />
       )}
     </div>
