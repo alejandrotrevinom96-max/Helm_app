@@ -113,22 +113,49 @@ export async function GET(request: Request) {
   // errorKind='voice_config' from the retry sweep — those need a
   // founder action in Settings, no amount of retrying changes the
   // upstream's mind.
-  const candidates = await db
-    .select({ job: heygenJobs, project: projects })
-    .from(heygenJobs)
-    .innerJoin(projects, eq(projects.id, heygenJobs.projectId))
-    .where(
-      or(
-        eq(heygenJobs.status, 'queued'),
-        and(
-          eq(heygenJobs.status, 'failed'),
-          eq(heygenJobs.errorKind, 'upstream_error'),
-          sql`${heygenJobs.attemptCount} < ${MAX_HEYGEN_ATTEMPTS}`,
+  //
+  // PR Sprint D-1 hotfix — wrap in try/catch. The SELECT joins
+  // projects and Drizzle includes every schema-defined column,
+  // so when the prod DB is behind the schema (e.g. heygen tuning
+  // migration not yet applied), this throws "column does not
+  // exist" on every cron tick. Without the catch, every minute
+  // spammed 59 Sentry errors and burned a Vercel invocation
+  // each time. Now we degrade to a no-op tick and surface the
+  // skip reason in the response.
+  let candidates: Array<{
+    job: typeof heygenJobs.$inferSelect;
+    project: typeof projects.$inferSelect;
+  }> = [];
+  try {
+    candidates = await db
+      .select({ job: heygenJobs, project: projects })
+      .from(heygenJobs)
+      .innerJoin(projects, eq(projects.id, heygenJobs.projectId))
+      .where(
+        or(
+          eq(heygenJobs.status, 'queued'),
+          and(
+            eq(heygenJobs.status, 'failed'),
+            eq(heygenJobs.errorKind, 'upstream_error'),
+            sql`${heygenJobs.attemptCount} < ${MAX_HEYGEN_ATTEMPTS}`,
+          ),
         ),
-      ),
-    )
-    .orderBy(asc(heygenJobs.requestedAt))
-    .limit(BATCH_LIMIT);
+      )
+      .orderBy(asc(heygenJobs.requestedAt))
+      .limit(BATCH_LIMIT);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(
+      '[heygen-worker] candidate fetch failed — likely schema drift between code + DB.',
+      msg,
+    );
+    return NextResponse.json({
+      success: false,
+      skipped: true,
+      reason: 'projects/heygen_jobs join failed — run admin migrate endpoints',
+      error: msg.slice(0, 500),
+    });
+  }
 
   const summary: WorkerSummary = {
     considered: candidates.length,
