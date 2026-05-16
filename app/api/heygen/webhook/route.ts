@@ -36,7 +36,16 @@
 // IS NOT 'completed').
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { heygenJobs } from '@/lib/db/schema';
+// PR Sprint 7.26 — Asset-based content flow. When the webhook
+// flips a job to completed, we also mirror videoUrl onto
+// content_assets.video_url so every platform variant of the asset
+// surfaces the same render (the heygen_jobs row is keyed to the
+// FIRST draft only).
+import {
+  heygenJobs,
+  generatedPosts,
+  contentAssets,
+} from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 
 interface HeygenWebhookEvent {
@@ -113,7 +122,7 @@ export async function POST(request: Request) {
   }
 
   if (eventType === 'avatar_video.success') {
-    await db
+    const [job] = await db
       .update(heygenJobs)
       .set({
         status: 'completed',
@@ -128,7 +137,38 @@ export async function POST(request: Request) {
         errorMessage: null,
         errorKind: null,
       })
-      .where(eq(heygenJobs.id, callbackId));
+      .where(eq(heygenJobs.id, callbackId))
+      .returning({ draftId: heygenJobs.draftId });
+
+    // PR Sprint 7.26 — Asset-based content flow. Mirror videoUrl
+    // onto the content_asset linked through the draft so EVERY
+    // platform variant of this asset can render the video, not
+    // just the one draft the heygen_jobs row references. Two-hop
+    // lookup: heygen_jobs.draftId → generated_posts.assetId →
+    // content_assets.video_url.
+    if (job?.draftId && data.video_url) {
+      try {
+        const [draft] = await db
+          .select({ assetId: generatedPosts.assetId })
+          .from(generatedPosts)
+          .where(eq(generatedPosts.id, job.draftId))
+          .limit(1);
+        if (draft?.assetId) {
+          await db
+            .update(contentAssets)
+            .set({ videoUrl: data.video_url })
+            .where(eq(contentAssets.id, draft.assetId));
+        }
+      } catch (err) {
+        // Non-fatal — the job row already has videoUrl; this just
+        // means the multi-platform group won't share it. Logged
+        // for diagnostics.
+        console.warn(
+          '[heygen/webhook] failed to mirror videoUrl to asset (non-fatal):',
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
     return NextResponse.json({ received: true });
   }
 

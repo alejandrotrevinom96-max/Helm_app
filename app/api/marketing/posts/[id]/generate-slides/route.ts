@@ -17,7 +17,15 @@
 // errors to the client.
 import { createClient } from '@/lib/supabase/server';
 import { db } from '@/lib/db';
-import { generatedPosts, projects } from '@/lib/db/schema';
+import {
+  generatedPosts,
+  projects,
+  // PR Sprint 7.26 — Asset-based content flow. When the draft
+  // being filled with slides belongs to an asset group, we mirror
+  // visualUrls onto content_assets.image_urls so every platform
+  // variant of the asset can render the same carousel.
+  contentAssets,
+} from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 import { checkRateLimit } from '@/lib/rate-limit';
@@ -473,10 +481,30 @@ async function handle(
   // can retry; we don't half-stamp the column.
   const allPresent = ordered.every((u): u is string => typeof u === 'string');
   if (allPresent) {
-    await db
+    const [persisted] = await db
       .update(generatedPosts)
       .set({ visualUrls: ordered as string[] })
-      .where(eq(generatedPosts.id, id));
+      .where(eq(generatedPosts.id, id))
+      .returning({ assetId: generatedPosts.assetId });
+
+    // PR Sprint 7.26 — Asset-based content flow. Mirror the
+    // ordered slide URLs onto content_assets.image_urls. The
+    // library API hydrates visualUrls from the asset when present,
+    // so this is what makes a multi-platform carousel render the
+    // same slides across LinkedIn + IG + FB without re-rendering.
+    if (persisted?.assetId) {
+      try {
+        await db
+          .update(contentAssets)
+          .set({ imageUrls: ordered as string[] })
+          .where(eq(contentAssets.id, persisted.assetId));
+      } catch (err) {
+        console.warn(
+          '[generate-slides] failed to mirror visualUrls to asset (non-fatal):',
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
   }
 
   return NextResponse.json({

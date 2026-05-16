@@ -1,6 +1,15 @@
 import { createClient } from '@/lib/supabase/server';
 import { db } from '@/lib/db';
-import { generatedPosts, projects } from '@/lib/db/schema';
+import {
+  generatedPosts,
+  projects,
+  // PR Sprint 7.26 — Asset-based content flow. When a draft is
+  // part of an asset group (assetId set), we also mirror the
+  // generated imageUrl onto content_assets.image_urls so every
+  // platform variant of the asset sees the same image — not just
+  // the one draft this endpoint was called with.
+  contentAssets,
+} from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 import { revalidatePath } from 'next/cache';
@@ -326,7 +335,13 @@ export async function POST(request: Request) {
     // forged draftId from a different project can't be written.
     if (draftId) {
       try {
-        await db
+        // Capture assetId in the same UPDATE so we know whether
+        // this draft is part of a multi-platform asset group
+        // without a second round-trip. .returning() gives us the
+        // assetId post-write — Drizzle's `update().set().where()`
+        // returns the matching rows after the set, so the column
+        // value reflects the row's current state.
+        const [persisted] = await db
           .update(generatedPosts)
           .set({
             imageUrl: finalUrl,
@@ -337,7 +352,31 @@ export async function POST(request: Request) {
               eq(generatedPosts.id, draftId),
               eq(generatedPosts.projectId, projectId)
             )
-          );
+          )
+          .returning({ assetId: generatedPosts.assetId });
+
+        // PR Sprint 7.26 — Asset-based content flow.
+        // Mirror the URL onto content_assets.image_urls so EVERY
+        // platform variant of this asset sees the same image. The
+        // library API joins generated_posts → content_assets and
+        // hydrates visualUrl from the asset when present, so this
+        // write is what makes multi-platform groups share media.
+        // We store it as a 1-element array (photo asset shape);
+        // carousel slides land in the same column with N elements.
+        if (persisted?.assetId) {
+          try {
+            await db
+              .update(contentAssets)
+              .set({ imageUrls: [finalUrl] })
+              .where(eq(contentAssets.id, persisted.assetId));
+          } catch (assetErr) {
+            console.warn(
+              '[visuals/generate] failed to mirror imageUrl to asset (non-fatal):',
+              assetErr instanceof Error ? assetErr.message : assetErr,
+            );
+          }
+        }
+
         // PR #46 — Sprint 6.7.4: invalidate Library + Calendar
         // server caches now that this draft has a persisted
         // image. Without this, prefetched RSC payloads in those

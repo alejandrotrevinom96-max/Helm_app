@@ -19,6 +19,13 @@ import {
   projects,
   generatedPosts,
   scheduledPosts,
+  // PR Sprint 7.26 — Asset-based content flow. We LEFT JOIN
+  // content_assets so every draft surfaces the asset's shared
+  // media (videoUrl / imageUrls) — not just the one draft the
+  // generation pipeline wrote to. Without the join, only the
+  // first platform variant in a multi-platform group would carry
+  // the image/video; everyone else would render naked.
+  contentAssets,
 } from '@/lib/db/schema';
 import { eq, and, ilike, desc, sql } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
@@ -253,13 +260,55 @@ export async function GET(request: Request) {
       draftFilters.push(eq(generatedPosts.isStory, false));
       draftFilters.push(eq(generatedPosts.isReel, false));
     }
+    // PR Sprint 7.26 — Asset-based content flow.
+    // LEFT JOIN so legacy rows whose asset_id is null still get
+    // returned (just with asset_video_url / asset_image_urls
+    // null). The hydration logic below preserves the per-row
+    // imageUrl/videoUrl as fallback when the asset columns are
+    // empty.
     const draftRows = await db
-      .select()
+      .select({
+        post: generatedPosts,
+        assetVideoUrl: contentAssets.videoUrl,
+        assetImageUrls: contentAssets.imageUrls,
+        assetType: contentAssets.assetType,
+      })
       .from(generatedPosts)
+      .leftJoin(contentAssets, eq(contentAssets.id, generatedPosts.assetId))
       .where(and(...draftFilters))
       .orderBy(desc(generatedPosts.createdAt));
 
-    drafts = draftRows.map((r) => ({
+    drafts = draftRows.map(({ post: r, assetVideoUrl, assetImageUrls, assetType }) => {
+      // PR Sprint 7.26 — Asset-based content flow. Hydrate the
+      // media columns from the asset when present, falling back
+      // to the per-row values for legacy rows whose backfill
+      // didn't land or who pre-dated the schema change.
+      //
+      // Photo asset → image_urls is a 1-element array; we mirror
+      // it into visualUrl (single-image consumers) AND into the
+      // visualUrls field as a 1-array (forward-compat).
+      // Carousel asset → image_urls is N elements; visualUrls
+      // gets the array, visualUrl shows the first (cover image).
+      // Video asset → video_url is the canonical render; all
+      // platform variants of the group surface the same URL.
+      const assetImgs = Array.isArray(assetImageUrls)
+        ? (assetImageUrls as string[])
+        : null;
+      const isCarouselAsset = assetType === 'carousel';
+      const hydratedVisualUrls =
+        assetImgs && assetImgs.length > 0
+          ? assetImgs
+          : ((r.visualUrls as string[] | null) ?? null);
+      const hydratedVisualUrl =
+        // Prefer the asset's first image; fall back to per-row
+        // imageUrl; finally to the first visualUrls slot (which is
+        // how legacy carousel rows expose a cover).
+        (assetImgs && assetImgs.length > 0 ? assetImgs[0] : null) ??
+        r.imageUrl ??
+        (Array.isArray(r.visualUrls) && r.visualUrls.length > 0
+          ? (r.visualUrls as string[])[0]
+          : null);
+      return {
       id: r.id,
       source: 'generated' as const,
       projectId: r.projectId,
@@ -269,12 +318,8 @@ export async function GET(request: Request) {
       prompt: r.prompt,
       scheduledFor: null,
       publishedAt: null,
-      // PR #43 — Sprint 6.7.1: drafts now persist their visual
-      // (PR #42 only persisted the row; pre-PR-43 the visualUrl
-      // column on generated_posts didn't exist and we hardcoded
-      // null here). Surfacing the column lets refreshed Library
-      // rows + Drafts pool chips keep their image.
-      visualUrl: r.imageUrl ?? null,
+      // PR Sprint 7.26 — hydrated from asset when grouped.
+      visualUrl: hydratedVisualUrl,
       performanceRating: null,
       performanceNote: null,
       metricsImpressions: null,
@@ -295,7 +340,11 @@ export async function GET(request: Request) {
       isStory: r.isStory ?? false,
       storyExpiresAt: null,
       isReel: r.isReel ?? false,
-      videoUrl: r.videoUrl ?? null,
+      // PR Sprint 7.26 — videoUrl hydrated from the asset when a
+      // multi-platform group is present. Falls back to the
+      // per-row column for legacy rows (where the heygen webhook
+      // wrote only to the linked draft).
+      videoUrl: assetVideoUrl ?? r.videoUrl ?? null,
       videoDurationSeconds: null,
       videoSizeBytes: null,
       reelProcessingStatus: null,
@@ -307,8 +356,13 @@ export async function GET(request: Request) {
       // PR #62 — Sprint 7.0.5: structured drafts.
       contentType: r.contentType ?? null,
       structuredContent: r.structuredContent ?? null,
-      // PR #80 — Sprint 7.5.2 (Bug #5): carousel slide URLs.
-      visualUrls: (r.visualUrls as string[] | null) ?? null,
+      // PR Sprint 7.26 — hydrated from asset for carousels; falls
+      // back to the per-row column for non-asset and pre-7.26
+      // rows. The hydration helper above picked the right
+      // array shape based on asset_type.
+      visualUrls: isCarouselAsset
+        ? hydratedVisualUrls
+        : ((r.visualUrls as string[] | null) ?? null),
       // PR Sprint 7.24 — Prompt 3 variant pair binding.
       variantLabel:
         r.variantLabel === 'A' || r.variantLabel === 'B'
@@ -317,7 +371,8 @@ export async function GET(request: Request) {
       variantGroupId: r.variantGroupId ?? null,
       // PR Sprint 7.26 — Asset-based content flow.
       assetId: r.assetId ?? null,
-    }));
+    };
+    });
   }
 
   // ---- SCHEDULED / PUBLISHED / CANCELLED (scheduled_posts) ----------

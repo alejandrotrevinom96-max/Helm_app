@@ -350,6 +350,75 @@ export function AssetGeneratePanel({ projectId }: Props) {
               view in library →
             </a>
           </div>
+
+          {/* Media-generation status. The caption text returns in
+              the POST response, but media (image / carousel slides
+              / HeyGen video) is rendered asynchronously by other
+              services — this banner tells the founder where each
+              type lives + how long it usually takes so they don't
+              think the flow is broken when the preview shows
+              captions only. */}
+          {(() => {
+            if (result.assetType === 'long_form_text') {
+              return (
+                <div className="p-3 rounded-lg border border-emerald-500/30 bg-emerald-500/5 text-xs text-emerald-500">
+                  ✓ Text asset complete. No media to render — the
+                  body itself IS the asset.
+                </div>
+              );
+            }
+            if (result.assetType === 'photo') {
+              return (
+                <div className="p-3 rounded-lg border border-blue-500/30 bg-blue-500/5 text-xs text-blue-500">
+                  🎨 Image generating in the background — usually
+                  10-20s. Refresh{' '}
+                  <a
+                    href="/marketing/library"
+                    className="underline hover:no-underline"
+                  >
+                    Library
+                  </a>{' '}
+                  to see the cover when it lands.
+                </div>
+              );
+            }
+            if (result.assetType === 'carousel') {
+              return (
+                <div className="p-3 rounded-lg border border-blue-500/30 bg-blue-500/5 text-xs text-blue-500">
+                  🖼️ Carousel slides rendering — 5-8 images × ~5s
+                  each, so 30-60s total. They&apos;ll show up in{' '}
+                  <a
+                    href="/marketing/library"
+                    className="underline hover:no-underline"
+                  >
+                    Library
+                  </a>{' '}
+                  once Flux finishes the batch.
+                </div>
+              );
+            }
+            if (
+              result.assetType === 'ugc_video' ||
+              result.assetType === 'reel'
+            ) {
+              return (
+                <div className="p-3 rounded-lg border border-purple-500/30 bg-purple-500/5 text-xs text-purple-500">
+                  🎬 Video queued with HeyGen — typically 2-5
+                  minutes per render. Track progress in{' '}
+                  <a
+                    href="/marketing/library"
+                    className="underline hover:no-underline"
+                  >
+                    Library
+                  </a>{' '}
+                  · the same render is shared across all platforms
+                  in this asset.
+                </div>
+              );
+            }
+            return null;
+          })()}
+
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
             {result.posts.map((p) => (
               <div

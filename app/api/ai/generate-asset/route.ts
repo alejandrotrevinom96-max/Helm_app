@@ -179,6 +179,64 @@ function textFromMessage(
     .trim();
 }
 
+// PR Sprint 7.26 — Asset-based content flow.
+//
+// Parse Claude's "Slide 1: ...\nSlide 2: ..." carousel output into
+// the shape /api/marketing/posts/[id]/generate-slides consumes
+// (`structuredContent.slides` — array of {title, body, role}).
+//
+// Roles are derived from position:
+//   - Slide 0           → 'cover' (the hook)
+//   - Last slide        → 'cta'
+//   - Everything else   → 'value'
+// The slide-gen endpoint uses these roles to bias each Flux
+// prompt (bold hero composition for cover, clean composition for
+// cta, editorial for value).
+interface ParsedSlide {
+  title: string;
+  body: string;
+  role: 'cover' | 'value' | 'cta';
+}
+
+function parseCarouselSlides(baseContent: string): ParsedSlide[] {
+  const lines = baseContent
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const slides: Array<{ title: string; body: string }> = [];
+  for (const line of lines) {
+    // Match "Slide 1: text", "Slide 1 — text", "Slide 1. text",
+    // case-insensitive. Anything that doesn't match the pattern is
+    // treated as a continuation of the previous slide's body.
+    const m = line.match(/^slide\s+\d+\s*[:\-—.]\s*(.+)$/i);
+    if (m) {
+      slides.push({ title: m[1].trim().slice(0, 80), body: m[1].trim() });
+    } else if (slides.length > 0) {
+      const last = slides[slides.length - 1];
+      last.body = `${last.body} ${line}`.slice(0, 400);
+    }
+  }
+  // Defensive fallback: if Claude returned something we couldn't
+  // parse at all, return a single slide so the carousel still
+  // renders one image instead of zero.
+  if (slides.length === 0) {
+    slides.push({
+      title: baseContent.slice(0, 80),
+      body: baseContent.slice(0, 400),
+    });
+  }
+  return slides.map((s, i, arr) => ({
+    title: s.title,
+    body: s.body,
+    role:
+      i === 0
+        ? ('cover' as const)
+        : i === arr.length - 1
+          ? ('cta' as const)
+          : ('value' as const),
+  }));
+}
+
 // Lightweight hashtag extractor — pulls #word tokens out of the
 // caption, dedupes, and strips them from the visible body so the
 // hashtags column stays canonical and the caption column reads
@@ -452,6 +510,18 @@ export async function POST(request: Request) {
             : assetType === 'photo'
               ? 'photo'
               : 'text_post';
+    // PR Sprint 7.26 — Asset-based content flow.
+    // For carousels we ALSO parse the baseContent into the slides
+    // shape /api/marketing/posts/[id]/generate-slides consumes
+    // (structuredContent.slides). Without this, the auto-fire
+    // below finds zero slides and renders nothing.
+    const parsedSlides =
+      assetType === 'carousel' ? parseCarouselSlides(baseContent) : null;
+    const structuredContent =
+      assetType === 'carousel'
+        ? { assetType, baseContent, slides: parsedSlides }
+        : { assetType, baseContent };
+
     const inserted = await db
       .insert(generatedPosts)
       .values(
@@ -469,14 +539,11 @@ export async function POST(request: Request) {
           ctaText: c.cta,
           prompt,
           contentType: legacyContentType,
-          // Keep the structured shape consistent with old drafts so
-          // legacy renderers don't crash on a null where they
-          // expected a shape. We pack the asset type + base content
-          // for completeness.
-          structuredContent: {
-            assetType,
-            baseContent,
-          },
+          // Per-asset-type structured shape — carousel rows carry
+          // the parsed slides[] so the slide-gen endpoint can run
+          // against them; other types carry the assetType +
+          // baseContent for the modal preview.
+          structuredContent,
           variantLabel:
             body.variantLabel === 'A' || body.variantLabel === 'B'
               ? body.variantLabel
@@ -529,8 +596,10 @@ export async function POST(request: Request) {
 
     // Step 6 — for photo assets, fire-and-forget visuals/generate
     // against the first inserted draft id. The visuals/generate
-    // endpoint already knows how to write imageUrl back to the
-    // draft row; future PR can also write to asset.imageUrls.
+    // endpoint writes imageUrl back to the draft AND mirrors it
+    // onto content_assets.image_urls (PR Sprint 7.26) so every
+    // platform variant in the asset group surfaces the image via
+    // the library's leftJoin on contentAssets.
     if (assetType === 'photo' && inserted.length > 0) {
       const first = inserted[0];
       const origin = new URL(request.url).origin;
@@ -547,6 +616,33 @@ export async function POST(request: Request) {
           draftId: first.id,
           painPoint: prompt,
           contentType: 'photo',
+        }),
+      }).catch(() => {
+        /* fire-and-forget — visible in Library on next refresh */
+      });
+    }
+
+    // Step 7 — for carousel assets, fire-and-forget the slide
+    // generator. parseCarouselSlides() above already populated
+    // structuredContent.slides on each draft, so the slide
+    // endpoint can hydrate per-slide painPoint/role without
+    // additional context. Generating against the FIRST draft is
+    // enough — generate-slides also mirrors visualUrls onto
+    // content_assets.image_urls so the rest of the group hydrates
+    // through the library leftJoin.
+    if (assetType === 'carousel' && inserted.length > 0) {
+      const first = inserted[0];
+      const origin = new URL(request.url).origin;
+      void fetch(`${origin}/api/marketing/posts/${first.id}/generate-slides`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          cookie: request.headers.get('cookie') ?? '',
+        },
+        body: JSON.stringify({
+          // The endpoint pulls slides from the row's
+          // structuredContent — no extra body fields required.
+          painPoint: prompt,
         }),
       }).catch(() => {
         /* fire-and-forget — visible in Library on next refresh */
