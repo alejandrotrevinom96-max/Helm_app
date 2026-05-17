@@ -396,22 +396,31 @@ export function StudioClient({ projectId }: Props) {
   };
 
   // ─── Send follow-up ────────────────────────────────────────
-  const sendFollowUp = async ({ autoProceed }: { autoProceed: boolean }) => {
+  //
+  // PR Sprint D-final — discriminated kind:'approve'|'feedback'
+  // contract replaces the legacy autoProceed boolean. HeyGen V3
+  // splits the two intents onto separate endpoints (POST
+  // /v3/video-agents/{id} for chat, POST .../approve for the
+  // explicit draft confirmation). The backend route dispatches
+  // to the right one based on kind.
+  const sendFollowUp = async (
+    args: { kind: 'feedback'; message: string } | { kind: 'approve' },
+  ) => {
     if (!activeSession || sending) return;
-    if (followUp.trim().length === 0 && !autoProceed) return;
+    if (args.kind === 'feedback' && args.message.trim().length === 0) return;
     setSending(true);
     setError(null);
     try {
-      const message =
-        followUp.trim().length > 0
-          ? followUp.trim()
-          : 'Looks good — approve and render the video.';
+      const requestBody =
+        args.kind === 'approve'
+          ? { kind: 'approve' as const }
+          : { kind: 'feedback' as const, message: args.message.trim() };
       const res = await fetch(
         `/api/heygen/studio/sessions/${activeSession.id}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message, autoProceed }),
+          body: JSON.stringify(requestBody),
         },
       );
       const data = (await res.json().catch(() => ({}))) as {
@@ -964,7 +973,8 @@ export function StudioClient({ projectId }: Props) {
                 {/* Quick-action chips — pre-fill the textarea with a
                     starter; founder edits then sends. Approve is its
                     own button (not a pre-fill) because it's a
-                    distinct intent that fires autoProceed=true. */}
+                    distinct intent that fires kind:'approve'
+                    (POST .../video-agents/{id}/approve). */}
                 {showsApprovalActions(activeSession.status) && (
                   <div
                     style={{
@@ -1044,7 +1054,12 @@ export function StudioClient({ projectId }: Props) {
                   <div style={{ display: 'flex', gap: '8px' }}>
                     <button
                       type="button"
-                      onClick={() => void sendFollowUp({ autoProceed: false })}
+                      onClick={() =>
+                        void sendFollowUp({
+                          kind: 'feedback',
+                          message: followUp,
+                        })
+                      }
                       disabled={
                         sending ||
                         followUp.trim().length === 0 ||
@@ -1055,7 +1070,7 @@ export function StudioClient({ projectId }: Props) {
                       {sending ? 'Sending…' : 'Send feedback'}
                     </button>
                     <Button
-                      onClick={() => void sendFollowUp({ autoProceed: true })}
+                      onClick={() => void sendFollowUp({ kind: 'approve' })}
                       disabled={
                         sending ||
                         inputModeFor(activeSession.status) === 'rendering'
@@ -1161,6 +1176,27 @@ export function StudioClient({ projectId }: Props) {
                       ⬇ SRT
                     </a>
                   )}
+                  {/* PR Sprint D-final — open the draft directly in
+                      HeyGen's own UI. Useful when the founder
+                      wants to give feedback in HeyGen's editor
+                      (richer storyboard editor than our chat
+                      surface). Best-guess URL pattern matching
+                      HeyGen's web app routes — if their actual
+                      URL is different the link still resolves to
+                      the founder's HeyGen dashboard. */}
+                  {activeSession.heygenSessionId && (
+                    <a
+                      href={`https://app.heygen.com/video-agents/${encodeURIComponent(
+                        activeSession.heygenSessionId,
+                      )}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="platform-btn platform-btn-ghost"
+                      style={{ fontSize: '11px' }}
+                    >
+                      ↗ View in HeyGen
+                    </a>
+                  )}
                 </div>
               </>
             ) : isTerminal(activeSession.status) ? (
@@ -1200,6 +1236,28 @@ export function StudioClient({ projectId }: Props) {
                         ? 'Rendering — typically 2-5 min.'
                         : 'Waiting for input.'}
                 </span>
+                {/* PR Sprint D-final — View-in-HeyGen link also
+                    surfaces in the pre-render preview block so
+                    the founder can click through to HeyGen's
+                    storyboard editor while the draft is open. */}
+                {activeSession.heygenSessionId &&
+                  activeSession.status === 'reviewing' && (
+                    <a
+                      href={`https://app.heygen.com/video-agents/${encodeURIComponent(
+                        activeSession.heygenSessionId,
+                      )}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        fontSize: '11px',
+                        fontFamily: 'JetBrains Mono, monospace',
+                        color: 'var(--accent)',
+                        textDecoration: 'underline',
+                      }}
+                    >
+                      ↗ View draft in HeyGen
+                    </a>
+                  )}
               </div>
             )}
           </GlassCard>

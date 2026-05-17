@@ -12,10 +12,13 @@
 //   subtitle_url on the same response.
 //
 // POST /api/heygen/studio/sessions/[id]
-//   Body: { message, autoProceed? }
-//   Sends a follow-up message to HeyGen ("add a scene about
-//   pricing", "approve and render", etc.). Then polls once so
-//   the agent's response shows up on the same round-trip.
+//   Body shapes (PR Sprint D-final):
+//     { kind: 'feedback', message: '...' }
+//       → POST /v3/video-agents/{id}, agent iterates on draft
+//     { kind: 'approve' }
+//       → POST /v3/video-agents/{id}/approve, fires final render
+//   Legacy back-compat: { message, autoProceed: true } still
+//   accepted (mapped to kind:'approve').
 
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
@@ -28,6 +31,7 @@ import { and, eq } from 'drizzle-orm';
 import {
   getAgentSession,
   sendAgentMessage,
+  approveAgentSession,
   getFinalVideo,
   type SessionStatus,
 } from '@/lib/heygen/v3-client';
@@ -254,7 +258,7 @@ async function refreshSession(
   // its own "Ready to bring this to life?" prompt without our
   // approval. This is the bug we're trying to stamp out; logging
   // it lets us measure how often it still leaks through after
-  // the auto_proceed=false explicit contract lands.
+  // the approval-gate + native /approve endpoint lands.
   //
   // Gated on row.status (previous local state) so we don't re-fire
   // on every poll once the session is already generating.
@@ -363,33 +367,56 @@ export async function POST(
     );
   }
 
-  let body: { message?: string; autoProceed?: boolean };
+  // PR Sprint D-final — explicit action contract.
+  //
+  // Old shape: { message, autoProceed? } — autoProceed=true was
+  // sent as `auto_proceed` to HeyGen, which 400s ("Extra inputs
+  // are not permitted"). New shape distinguishes the two intents
+  // by their dedicated upstream endpoints:
+  //
+  //   { kind: 'feedback', message: '...' }
+  //     → POST /v3/video-agents/{id}     (sendAgentMessage)
+  //     → agent iterates on the draft, status stays at draft
+  //
+  //   { kind: 'approve' }
+  //     → POST /v3/video-agents/{id}/approve  (approveAgentSession)
+  //     → HeyGen confirms the draft, render fires, status flips
+  //       to generating then completed
+  //
+  // Backward compat: callers that still send the old shape are
+  // mapped automatically (autoProceed=true → approve, otherwise
+  // feedback). The UGC Studio client is updated in the same PR
+  // but external callers might still be on the old contract.
+  let body: {
+    kind?: 'feedback' | 'approve';
+    message?: string;
+    autoProceed?: boolean;
+  };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
+
+  // Resolve the action. Explicit `kind` wins; legacy `autoProceed`
+  // falls back to approve|feedback semantics.
+  const isApprove =
+    body.kind === 'approve' || body.autoProceed === true;
   const message = (body.message ?? '').trim();
-  if (message.length < 1 || message.length > 10_000) {
+
+  // Feedback path requires a non-empty message; approve doesn't.
+  if (!isApprove && (message.length < 1 || message.length > 10_000)) {
     return NextResponse.json(
-      { error: 'message must be 1–10,000 chars' },
+      { error: 'feedback requires message (1–10000 chars)' },
       { status: 400 },
     );
   }
 
-  // PR Sprint D-bugs (UGC fix) — clearing the approval gate.
-  //
-  // Whenever the founder sends ANY message (approval or
-  // feedback) we clear the gate. After this point the serializer
-  // exposes the real HeyGen state — typically already at
-  // 'completed' with a video URL, which the founder can now
-  // see + decide what to do with.
-  //
-  // We forward the message to HeyGen as usual. If HeyGen's
-  // session is already at a terminal state on its side, the
-  // message just gets logged + ignored; that's the right
-  // failure mode (the founder's intent is captured in the
-  // local message thread regardless).
+  // PR Sprint D-bugs (UGC fix) — clear the approval gate on any
+  // founder action. After this point the serializer exposes the
+  // real HeyGen state, which is what the founder is about to
+  // act on (approve → trigger render, or feedback → wait for
+  // re-draft).
   const wasGated = row.approvalGateActive === true;
   if (wasGated) {
     await db
@@ -398,21 +425,16 @@ export async function POST(
       .where(eq(heygenAgentSessions.id, row.id));
   }
 
-  const send = await sendAgentMessage(row.heygenSessionId, {
-    message,
-    autoProceed: Boolean(body.autoProceed),
-  });
-  if (!send.ok) {
-    // Even if HeyGen rejected the message (typically because the
-    // upstream session is at a terminal state), we already
-    // cleared the gate above so the founder isn't stranded.
-    // Surface the upstream error so the UI can show it; the
-    // next GET will return the real session state with the gate
-    // off and the video URL exposed.
+  const sendResult = isApprove
+    ? await approveAgentSession(row.heygenSessionId)
+    : await sendAgentMessage(row.heygenSessionId, { message });
+
+  if (!sendResult.ok) {
     return NextResponse.json(
       {
-        error: `${send.error} (Gate released — refresh to see HeyGen's actual state.)`,
+        error: `${sendResult.error} (Gate released — refresh to see HeyGen's actual state.)`,
         gateCleared: wasGated,
+        action: isApprove ? 'approve' : 'feedback',
       },
       { status: 502 },
     );

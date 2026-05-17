@@ -2,7 +2,7 @@
 //
 // POST /api/heygen/studio/sessions
 //   Body: { projectId, prompt, styleId?, avatarId?, voiceId?,
-//           orientation?, autoProceed? }
+//           orientation? }
 //   Creates a HeyGen V3 Video Agent session in chat mode +
 //   stores the local row. Returns the new row's id (Helm's PK).
 //
@@ -11,9 +11,10 @@
 //   sidebar.
 //
 // Why chat mode by default: founders want to review the
-// storyboard before HeyGen burns a render. Set autoProceed=true
-// to short-circuit straight to generation when they trust the
-// agent.
+// storyboard before HeyGen burns a render. Approval is now
+// dispatched via the native /v3/video-agents/{id}/approve
+// endpoint on the per-session POST handler — see the [id]
+// route — so we don't need a create-time autoProceed flag.
 
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
@@ -84,7 +85,6 @@ export async function POST(request: Request) {
     avatarId?: string | null;
     voiceId?: string | null;
     orientation?: 'landscape' | 'portrait' | null;
-    autoProceed?: boolean;
   };
   try {
     body = await request.json();
@@ -120,8 +120,11 @@ export async function POST(request: Request) {
     );
   }
 
-  // Hand off to HeyGen. Always chat mode unless the founder
-  // explicitly opts in to one-shot via autoProceed=true.
+  // PR Sprint D-final — chat mode + native HeyGen draft/approve
+  // flow. auto_proceed removed (HeyGen V3 doesn't accept it);
+  // approval lives on /v3/video-agents/{id}/approve and is fired
+  // from the per-session POST handler when the founder clicks
+  // Approve & render.
   const result = await createAgentSession({
     prompt,
     mode: 'chat',
@@ -129,7 +132,6 @@ export async function POST(request: Request) {
     avatarId: body.avatarId ?? null,
     voiceId: body.voiceId ?? null,
     orientation: body.orientation ?? undefined,
-    autoProceed: Boolean(body.autoProceed),
   });
   if (!result.ok) {
     return NextResponse.json(

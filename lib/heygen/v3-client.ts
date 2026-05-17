@@ -215,10 +215,25 @@ export interface CreateSessionInput {
     | { type: 'asset_id'; asset_id: string }
     | { type: 'base64'; media_type: string; data: string }
   >;
-  autoProceed?: boolean;
   callbackUrl?: string;
   callbackId?: string;
 }
+
+// PR Sprint D-final — auto_proceed REMOVED from the entire V3
+// client surface.
+//
+// New evidence (Sentry 7487542342 — POST /v3/video-agents/{id}
+// with auto_proceed:true returned 400 "Extra inputs are not
+// permitted"): HeyGen V3's Video Agent has a NATIVE draft +
+// approve flow, not an auto_proceed flag. The agent generates a
+// DRAFT on its own, the founder reviews it (in Helm OR in
+// HeyGen's own UI), and then approves via a dedicated endpoint
+// to trigger the final render.
+//
+// All call sites that previously sent auto_proceed:
+//   - Approve → call approveAgentSession() (new function below)
+//   - Send feedback → call sendAgentMessage() with just message
+//   - One-shot create → no longer supported (was a hack anyway)
 
 export async function createAgentSession(
   input: CreateSessionInput,
@@ -235,21 +250,6 @@ export async function createAgentSession(
   if (input.styleId) body.style_id = input.styleId;
   if (input.orientation) body.orientation = input.orientation;
   if (input.files && input.files.length > 0) body.files = input.files;
-  // PR Sprint D-finish — auto_proceed is only valid on the
-  // SEND-MESSAGE endpoint, NOT on create. The create endpoint of
-  // HeyGen V3's Video Agent rejects unknown fields with "Extra
-  // inputs are not permitted" — that's where my Sprint D-7 fix
-  // overshot. Server-side default for chat-mode sessions is to
-  // wait for input anyway (the auto-render bug we hit before
-  // was actually downstream — first follow-up message dispatched
-  // auto_proceed=true by accident, not the create call).
-  //
-  // For session creation: only set auto_proceed when the caller
-  // explicitly wants one-shot (autoProceed=true). Same as the
-  // pre-D-7 conditional. For sendAgentMessage we keep the
-  // explicit contract — that's where the auto-render actually
-  // happens.
-  if (input.autoProceed === true) body.auto_proceed = true;
   if (input.callbackUrl) body.callback_url = input.callbackUrl;
   if (input.callbackId) body.callback_id = input.callbackId;
   const r = await v3<AgentSession>('/video-agents', {
@@ -278,9 +278,15 @@ export interface SendMessageInput {
   message: string;
   avatarId?: string | null;
   voiceId?: string | null;
-  autoProceed?: boolean;
 }
 
+// Send a free-form chat message to an existing agent session.
+// Used for FEEDBACK (founder asks the agent to iterate on the
+// current draft). The agent re-generates the draft incorporating
+// the new instruction; status stays at the draft/reviewing
+// checkpoint until the founder explicitly approves.
+//
+// NOT used for approval — that's approveAgentSession() below.
 export async function sendAgentMessage(
   sessionId: string,
   input: SendMessageInput,
@@ -288,17 +294,33 @@ export async function sendAgentMessage(
   const body: Record<string, unknown> = { message: input.message };
   if (input.avatarId) body.avatar_id = input.avatarId;
   if (input.voiceId) body.voice_id = input.voiceId;
-  // Same explicit contract as createAgentSession: HeyGen defaults
-  // auto_proceed=true server-side. We send it explicitly every
-  // time so a "Send feedback" follow-up doesn't accidentally
-  // become "Approve & render".
-  body.auto_proceed = input.autoProceed === true;
-  // The endpoint returns { session_id, run_id, title }; we don't
-  // need those fields here — the next GET will surface the new
-  // model message. Just confirm 200.
   const r = await v3<Record<string, unknown>>(
     `/video-agents/${encodeURIComponent(sessionId)}`,
     { method: 'POST', body: JSON.stringify(body) },
+  );
+  if (!r.ok) return r;
+  return { ok: true };
+}
+
+// PR Sprint D-final — explicit approve endpoint.
+//
+// The user reported HeyGen V3 Video Agent has a native draft +
+// approve flow. The most likely endpoint pattern based on
+// HeyGen's existing /stop convention is POST /v3/video-agents/
+// {id}/approve. If the actual path is /publish or /render or
+// /confirm, the wrapped v3() helper logs the 404 to Sentry with
+// the full path so we can pivot quickly without a code redeploy.
+//
+// The body is empty — approval is the action the path encodes,
+// not a payload distinction. Some HeyGen endpoints accept an
+// optional "note" field on approval; we'll add it once we see
+// the spec.
+export async function approveAgentSession(
+  sessionId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const r = await v3<Record<string, unknown>>(
+    `/video-agents/${encodeURIComponent(sessionId)}/approve`,
+    { method: 'POST', body: JSON.stringify({}) },
   );
   if (!r.ok) return r;
   return { ok: true };
