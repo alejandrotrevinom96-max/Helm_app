@@ -402,7 +402,6 @@ export function ResearchClient({
                 <PainPointCard
                   key={`${p.theme}-${i}`}
                   painPoint={p}
-                  projectId={project.id}
                 />
               ))}
             </div>

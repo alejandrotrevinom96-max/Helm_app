@@ -28,34 +28,40 @@ export interface PainPoint {
 
 interface Props {
   painPoint: PainPoint;
-  projectId: string;
+  // PR Sprint D-finish — projectId removed from props. The studios
+  // resolve the active project server-side; the URL never needed
+  // it. Kept the prop name out of the type so existing callers
+  // that still pass it just have an ignored prop (TS treats it as
+  // unknown extra). If the caller is strict-typed we'll see it at
+  // build time — only one caller today (research/client.tsx) so
+  // low blast radius.
 }
 
-export function PainPointCard({ painPoint, projectId }: Props) {
+export function PainPointCard({ painPoint }: Props) {
   const { id, theme, frequency, sampleQuote, platform, actionableAngle } =
     painPoint;
 
-  // Pre-fill prompt for the legacy fallback. Keep it short — the
-  // composer already pulls full brand context, this is just a seed.
-  // Only used when the pain point predates the D-8 id backfill.
-  const promptText = [
-    `Address this audience pain: "${theme}".`,
-    actionableAngle,
-    `Real quote from community: "${sampleQuote}"`,
-  ]
-    .filter(Boolean)
-    .join(' ');
-
-  // PR Sprint D-8 — prefer painPointId routing when available, fall
-  // back to the legacy prompt seed when the row predates the
-  // backfill. The studios know to read either param.
+  // PR Sprint D-finish — painPointId is the canonical contract.
+  //
+  // Previously the card carried both ?projectId= and a ?prompt=
+  // fallback (used when the pain point predated the id backfill).
+  // The studios resolve the active project from the user session
+  // server-side, so projectId in URL was dead-code; and the legacy
+  // ?prompt= path bypassed the agent's pain-point-aware first
+  // message (Case B in conceptBuilder.ts) — defeating the whole
+  // reason the Studios know how to greet with the real quote +
+  // 3 angle suggestions.
+  //
+  // Backward compat: rows without an id (only possible if the
+  // admin backfill never ran on a given deploy) get a disabled
+  // chip set instead of broken links. The PainPoint type still
+  // has id optional for that exact case.
   const photoStudioHref = id
-    ? `/marketing/photo-studio?projectId=${encodeURIComponent(projectId)}&painPointId=${encodeURIComponent(id)}`
-    : `/marketing/photo-studio?projectId=${encodeURIComponent(projectId)}&prompt=${encodeURIComponent(promptText)}`;
-
+    ? `/marketing/photo-studio?painPointId=${encodeURIComponent(id)}`
+    : null;
   const ugcStudioHref = id
-    ? `/marketing/ugc-studio?projectId=${encodeURIComponent(projectId)}&painPointId=${encodeURIComponent(id)}`
-    : `/marketing/ugc-studio?projectId=${encodeURIComponent(projectId)}&prompt=${encodeURIComponent(promptText)}`;
+    ? `/marketing/ugc-studio?painPointId=${encodeURIComponent(id)}`
+    : null;
 
   return (
     <GlassCard className="p-4">
@@ -83,23 +89,45 @@ export function PainPointCard({ painPoint, projectId }: Props) {
           the single "Generate post →" link. The founder picks the
           medium upfront (photo vs UGC video) — the chosen studio
           loads the pain point context and starts the chat from
-          there. */}
+          there.
+          PR Sprint D-finish — chips render disabled if the pain
+          point lacks an id (admin backfill hasn't run on this
+          deploy). Clicking would 404 on the lookup, so we'd
+          rather show "Backfill pending" than a broken link. */}
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-[10px] font-mono uppercase tracking-[0.12em] text-text-3 shrink-0">
           Send to:
         </span>
-        <Link
-          href={photoStudioHref}
-          className="text-xs font-mono px-2.5 py-1 rounded-md border border-border text-text-1 hover:bg-bg-elev hover:border-border-bright transition-colors"
-        >
-          🖼️ Photo Studio
-        </Link>
-        <Link
-          href={ugcStudioHref}
-          className="text-xs font-mono px-2.5 py-1 rounded-md border border-border text-text-1 hover:bg-bg-elev hover:border-border-bright transition-colors"
-        >
-          🎬 UGC Studio
-        </Link>
+        {photoStudioHref ? (
+          <Link
+            href={photoStudioHref}
+            className="text-xs font-mono px-2.5 py-1 rounded-md border border-border text-text-1 hover:bg-bg-elev hover:border-border-bright transition-colors"
+          >
+            🖼️ Photo Studio
+          </Link>
+        ) : (
+          <span
+            className="text-xs font-mono px-2.5 py-1 rounded-md border border-border text-text-3 opacity-50"
+            title="Pain point predates the id backfill — run /api/admin/backfill-pain-point-ids"
+          >
+            🖼️ Photo Studio
+          </span>
+        )}
+        {ugcStudioHref ? (
+          <Link
+            href={ugcStudioHref}
+            className="text-xs font-mono px-2.5 py-1 rounded-md border border-border text-text-1 hover:bg-bg-elev hover:border-border-bright transition-colors"
+          >
+            🎬 UGC Studio
+          </Link>
+        ) : (
+          <span
+            className="text-xs font-mono px-2.5 py-1 rounded-md border border-border text-text-3 opacity-50"
+            title="Pain point predates the id backfill — run /api/admin/backfill-pain-point-ids"
+          >
+            🎬 UGC Studio
+          </span>
+        )}
       </div>
     </GlassCard>
   );

@@ -214,6 +214,46 @@ export async function POST() {
     }),
   );
 
+  // 6. photo_agent_sessions table (Sprint D-8 Phase 2).
+  //
+  // Was missing from the original migrate-all. Without this step
+  // a DB reset would leave the Photo Studio chat-agent dead until
+  // someone manually called /api/admin/migrate-photo-agent-sessions
+  // — symptom: "Create failed (500)" on the first session POST.
+  results.push(
+    await runStep('photo-agent-sessions', async () => {
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS photo_agent_sessions (
+          id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+          prompt text NOT NULL,
+          pain_point_id text,
+          brand_snapshot jsonb,
+          state text NOT NULL DEFAULT 'understanding',
+          asset_type text,
+          uploaded_asset_url text,
+          concept text,
+          visual_url text,
+          visual_width integer,
+          visual_height integer,
+          platforms jsonb,
+          copies jsonb,
+          messages jsonb,
+          content_asset_id uuid REFERENCES content_assets(id) ON DELETE SET NULL,
+          error_message text,
+          created_at timestamp NOT NULL DEFAULT now(),
+          updated_at timestamp NOT NULL DEFAULT now(),
+          completed_at timestamp
+        )
+      `);
+      await db.execute(sql`
+        CREATE INDEX IF NOT EXISTS idx_photo_agent_session_project
+          ON photo_agent_sessions (project_id, created_at DESC)
+      `);
+    }),
+  );
+
   const allOk = results.every((r) => r.ok);
   return NextResponse.json(
     {

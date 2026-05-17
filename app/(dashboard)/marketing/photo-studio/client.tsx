@@ -152,6 +152,23 @@ export function PhotoStudioClient({ projectId }: Props) {
   const [seededFromPainPoint, setSeededFromPainPoint] = useState<string | null>(
     null,
   );
+  // PR Sprint D-finish — id of the pain point the founder picked
+  // (either by landing here from Research with ?painPointId=, or by
+  // clicking a chip in the new-session panel). Used by
+  // createSession so the agent's first message lands in Case B
+  // (theme + real quote + 3 angles) instead of the no-context
+  // greeting.
+  const [pickedPainPointId, setPickedPainPointId] = useState<string | null>(
+    null,
+  );
+
+  // List of pain points for the chip rail. Loaded once on mount;
+  // cached client-side because the founder rarely opens more than
+  // one session per page-load and the freshness expectation is
+  // weekly (research extractions run on a cadence).
+  const [painPointOptions, setPainPointOptions] = useState<
+    Array<{ id: string; theme: string; frequency: number; sampleQuote: string; actionableAngle: string }>
+  >([]);
 
   // Chat input draft (for active session).
   const [chatInput, setChatInput] = useState('');
@@ -199,6 +216,44 @@ export function PhotoStudioClient({ projectId }: Props) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [incomingPainPointId, incomingPrompt]);
+
+  // PR Sprint D-finish — sync the incoming URL id into the picked-
+  // state so createSession passes it through. Doing this in its own
+  // effect keeps it independent of the prompt-seeding logic above.
+  useEffect(() => {
+    if (incomingPainPointId) setPickedPainPointId(incomingPainPointId);
+  }, [incomingPainPointId]);
+
+  // PR Sprint D-finish — fetch the pain-points chip rail. Cheap,
+  // small payload, founder-scoped — fire once on mount.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/research/pain-points?projectId=${encodeURIComponent(projectId)}`,
+          { cache: 'no-store' },
+        );
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          painPoints?: Array<{
+            id: string;
+            theme: string;
+            frequency: number;
+            sampleQuote: string;
+            actionableAngle: string;
+          }>;
+        };
+        if (cancelled) return;
+        setPainPointOptions(data.painPoints ?? []);
+      } catch {
+        /* non-fatal — picker just won't show chips */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -269,7 +324,11 @@ export function PhotoStudioClient({ projectId }: Props) {
   // ─── Create new session ────────────────────────────────────
   const createSession = useCallback(async () => {
     if (creating) return;
-    if (draftPrompt.trim().length === 0 && !incomingPainPointId) return;
+    // PR Sprint D-finish — accept either an in-page picked id OR
+    // an inbound URL id OR a typed prompt. Any of the three is
+    // enough to seed a session.
+    const painPointId = pickedPainPointId || incomingPainPointId || null;
+    if (draftPrompt.trim().length === 0 && !painPointId) return;
     setCreating(true);
     setError(null);
     try {
@@ -279,7 +338,7 @@ export function PhotoStudioClient({ projectId }: Props) {
         body: JSON.stringify({
           projectId,
           prompt: draftPrompt.trim(),
-          painPointId: incomingPainPointId || null,
+          painPointId,
         }),
       });
       const data = (await res.json().catch(() => ({}))) as {
@@ -294,12 +353,19 @@ export function PhotoStudioClient({ projectId }: Props) {
       setActiveId(data.session.id);
       setDraftPrompt('');
       setSeededFromPainPoint(null);
+      setPickedPainPointId(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Network error');
     } finally {
       setCreating(false);
     }
-  }, [creating, draftPrompt, projectId, incomingPainPointId]);
+  }, [
+    creating,
+    draftPrompt,
+    projectId,
+    incomingPainPointId,
+    pickedPainPointId,
+  ]);
 
   // ─── Send message / action ─────────────────────────────────
   const sendAction = useCallback(
@@ -429,6 +495,27 @@ export function PhotoStudioClient({ projectId }: Props) {
             setDraftPrompt={setDraftPrompt}
             seededFromPainPoint={seededFromPainPoint}
             setSeededFromPainPoint={setSeededFromPainPoint}
+            painPointOptions={painPointOptions}
+            pickedPainPointId={pickedPainPointId}
+            onPickPainPoint={(p) => {
+              // PR Sprint D-finish — click on a pain-point chip in
+              // the picker. Behavior mirrors the URL-deep-link
+              // path: build the same seed text + show the same
+              // "Loaded from" badge + flag the id for the next
+              // createSession call.
+              const seed = [
+                `Address this audience pain: "${p.theme}"`,
+                p.actionableAngle ? `Angle: ${p.actionableAngle}` : null,
+                p.sampleQuote
+                  ? `Real quote from community: "${p.sampleQuote}"`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join('\n\n');
+              setDraftPrompt(seed);
+              setSeededFromPainPoint(p.theme);
+              setPickedPainPointId(p.id);
+            }}
             creating={creating}
             createSession={createSession}
             error={error}
@@ -464,11 +551,26 @@ export function PhotoStudioClient({ projectId }: Props) {
 
 // ─── New-session panel ────────────────────────────────────────
 
+interface PainPointOption {
+  id: string;
+  theme: string;
+  frequency: number;
+  sampleQuote: string;
+  actionableAngle: string;
+}
+
 interface NewSessionPanelProps {
   draftPrompt: string;
   setDraftPrompt: (v: string) => void;
   seededFromPainPoint: string | null;
   setSeededFromPainPoint: (v: string | null) => void;
+  // PR Sprint D-finish — pain-points chip rail. Empty array means
+  // none extracted yet (or the latest batch was entirely pre-
+  // backfill); the picker hides itself rather than render a
+  // dead section.
+  painPointOptions: PainPointOption[];
+  pickedPainPointId: string | null;
+  onPickPainPoint: (p: PainPointOption) => void;
   creating: boolean;
   createSession: () => Promise<void>;
   error: string | null;
@@ -479,6 +581,9 @@ function NewSessionPanel({
   setDraftPrompt,
   seededFromPainPoint,
   setSeededFromPainPoint,
+  painPointOptions,
+  pickedPainPointId,
+  onPickPainPoint,
   creating,
   createSession,
   error,
@@ -496,6 +601,75 @@ function NewSessionPanel({
         writes captions adapted per network. Iterate by chat until each piece
         is right.
       </p>
+
+      {/* PR Sprint D-finish — pain-points chip rail. Surfaces the
+          latest research extraction so the founder can jump
+          straight from "what is my audience complaining about" to
+          a visual concept without leaving the studio. Click → fills
+          the textarea with the same seed text the Research → Send-
+          to flow uses, marks the id for createSession, and shows
+          the "Loaded from" badge. */}
+      {painPointOptions.length > 0 && (
+        <div style={{ marginBottom: '14px' }}>
+          <div className="text-[10px] font-mono uppercase tracking-[0.12em] text-text-3 mb-2">
+            Or pick a pain point from your research
+          </div>
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: '6px',
+              maxHeight: '110px',
+              overflowY: 'auto',
+              paddingRight: '4px',
+            }}
+          >
+            {painPointOptions.map((p) => {
+              const picked = pickedPainPointId === p.id;
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => onPickPainPoint(p)}
+                  title={p.sampleQuote ? `"${p.sampleQuote}"` : p.theme}
+                  style={{
+                    fontSize: '11px',
+                    padding: '6px 10px',
+                    borderRadius: '999px',
+                    border: '1px solid',
+                    borderColor: picked
+                      ? 'var(--d-orange)'
+                      : 'var(--border)',
+                    background: picked
+                      ? 'rgba(249,115,22,0.10)'
+                      : 'var(--bg)',
+                    color: picked ? 'var(--text-1)' : 'var(--text-2)',
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                    textAlign: 'left',
+                    maxWidth: '300px',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {p.theme}
+                  <span
+                    style={{
+                      marginLeft: '6px',
+                      fontFamily: 'JetBrains Mono, monospace',
+                      fontSize: '9px',
+                      color: 'var(--text-3)',
+                    }}
+                  >
+                    {p.frequency}×
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {seededFromPainPoint && (
         <div

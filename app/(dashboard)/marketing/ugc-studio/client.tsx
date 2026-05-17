@@ -162,6 +162,26 @@ export function StudioClient({ projectId }: Props) {
   const [styles, setStyles] = useState<StyleOption[]>([]);
   const [stylesOpen, setStylesOpen] = useState(false);
 
+  // PR Sprint D-finish — pain-points chip rail. Same fetch +
+  // shape as the Photo Studio sibling, so the founder gets a
+  // consistent "pick from research" affordance across both studios
+  // without leaving the new-session flow.
+  //
+  // UGC Studio doesn't propagate a painPointId to its session API
+  // (HeyGen V3's chat agent has no concept of painPoints) — the
+  // chip click pre-fills the textarea verbatim, same way the URL
+  // ?painPointId= handoff already does. Less intrusive: zero
+  // backend changes to the existing UGC chat flow.
+  const [painPointOptions, setPainPointOptions] = useState<
+    Array<{
+      id: string;
+      theme: string;
+      frequency: number;
+      sampleQuote: string;
+      actionableAngle: string;
+    }>
+  >([]);
+
   const activeSession = useMemo(
     () => sessions.find((s) => s.id === activeSessionId) ?? null,
     [sessions, activeSessionId],
@@ -229,6 +249,37 @@ export function StudioClient({ projectId }: Props) {
       cancelled = true;
     };
   }, [searchParams, draftPrompt.length]);
+
+  // PR Sprint D-finish — fetch pain points for the chip rail.
+  // Same endpoint + shape as Photo Studio. One fire on mount.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/research/pain-points?projectId=${encodeURIComponent(projectId)}`,
+          { cache: 'no-store' },
+        );
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          painPoints?: Array<{
+            id: string;
+            theme: string;
+            frequency: number;
+            sampleQuote: string;
+            actionableAngle: string;
+          }>;
+        };
+        if (cancelled) return;
+        setPainPointOptions(data.painPoints ?? []);
+      } catch {
+        /* non-fatal — picker just won't show */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
 
   // ─── Load initial session list ─────────────────────────────
   useEffect(() => {
@@ -507,6 +558,89 @@ export function StudioClient({ projectId }: Props) {
               the script, scene composition, and voice picking for
               you.
             </p>
+
+            {/* PR Sprint D-finish — pain-points chip rail.
+                Identical UX to the Photo Studio sibling. Click on
+                a chip pre-fills the textarea with the same seed
+                text the URL handoff uses, and surfaces the
+                "Loaded from" badge below. The UGC chat agent
+                doesn't need a painPointId — it reads context from
+                the textarea like any other free-form brief. */}
+            {painPointOptions.length > 0 && (
+              <div style={{ marginBottom: '14px' }}>
+                <div className="text-[10px] font-mono uppercase tracking-[0.12em] text-text-3 mb-2">
+                  Or pick a pain point from your research
+                </div>
+                <div
+                  style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: '6px',
+                    maxHeight: '110px',
+                    overflowY: 'auto',
+                    paddingRight: '4px',
+                  }}
+                >
+                  {painPointOptions.map((p) => {
+                    const picked = seededFromPainPoint === p.theme;
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => {
+                          const seed = [
+                            `Address this audience pain: "${p.theme}"`,
+                            p.actionableAngle
+                              ? `Angle: ${p.actionableAngle}`
+                              : null,
+                            p.sampleQuote
+                              ? `Real quote from community: "${p.sampleQuote}"`
+                              : null,
+                          ]
+                            .filter(Boolean)
+                            .join('\n\n');
+                          setDraftPrompt(seed);
+                          setSeededFromPainPoint(p.theme);
+                        }}
+                        title={p.sampleQuote ? `"${p.sampleQuote}"` : p.theme}
+                        style={{
+                          fontSize: '11px',
+                          padding: '6px 10px',
+                          borderRadius: '999px',
+                          border: '1px solid',
+                          borderColor: picked
+                            ? 'var(--d-orange)'
+                            : 'var(--border)',
+                          background: picked
+                            ? 'rgba(249,115,22,0.10)'
+                            : 'var(--bg)',
+                          color: picked ? 'var(--text-1)' : 'var(--text-2)',
+                          cursor: 'pointer',
+                          fontFamily: 'inherit',
+                          textAlign: 'left',
+                          maxWidth: '300px',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {p.theme}
+                        <span
+                          style={{
+                            marginLeft: '6px',
+                            fontFamily: 'JetBrains Mono, monospace',
+                            fontSize: '9px',
+                            color: 'var(--text-3)',
+                          }}
+                        >
+                          {p.frequency}×
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* PR Sprint D-8 — context badge when the textarea was
                 pre-filled by a Research → UGC Studio handoff. The
