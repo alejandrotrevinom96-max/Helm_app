@@ -87,8 +87,18 @@ function serialize(row: HeygenAgentSessionRow) {
   return {
     id: row.id,
     heygenSessionId: row.heygenSessionId,
+    // PR Sprint D-bugs-2 — server-built deep-link to HeyGen's
+    // own UI for this session. Surfaced regardless of gate state
+    // so the founder can always pop into HeyGen's storyboard
+    // editor (richer feedback surface than the inline chat).
+    viewInHeygenUrl: row.heygenSessionId
+      ? `https://app.heygen.com/video-agent/${encodeURIComponent(
+          row.heygenSessionId,
+        )}`
+      : null,
     status: surfacedStatus,
     approvalGateActive: gated,
+    approvalGateAt: row.approvalGateAt?.toISOString() ?? null,
     prompt: row.prompt,
     title: row.title,
     styleId: row.styleId,
@@ -201,37 +211,54 @@ async function refreshSession(
     updates.completedAt = new Date();
   }
 
-  // PR Sprint D-bugs (UGC fix) — approval-gate detection.
+  // PR Sprint D-bugs-2 (UGC fix v2) — approval-gate detection,
+  // rewritten.
   //
-  // Scan the freshly merged messages array for HeyGen's "review
-  // this storyboard / let me know" agent message. If found AND
-  // the gate isn't already active AND the founder hasn't sent
-  // ANY message yet, flip the gate so the serializer surfaces
-  // status='reviewing' + hides the video URL.
+  // The original Sprint D-bugs logic required userMessageCount===0
+  // to engage — but HeyGen V3 counts the founder's create-time
+  // prompt as a 'user' message in the thread, so that gate
+  // condition was permanently false and the detector NEVER
+  // engaged on real sessions. That's why videos were
+  // auto-rendering past the gate in test sessions like "Solo
+  // Founders: Ship It!".
   //
-  // Gate is sticky once set — only the POST handler clears it.
-  // We re-detect on every poll (cheap regex on the latest msg)
-  // so even if HeyGen sends multiple agent messages in quick
-  // succession, the first checkpoint trips the gate.
+  // The new rule uses MESSAGE TIMESTAMP, not user count:
+  //
+  //   Engage iff:
+  //     - row.approvalGateActive is currently false, AND
+  //     - the latest agent message matches the checkpoint regex,
+  //       AND
+  //     - that message's created_at is NEWER than the last gate
+  //       transition (approvalGateAt). The POST handler updates
+  //       approvalGateAt when it clears the gate, so we can
+  //       distinguish "stale checkpoint we already saw" from
+  //       "new checkpoint after iteration".
+  //
+  // Net result: gate engages on the FIRST checkpoint regardless
+  // of how many user messages preceded it, and RE-engages after
+  // user iteration when HeyGen produces a new checkpoint.
   if (!row.approvalGateActive) {
     const mergedMessages = isAgentMessageArray(updates.messages)
       ? updates.messages
       : isAgentMessageArray(row.messages)
         ? row.messages
         : [];
-    const userMessageCount = mergedMessages.filter(
-      (m) => m && typeof m === 'object' && m.role === 'user',
-    ).length;
-    // Only gate on the FIRST agent checkpoint, before any
-    // founder input. Once the founder has sent a feedback /
-    // approval message, subsequent agent checkpoints are
-    // expected (HeyGen acknowledging the founder's input) and
-    // shouldn't trigger another gate.
-    if (userMessageCount === 0) {
-      const lastAgentMsg = [...mergedMessages]
-        .reverse()
-        .find((m) => m && typeof m === 'object' && m.role === 'model');
-      if (looksLikeApprovalCheckpoint(lastAgentMsg?.content)) {
+    const lastAgentMsg = [...mergedMessages]
+      .reverse()
+      .find((m) => m && typeof m === 'object' && m.role === 'model');
+    if (looksLikeApprovalCheckpoint(lastAgentMsg?.content)) {
+      // HeyGen returns created_at as a ms-since-epoch number on
+      // each AgentMessage. Cast through unknown so we don't have
+      // to widen the AgentMessageShape interface in this file.
+      const msgCreatedAtMs =
+        typeof (lastAgentMsg as { created_at?: unknown })?.created_at ===
+        'number'
+          ? ((lastAgentMsg as { created_at?: number }).created_at ?? 0)
+          : 0;
+      const lastTransitionMs = row.approvalGateAt?.getTime() ?? 0;
+      const isFreshCheckpoint =
+        msgCreatedAtMs === 0 || msgCreatedAtMs > lastTransitionMs;
+      if (isFreshCheckpoint) {
         updates.approvalGateActive = true;
         updates.approvalGateAt = new Date();
         // Sentry breadcrumb for visibility — lets us tune the
@@ -244,6 +271,8 @@ async function refreshSession(
             rowId: row.id,
             heygenStatus: fresh.status,
             triggerSnippet: (lastAgentMsg?.content ?? '').slice(0, 200),
+            msgCreatedAtMs,
+            lastTransitionMs,
           },
         });
       }
@@ -419,9 +448,18 @@ export async function POST(
   // re-draft).
   const wasGated = row.approvalGateActive === true;
   if (wasGated) {
+    // PR Sprint D-bugs-2 — bump approvalGateAt on clear so the
+    // re-engagement detector (above) knows "this checkpoint
+    // message is stale, don't re-engage on it". Only NEW agent
+    // messages (created_at > approvalGateAt) re-trigger the
+    // gate.
     await db
       .update(heygenAgentSessions)
-      .set({ approvalGateActive: false, updatedAt: new Date() })
+      .set({
+        approvalGateActive: false,
+        approvalGateAt: new Date(),
+        updatedAt: new Date(),
+      })
       .where(eq(heygenAgentSessions.id, row.id));
   }
 

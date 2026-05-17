@@ -32,6 +32,11 @@ interface AgentMessage {
 interface Session {
   id: string;
   heygenSessionId: string;
+  // PR Sprint D-bugs-2 — server-built deep-link to HeyGen's own
+  // editor for this session. Server is source of truth for the
+  // URL pattern (matches the actual /video-agent/{id} path
+  // HeyGen uses on app.heygen.com).
+  viewInHeygenUrl: string | null;
   status:
     | 'thinking'
     | 'waiting_for_input'
@@ -39,6 +44,12 @@ interface Session {
     | 'generating'
     | 'completed'
     | 'failed';
+  // PR Sprint D-bugs-2 — approval gate state. When true, the
+  // surfaced status is forced to 'reviewing' and final-video
+  // URLs are nulled even if HeyGen rendered in the background.
+  // Clears on the next founder POST (feedback or approve).
+  approvalGateActive: boolean;
+  approvalGateAt: string | null;
   prompt: string;
   title: string | null;
   styleId: string | null;
@@ -1176,19 +1187,13 @@ export function StudioClient({ projectId }: Props) {
                       ⬇ SRT
                     </a>
                   )}
-                  {/* PR Sprint D-final — open the draft directly in
-                      HeyGen's own UI. Useful when the founder
-                      wants to give feedback in HeyGen's editor
-                      (richer storyboard editor than our chat
-                      surface). Best-guess URL pattern matching
-                      HeyGen's web app routes — if their actual
-                      URL is different the link still resolves to
-                      the founder's HeyGen dashboard. */}
-                  {activeSession.heygenSessionId && (
+                  {/* PR Sprint D-bugs-2 — server-built URL.
+                      Server owns the path pattern so a future
+                      HeyGen URL change is a one-line server edit
+                      instead of hunting through client code. */}
+                  {activeSession.viewInHeygenUrl && (
                     <a
-                      href={`https://app.heygen.com/video-agents/${encodeURIComponent(
-                        activeSession.heygenSessionId,
-                      )}`}
+                      href={activeSession.viewInHeygenUrl}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="platform-btn platform-btn-ghost"
@@ -1236,16 +1241,13 @@ export function StudioClient({ projectId }: Props) {
                         ? 'Rendering — typically 2-5 min.'
                         : 'Waiting for input.'}
                 </span>
-                {/* PR Sprint D-final — View-in-HeyGen link also
-                    surfaces in the pre-render preview block so
-                    the founder can click through to HeyGen's
-                    storyboard editor while the draft is open. */}
-                {activeSession.heygenSessionId &&
+                {/* PR Sprint D-bugs-2 — server-built URL during
+                    the reviewing checkpoint, so the founder can
+                    pop into HeyGen's storyboard editor. */}
+                {activeSession.viewInHeygenUrl &&
                   activeSession.status === 'reviewing' && (
                     <a
-                      href={`https://app.heygen.com/video-agents/${encodeURIComponent(
-                        activeSession.heygenSessionId,
-                      )}`}
+                      href={activeSession.viewInHeygenUrl}
                       target="_blank"
                       rel="noopener noreferrer"
                       style={{

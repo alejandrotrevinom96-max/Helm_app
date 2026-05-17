@@ -36,10 +36,29 @@ const UUID_RE =
 export const maxDuration = 30;
 
 function serialize(row: HeygenAgentSessionRow) {
+  // PR Sprint D-bugs-2 (UGC fix v2) — match the [id] route's
+  // serializer shape exactly: approval-gate fields + the server-
+  // built viewInHeygenUrl, plus the gated status / videoUrl
+  // overrides so a session that's freshly created with the gate
+  // already set lands at the right UI state from message zero.
+  //
+  // Pre-fix this serializer omitted approvalGateActive entirely
+  // and the create POST returned a session shape that didn't
+  // match the polling GET. The UGC client read undefined and
+  // never showed the approval flow.
+  const gated = row.approvalGateActive === true;
+  const surfacedStatus = gated ? 'reviewing' : row.status;
   return {
     id: row.id,
     heygenSessionId: row.heygenSessionId,
-    status: row.status,
+    viewInHeygenUrl: row.heygenSessionId
+      ? `https://app.heygen.com/video-agent/${encodeURIComponent(
+          row.heygenSessionId,
+        )}`
+      : null,
+    status: surfacedStatus,
+    approvalGateActive: gated,
+    approvalGateAt: row.approvalGateAt?.toISOString() ?? null,
     prompt: row.prompt,
     title: row.title,
     styleId: row.styleId,
@@ -49,11 +68,11 @@ function serialize(row: HeygenAgentSessionRow) {
     messages: row.messages ?? [],
     lastResources: row.lastResources ?? [],
     finalVideoId: row.finalVideoId,
-    finalVideoUrl: row.finalVideoUrl,
-    finalVideoThumbnailUrl: row.finalVideoThumbnailUrl,
-    finalVideoCaptionedUrl: row.finalVideoCaptionedUrl,
-    finalVideoSubtitleUrl: row.finalVideoSubtitleUrl,
-    finalVideoDurationSec: row.finalVideoDurationSec,
+    finalVideoUrl: gated ? null : row.finalVideoUrl,
+    finalVideoThumbnailUrl: gated ? null : row.finalVideoThumbnailUrl,
+    finalVideoCaptionedUrl: gated ? null : row.finalVideoCaptionedUrl,
+    finalVideoSubtitleUrl: gated ? null : row.finalVideoSubtitleUrl,
+    finalVideoDurationSec: gated ? null : row.finalVideoDurationSec,
     errorMessage: row.errorMessage,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
