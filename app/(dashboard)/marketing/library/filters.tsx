@@ -8,13 +8,35 @@
 // structured-draft formats (Reel, Carousel, Thread, etc.). It's a
 // client-side filter so it composes with the existing API-side
 // status/platform/type filters.
+// PR Sprint D-8 Phase 3 — added the modern visual networks (tiktok,
+// instagram_reels, facebook_reels, x) to the dropdown. Pre-D-8 the
+// filter only listed the OG 5 even though the rest of the app
+// already publishes to them. Filtering by tiktok highlighted the
+// drift; fixing it now keeps the dropdown in sync with what
+// AssetGroupCard actually renders.
 const PLATFORMS = [
   'instagram',
+  'instagram_reels',
   'facebook',
+  'facebook_reels',
   'linkedin',
   'threads',
   'reddit',
+  'x',
+  'tiktok',
 ] as const;
+
+const PLATFORM_LABEL: Record<string, string> = {
+  instagram: 'Instagram',
+  instagram_reels: 'Instagram Reels',
+  facebook: 'Facebook',
+  facebook_reels: 'Facebook Reels',
+  linkedin: 'LinkedIn',
+  threads: 'Threads',
+  reddit: 'Reddit',
+  x: 'X (Twitter)',
+  tiktok: 'TikTok',
+};
 
 // Mirrors the seeded `content_types.type` values from
 // scripts/seed-content-types.ts. Plus 'legacy' which targets the
@@ -81,8 +103,8 @@ export function LibraryFilters({ filters, onChange }: Props) {
       >
         <option value="">All platforms</option>
         {PLATFORMS.map((p) => (
-          <option key={p} value={p} className="capitalize">
-            {p}
+          <option key={p} value={p}>
+            {PLATFORM_LABEL[p] ?? p}
           </option>
         ))}
       </select>

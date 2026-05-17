@@ -226,7 +226,11 @@ export function LibraryClient({
   // returns.
   const handleClone = () => {
     setSelectedPost(null);
-    window.location.href = '/marketing/generate';
+    // PR Sprint D-8 Phase 3 — point to the new Photo Studio
+    // route. The legacy /marketing/generate still 301-redirects
+    // here (next.config.mjs), but inline update saves a round-
+    // trip on the bounce.
+    window.location.href = '/marketing/photo-studio';
   };
 
   // PR #24 — Sprint 2.3: when the modal deletes or moves a post to
@@ -311,7 +315,9 @@ export function LibraryClient({
               description={description}
               action={{
                 label: hasAnyFilter ? 'Clear filters' : 'Generate first post',
-                href: hasAnyFilter ? '/marketing/library' : '/marketing/generate',
+                href: hasAnyFilter
+                  ? '/marketing/library'
+                  : '/marketing/photo-studio',
               }}
               icon={
                 <svg
@@ -365,10 +371,17 @@ export function LibraryClient({
                 // detail modal with the FIRST post pre-selected and
                 // the rest stashed as siblings so the embedded
                 // ScheduleModal can offer multi-platform stagger.
+                //
+                // PR Sprint D-8 Phase 3 — pass the active platform
+                // filter for accordion highlight, plus a per-post
+                // open handler so the per-row Edit / Schedule
+                // buttons land in the detail modal with the right
+                // post pre-selected.
                 return (
                   <AssetGroupCard
                     key={`asset:${key}`}
                     posts={groupPosts}
+                    activePlatformFilter={filters.platform}
                     onClick={() => {
                       setSelectedPost(groupPosts[0]);
                       setSelectedSiblings(
@@ -376,6 +389,17 @@ export function LibraryClient({
                           id: p.id,
                           platform: p.platform,
                         })),
+                      );
+                    }}
+                    onOpenPost={(post) => {
+                      setSelectedPost(post);
+                      setSelectedSiblings(
+                        groupPosts
+                          .filter((p) => p.id !== post.id)
+                          .map((p) => ({
+                            id: p.id,
+                            platform: p.platform,
+                          })),
                       );
                     }}
                   />
