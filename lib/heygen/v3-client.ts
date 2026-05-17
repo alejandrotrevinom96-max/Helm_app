@@ -181,7 +181,17 @@ export async function createAgentSession(
   if (input.styleId) body.style_id = input.styleId;
   if (input.orientation) body.orientation = input.orientation;
   if (input.files && input.files.length > 0) body.files = input.files;
-  if (input.autoProceed) body.auto_proceed = input.autoProceed;
+  // PR Sprint D-7 — explicit auto_proceed contract.
+  //
+  // HeyGen V3's Video Agent defaults auto_proceed=TRUE server-side
+  // when the field is omitted. That means a `mode: 'chat'` session
+  // would still auto-render after the agent's first "Ready to
+  // bring this to life?" prompt — silently burning a render the
+  // user never approved. We must send the flag explicitly, always.
+  //
+  //   - autoProceed === true  → straight to render (one-shot)
+  //   - autoProceed !== true  → wait for explicit user approval
+  body.auto_proceed = input.autoProceed === true;
   if (input.callbackUrl) body.callback_url = input.callbackUrl;
   if (input.callbackId) body.callback_id = input.callbackId;
   const r = await v3<AgentSession>('/video-agents', {
@@ -220,7 +230,11 @@ export async function sendAgentMessage(
   const body: Record<string, unknown> = { message: input.message };
   if (input.avatarId) body.avatar_id = input.avatarId;
   if (input.voiceId) body.voice_id = input.voiceId;
-  if (input.autoProceed) body.auto_proceed = input.autoProceed;
+  // Same explicit contract as createAgentSession: HeyGen defaults
+  // auto_proceed=true server-side. We send it explicitly every
+  // time so a "Send feedback" follow-up doesn't accidentally
+  // become "Approve & render".
+  body.auto_proceed = input.autoProceed === true;
   // The endpoint returns { session_id, run_id, title }; we don't
   // need those fields here — the next GET will surface the new
   // model message. Just confirm 200.

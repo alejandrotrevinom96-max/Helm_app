@@ -86,6 +86,34 @@ function isTerminal(s: Session['status']): boolean {
   return s === 'completed' || s === 'failed';
 }
 
+// PR Sprint D-7 — input visibility states.
+//
+// The chat input was previously gated on !isTerminal(), which meant
+// the textarea disappeared the instant the session flipped to
+// 'generating' or 'completed'. When HeyGen auto-rendered (the
+// auto_proceed default bug — fixed server-side in v3-client.ts),
+// the user never even saw the textarea. This helper makes the
+// rules explicit:
+//
+//   'thinking' / 'waiting_for_input' / 'reviewing' → input visible + enabled
+//   'generating' → input visible but DISABLED with a "rendering" hint
+//   'completed' / 'failed' → input hidden (terminal — start a new session
+//                            to iterate; HeyGen V3 doesn't support
+//                            follow-ups on completed agent runs)
+type InputMode = 'enabled' | 'rendering' | 'hidden';
+function inputModeFor(s: Session['status']): InputMode {
+  if (s === 'generating') return 'rendering';
+  if (s === 'completed' || s === 'failed') return 'hidden';
+  return 'enabled';
+}
+
+// PR Sprint D-7 — show quick-action buttons when the agent is
+// explicitly waiting on the founder. These pre-fill the textarea
+// with a starter message the user can tweak before sending.
+function showsApprovalActions(s: Session['status']): boolean {
+  return s === 'reviewing' || s === 'waiting_for_input';
+}
+
 function relativeTime(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
   if (ms < 60_000) return 'just now';
@@ -671,7 +699,16 @@ export function StudioClient({ projectId }: Props) {
               )}
             </div>
 
-            {!isTerminal(activeSession.status) && (
+            {/* PR Sprint D-7 — explicit state-machine for the chat
+                input. Three modes (see inputModeFor()):
+                  - enabled: thinking / waiting_for_input / reviewing
+                  - rendering: 'generating' — disabled with hint
+                  - hidden: terminal (completed / failed)
+                Quick-action approval buttons surface ONLY when the
+                agent is explicitly waiting on user input
+                (status === 'reviewing' | 'waiting_for_input') — see
+                showsApprovalActions(). */}
+            {inputModeFor(activeSession.status) !== 'hidden' && (
               <div
                 style={{
                   marginTop: '12px',
@@ -680,11 +717,68 @@ export function StudioClient({ projectId }: Props) {
                   gap: '8px',
                 }}
               >
+                {/* Quick-action chips — pre-fill the textarea with a
+                    starter; founder edits then sends. Approve is its
+                    own button (not a pre-fill) because it's a
+                    distinct intent that fires autoProceed=true. */}
+                {showsApprovalActions(activeSession.status) && (
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      gap: '6px',
+                      marginBottom: '2px',
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setFollowUp(
+                          'Change the visual style — try something cleaner / more modern.',
+                        )
+                      }
+                      className="platform-btn platform-btn-ghost"
+                      style={{ fontSize: '11px' }}
+                    >
+                      🎨 Change visual style
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setFollowUp(
+                          'Use a different voice — something warmer.',
+                        )
+                      }
+                      className="platform-btn platform-btn-ghost"
+                      style={{ fontSize: '11px' }}
+                    >
+                      🎤 Different voice
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setFollowUp(
+                          'Edit the script: ',
+                        )
+                      }
+                      className="platform-btn platform-btn-ghost"
+                      style={{ fontSize: '11px' }}
+                    >
+                      ✏️ Edit script
+                    </button>
+                  </div>
+                )}
+
                 <textarea
                   value={followUp}
                   onChange={(e) => setFollowUp(e.target.value)}
-                  placeholder="Send feedback or hit Approve to render…"
+                  placeholder={
+                    inputModeFor(activeSession.status) === 'rendering'
+                      ? 'Generating video, hang tight…'
+                      : 'Send feedback or hit Approve to render…'
+                  }
                   rows={2}
+                  disabled={inputModeFor(activeSession.status) === 'rendering'}
                   className="platform-field-input"
                   style={{ resize: 'vertical', minHeight: '52px' }}
                 />
@@ -707,16 +801,23 @@ export function StudioClient({ projectId }: Props) {
                     <button
                       type="button"
                       onClick={() => void sendFollowUp({ autoProceed: false })}
-                      disabled={sending || followUp.trim().length === 0}
+                      disabled={
+                        sending ||
+                        followUp.trim().length === 0 ||
+                        inputModeFor(activeSession.status) === 'rendering'
+                      }
                       className="platform-btn platform-btn-ghost"
                     >
                       {sending ? 'Sending…' : 'Send feedback'}
                     </button>
                     <Button
                       onClick={() => void sendFollowUp({ autoProceed: true })}
-                      disabled={sending}
+                      disabled={
+                        sending ||
+                        inputModeFor(activeSession.status) === 'rendering'
+                      }
                     >
-                      Approve & render
+                      ✓ Approve &amp; render
                     </Button>
                   </div>
                 </div>

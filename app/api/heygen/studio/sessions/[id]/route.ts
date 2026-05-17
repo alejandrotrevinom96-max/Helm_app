@@ -31,6 +31,17 @@ import {
   getFinalVideo,
   type SessionStatus,
 } from '@/lib/heygen/v3-client';
+import * as Sentry from '@sentry/nextjs';
+
+// PR Sprint D-7 — message-shape guard for the unapproved-render
+// telemetry below. HeyGen's messages array is loose-typed (`unknown[]`
+// on the row), so we narrow before we touch it.
+interface AgentMessageShape {
+  role?: string;
+}
+function isAgentMessageArray(v: unknown): v is AgentMessageShape[] {
+  return Array.isArray(v);
+}
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -146,6 +157,49 @@ async function refreshSession(
     !row.completedAt
   ) {
     updates.completedAt = new Date();
+  }
+
+  // PR Sprint D-7 — unapproved-render telemetry.
+  //
+  // Fire ONCE when a session first transitions into 'generating'
+  // (HeyGen has started the render). Check if the user ever sent
+  // a follow-up message — if not, the agent auto-proceeded after
+  // its own "Ready to bring this to life?" prompt without our
+  // approval. This is the bug we're trying to stamp out; logging
+  // it lets us measure how often it still leaks through after
+  // the auto_proceed=false explicit contract lands.
+  //
+  // Gated on row.status (previous local state) so we don't re-fire
+  // on every poll once the session is already generating.
+  if (
+    updates.status === 'generating' &&
+    row.status !== 'generating' &&
+    row.status !== 'completed' &&
+    row.status !== 'failed'
+  ) {
+    const messages = isAgentMessageArray(updates.messages)
+      ? updates.messages
+      : isAgentMessageArray(row.messages)
+        ? row.messages
+        : [];
+    const userMessages = messages.filter(
+      (m) => m && typeof m === 'object' && m.role === 'user',
+    );
+    if (userMessages.length === 0) {
+      Sentry.captureMessage('studio_render_without_approval', {
+        level: 'warning',
+        tags: {
+          area: 'studio',
+          kind: 'auto_render_without_approval',
+        },
+        extra: {
+          rowId: row.id,
+          heygenSessionId: row.heygenSessionId,
+          prompt: row.prompt.slice(0, 200),
+          totalMessages: messages.length,
+        },
+      });
+    }
   }
 
   await db
