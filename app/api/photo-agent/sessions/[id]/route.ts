@@ -30,6 +30,8 @@ import {
   photoAgentSessions,
   contentAssets,
   generatedPosts,
+  projects,
+  researchInsights,
   type PhotoAgentSessionRow,
 } from '@/lib/db/schema';
 import { and, eq } from 'drizzle-orm';
@@ -46,7 +48,141 @@ import {
   regenerateOne,
   type PerPlatformCopy,
 } from '@/lib/photo-agent/copyGenerator';
-import { generateVisual } from '@/lib/visuals/generate';
+import {
+  generateVisual,
+  type VisualResult,
+} from '@/lib/visuals/generate';
+
+// PR Sprint D-finish — pain-point shape for the in-memory lookup
+// below. Same shape as elsewhere; duplicated here so we don't
+// drag the entire research types module into this route.
+interface PainPointShape {
+  id?: string;
+  theme?: string;
+  sampleQuote?: string;
+}
+
+// PR Sprint D-finish — wrap generateVisual with diagnostic env
+// check + pain-point pass-through + Sentry-rich failure surfacing.
+//
+// Why this exists: the bare generateVisual() returns null on every
+// kind of failure (env missing, fal.ai crash, IR pipeline reject,
+// empty image URL) and the founder saw a generic "Visual generation
+// failed" message that gave us nothing to debug. This wrapper:
+//
+//   1. Bails early with a precise message if FAL_API_KEY isn't
+//      configured for the deployment.
+//   2. Fetches the painPoint theme (if the session was seeded
+//      from one) so the IR pipeline path can actually fire —
+//      the IR gate requires painPoint, and without it we silently
+//      fall back to the legacy builder which itself sometimes
+//      returns null on thin concepts.
+//   3. Wraps the call in try/catch + Sentry capture so we see WHY
+//      it failed in Sentry instead of a black-box null.
+//   4. Returns a discriminated union so callers can render the
+//      specific reason in the chat thread.
+async function tryGenerateVisual(args: {
+  concept: string;
+  brandBible: BrandBible | null;
+  assetType: 'photo' | 'carousel' | 'upload' | null;
+  painPointId: string | null;
+  userId: string;
+  rowId: string;
+}): Promise<
+  | { ok: true; visual: VisualResult }
+  | { ok: false; error: string }
+> {
+  if (!process.env.FAL_API_KEY) {
+    Sentry.captureMessage('photo_agent_fal_key_missing', {
+      level: 'error',
+      tags: { area: 'photo-agent', kind: 'env-misconfigured' },
+      extra: { rowId: args.rowId },
+    });
+    return {
+      ok: false,
+      error:
+        'Visual generation is not configured (FAL_API_KEY missing in deployment). Tell your admin to add it in Vercel project env.',
+    };
+  }
+  if (args.concept.trim().length < 12) {
+    return {
+      ok: false,
+      error:
+        'Concept is too thin to render (under 12 chars). Reply with a more specific description first.',
+    };
+  }
+
+  // Fetch the pain point theme if the session was seeded from
+  // one. Required for the IR pipeline path. Best-effort — if the
+  // lookup fails we just fall through to the legacy builder.
+  let painPointTheme: string | null = null;
+  if (args.painPointId) {
+    try {
+      const rows = await db
+        .select({ painPoints: researchInsights.painPoints })
+        .from(researchInsights)
+        .innerJoin(projects, eq(projects.id, researchInsights.projectId))
+        .where(eq(projects.userId, args.userId))
+        .limit(200);
+      for (const row of rows) {
+        const arr = Array.isArray(row.painPoints)
+          ? (row.painPoints as PainPointShape[])
+          : [];
+        const hit = arr.find((p) => p?.id === args.painPointId);
+        if (hit?.theme) {
+          painPointTheme = hit.theme;
+          break;
+        }
+      }
+    } catch {
+      /* non-fatal */
+    }
+  }
+
+  try {
+    const visual = await generateVisual({
+      platform: 'instagram',
+      postContent: args.concept,
+      brandBible: args.brandBible,
+      contentType: args.assetType === 'carousel' ? 'carousel' : 'photo',
+      aspectRatio: args.assetType === 'carousel' ? 'square' : 'portrait',
+      // PR Sprint D-finish — pass painPoint so the IR pipeline
+      // gate fires (it requires painPoint to use the modern
+      // brand-aware builder). When null, generateVisual falls
+      // back to the legacy builder; either path is acceptable
+      // but IR produces visibly better Flux output.
+      painPoint: painPointTheme ?? undefined,
+    });
+    if (!visual) {
+      Sentry.captureMessage('photo_agent_visual_null', {
+        level: 'error',
+        tags: { area: 'photo-agent', kind: 'visual-null' },
+        extra: {
+          rowId: args.rowId,
+          assetType: args.assetType,
+          conceptLen: args.concept.length,
+          hadPainPoint: Boolean(painPointTheme),
+        },
+      });
+      return {
+        ok: false,
+        error:
+          'fal.ai returned no image. Check Sentry for the underlying error — typically Flux rejecting a thin or unsafe concept, or a transient upstream timeout.',
+      };
+    }
+    return { ok: true, visual };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    Sentry.captureException(e, {
+      tags: { area: 'photo-agent', kind: 'visual-threw' },
+      extra: { rowId: args.rowId, assetType: args.assetType },
+    });
+    return {
+      ok: false,
+      error: `Visual generation threw: ${msg.slice(0, 200)}`,
+    };
+  }
+}
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -282,29 +418,40 @@ export async function POST(
             concept: refined.concept,
             messages: nextMessages,
           });
-          // Synchronous fal.ai call — happens inside this request
-          // (maxDuration=60). For longer carousels this could be
-          // queued later; for single photos it's ~6-10s.
-          const visual = await generateVisual({
-            platform: 'instagram',
-            postContent: refined.concept,
+          // PR Sprint D-finish — tryGenerateVisual wraps env check
+          // + painPoint pass-through + Sentry-rich failure
+          // surfacing so the founder sees WHY it failed instead
+          // of a generic "no result" message.
+          const visualResult = await tryGenerateVisual({
+            concept: refined.concept,
             brandBible: bibleSnapshot,
-            contentType: assetType === 'carousel' ? 'carousel' : 'photo',
-            aspectRatio: assetType === 'carousel' ? 'square' : 'portrait',
+            assetType,
+            painPointId: row.painPointId,
+            userId: user.id,
+            rowId: row.id,
           });
-          if (!visual) {
+          if (!visualResult.ok) {
             const failMsg: ChatMessage = {
               role: 'agent',
-              content:
-                '⚠️ Visual generation failed. The Flux pipeline returned no result — start a new session or try a more specific concept.',
+              content: `⚠️ ${visualResult.error}`,
               kind: 'system',
               createdAt: Date.now() + 2,
             };
-            const failed = await transition(generating, 'failed', {
-              messages: [...nextMessages, failMsg],
-              errorMessage: 'fal.ai returned null',
-            });
-            return NextResponse.json({ session: serialize(failed) });
+            // PR Sprint D-finish — DON'T transition to 'failed'
+            // (terminal). Stay in awaiting_type_choice so the
+            // founder can iterate without starting a new session.
+            // Only env-misconfig deserves a hard failed; other
+            // errors are recoverable with a better concept.
+            const isEnvIssue = visualResult.error.includes('FAL_API_KEY');
+            const back = await transition(
+              generating,
+              isEnvIssue ? 'failed' : 'awaiting_type_choice',
+              {
+                messages: [...nextMessages, failMsg],
+                errorMessage: isEnvIssue ? visualResult.error : null,
+              },
+            );
+            return NextResponse.json({ session: serialize(back) });
           }
           const visualMsg: ChatMessage = {
             role: 'agent',
@@ -313,9 +460,9 @@ export async function POST(
             createdAt: Date.now() + 2,
           };
           const fresh = await transition(generating, 'awaiting_visual_feedback', {
-            visualUrl: visual.url,
-            visualWidth: visual.width,
-            visualHeight: visual.height,
+            visualUrl: visualResult.visual.url,
+            visualWidth: visualResult.visual.width,
+            visualHeight: visualResult.visual.height,
             messages: [...nextMessages, visualMsg],
           });
           return NextResponse.json({ session: serialize(fresh) });
@@ -373,20 +520,25 @@ export async function POST(
         }
         breadcrumb('regenerate_visual');
         const generating = await transition(row, 'generating_visual', {});
-        const visual = await generateVisual({
-          platform: 'instagram',
-          postContent: row.concept ?? '',
+        const visualResult = await tryGenerateVisual({
+          concept: row.concept ?? '',
           brandBible: bibleSnapshot,
-          contentType: row.assetType === 'carousel' ? 'carousel' : 'photo',
-          aspectRatio: row.assetType === 'carousel' ? 'square' : 'portrait',
+          assetType: row.assetType as 'photo' | 'carousel' | 'upload' | null,
+          painPointId: row.painPointId,
+          userId: user.id,
+          rowId: row.id,
         });
-        if (!visual) {
+        if (!visualResult.ok) {
           const failMsg: ChatMessage = {
             role: 'agent',
-            content: '⚠️ Regeneration failed. Try a different concept.',
+            content: `⚠️ ${visualResult.error}`,
             kind: 'system',
             createdAt: Date.now(),
           };
+          // Always come back to visual_feedback after a regen
+          // attempt — the founder can iterate via chat or try
+          // again. Even when fal.ai threw, the previous visual
+          // URL is preserved on the row.
           const back = await transition(generating, 'awaiting_visual_feedback', {
             messages: [...messages, failMsg],
           });
@@ -399,9 +551,9 @@ export async function POST(
           createdAt: Date.now(),
         };
         const fresh = await transition(generating, 'awaiting_visual_feedback', {
-          visualUrl: visual.url,
-          visualWidth: visual.width,
-          visualHeight: visual.height,
+          visualUrl: visualResult.visual.url,
+          visualWidth: visualResult.visual.width,
+          visualHeight: visualResult.visual.height,
           messages: [...messages, visualMsg],
         });
         return NextResponse.json({ session: serialize(fresh) });
@@ -765,20 +917,21 @@ export async function POST(
             concept: refined.concept,
             messages: nextMessages,
           });
-          const visual = await generateVisual({
-            platform: 'instagram',
-            postContent: refined.concept,
+          const visualResult = await tryGenerateVisual({
+            concept: refined.concept,
             brandBible: bibleSnapshot,
-            contentType: row.assetType === 'carousel' ? 'carousel' : 'photo',
-            aspectRatio: row.assetType === 'carousel' ? 'square' : 'portrait',
+            assetType: row.assetType as 'photo' | 'carousel' | 'upload' | null,
+            painPointId: row.painPointId,
+            userId: user.id,
+            rowId: row.id,
           });
-          if (!visual) {
+          if (!visualResult.ok) {
             const back = await transition(generating, 'awaiting_visual_feedback', {
               messages: [
                 ...nextMessages,
                 {
                   role: 'agent' as const,
-                  content: '⚠️ Regeneration failed.',
+                  content: `⚠️ ${visualResult.error}`,
                   kind: 'system' as const,
                   createdAt: Date.now() + 2,
                 },
@@ -787,9 +940,9 @@ export async function POST(
             return NextResponse.json({ session: serialize(back) });
           }
           const fresh = await transition(generating, 'awaiting_visual_feedback', {
-            visualUrl: visual.url,
-            visualWidth: visual.width,
-            visualHeight: visual.height,
+            visualUrl: visualResult.visual.url,
+            visualWidth: visualResult.visual.width,
+            visualHeight: visualResult.visual.height,
             messages: [
               ...nextMessages,
               {

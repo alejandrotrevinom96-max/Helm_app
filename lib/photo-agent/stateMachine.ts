@@ -73,7 +73,13 @@ const VALID_TRANSITIONS: Record<PhotoSessionState, Set<PhotoSessionState>> = {
   ]),
   generating_visual: new Set([
     'awaiting_visual_feedback', // fal.ai returned
-    'failed', // fal.ai down or bad result
+    // PR Sprint D-finish — allow falling back to awaiting_type_
+    // choice when fal.ai returns null on a recoverable cause
+    // (thin concept, transient Flux error). The founder iterates
+    // on the concept and re-fires instead of having to start a
+    // brand-new session for what's effectively a "try again".
+    'awaiting_type_choice',
+    'failed', // fal.ai down / env misconfigured / bad result
   ]),
   awaiting_visual_feedback: new Set([
     'generating_visual', // founder asked to regenerate

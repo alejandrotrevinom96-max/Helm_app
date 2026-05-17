@@ -181,17 +181,21 @@ export async function createAgentSession(
   if (input.styleId) body.style_id = input.styleId;
   if (input.orientation) body.orientation = input.orientation;
   if (input.files && input.files.length > 0) body.files = input.files;
-  // PR Sprint D-7 — explicit auto_proceed contract.
+  // PR Sprint D-finish — auto_proceed is only valid on the
+  // SEND-MESSAGE endpoint, NOT on create. The create endpoint of
+  // HeyGen V3's Video Agent rejects unknown fields with "Extra
+  // inputs are not permitted" — that's where my Sprint D-7 fix
+  // overshot. Server-side default for chat-mode sessions is to
+  // wait for input anyway (the auto-render bug we hit before
+  // was actually downstream — first follow-up message dispatched
+  // auto_proceed=true by accident, not the create call).
   //
-  // HeyGen V3's Video Agent defaults auto_proceed=TRUE server-side
-  // when the field is omitted. That means a `mode: 'chat'` session
-  // would still auto-render after the agent's first "Ready to
-  // bring this to life?" prompt — silently burning a render the
-  // user never approved. We must send the flag explicitly, always.
-  //
-  //   - autoProceed === true  → straight to render (one-shot)
-  //   - autoProceed !== true  → wait for explicit user approval
-  body.auto_proceed = input.autoProceed === true;
+  // For session creation: only set auto_proceed when the caller
+  // explicitly wants one-shot (autoProceed=true). Same as the
+  // pre-D-7 conditional. For sendAgentMessage we keep the
+  // explicit contract — that's where the auto-render actually
+  // happens.
+  if (input.autoProceed === true) body.auto_proceed = true;
   if (input.callbackUrl) body.callback_url = input.callbackUrl;
   if (input.callbackId) body.callback_id = input.callbackId;
   const r = await v3<AgentSession>('/video-agents', {
