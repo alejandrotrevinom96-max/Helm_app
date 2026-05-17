@@ -106,6 +106,18 @@ export interface FinalVideo {
 // ─────────────────────────────────────────────────────────────
 // Low-level fetch helper
 // ─────────────────────────────────────────────────────────────
+//
+// PR Sprint D-bugs — every non-200 from HeyGen V3 now lands in
+// Sentry with the request path + sent body + response status +
+// response body (truncated). Pre-fix we only surfaced the upstream
+// error MESSAGE which doesn't include WHICH field HeyGen rejected
+// — so "Extra inputs are not permitted" gave us nothing to act on
+// without manual curl-replay against the API.
+//
+// The Sentry payload is the source of truth for triaging:
+//   tag: area=heygen-v3, kind=http-error
+//   extra: path, sentBody, status, responseBody
+import * as Sentry from '@sentry/nextjs';
 
 async function v3<T>(
   path: string,
@@ -115,6 +127,8 @@ async function v3<T>(
   if (!key) {
     return { ok: false, error: 'HEYGEN_API_KEY not configured' };
   }
+  const sentBodyRaw =
+    typeof init.body === 'string' ? init.body : null;
   try {
     const res = await fetch(`${HEYGEN_V3_BASE}${path}`, {
       ...init,
@@ -125,19 +139,59 @@ async function v3<T>(
         ...(init.headers ?? {}),
       },
     });
-    const body = (await res.json().catch(() => ({}))) as HeygenEnvelope<T>;
+    // Read raw text first so we can log it on error even when JSON
+    // parse fails (HeyGen 5xx pages often return HTML).
+    const rawResponse = await res.text();
+    let body: HeygenEnvelope<T> = {};
+    try {
+      body = rawResponse ? (JSON.parse(rawResponse) as HeygenEnvelope<T>) : {};
+    } catch {
+      /* non-JSON response; rawResponse already captured */
+    }
     if (!res.ok || body.error) {
       const msg =
         body.error?.message ??
         body.message ??
         `HeyGen V3 returned HTTP ${res.status}`;
+      Sentry.captureMessage('heygen_v3_http_error', {
+        level: 'error',
+        tags: {
+          area: 'heygen-v3',
+          kind: 'http-error',
+          method: String(init.method ?? 'GET').toUpperCase(),
+          status: String(res.status),
+        },
+        extra: {
+          path,
+          sentBody: sentBodyRaw?.slice(0, 4000) ?? null,
+          responseStatus: res.status,
+          responseBody: rawResponse.slice(0, 4000),
+          errorMessage: msg,
+        },
+      });
       return { ok: false, error: msg };
     }
     if (!body.data) {
+      Sentry.captureMessage('heygen_v3_empty_data', {
+        level: 'warning',
+        tags: { area: 'heygen-v3', kind: 'empty-data' },
+        extra: {
+          path,
+          sentBody: sentBodyRaw?.slice(0, 4000) ?? null,
+          responseStatus: res.status,
+        },
+      });
       return { ok: false, error: 'HeyGen V3 returned empty data' };
     }
     return { ok: true, data: body.data };
   } catch (e) {
+    Sentry.captureException(e, {
+      tags: { area: 'heygen-v3', kind: 'fetch-threw' },
+      extra: {
+        path,
+        sentBody: sentBodyRaw?.slice(0, 4000) ?? null,
+      },
+    });
     return {
       ok: false,
       error: e instanceof Error ? e.message : 'V3 request failed',

@@ -177,23 +177,45 @@ export async function refineConcept(
     .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
     .join('\n\n');
 
+  // PR Sprint D-bugs — pick out the latest user message so the
+  // system prompt can demand an explicit acknowledgement of what
+  // the founder just said. Pre-fix the agent rendered a generic
+  // "tell me more" loop regardless of how concrete the input
+  // was; founders interpreted that as their input being ignored.
+  const lastUser = [...recent].reverse().find((m) => m.role === 'user');
+
   const system = `You are a visual content director refining a concept for a Flux image-generation pipeline. Output ONLY valid JSON.
 
-Your job:
-- If the chat has enough specificity (subject, mood/palette hint, key composition choice), produce a concise CONCEPT string the Flux prompt-builder can consume. Keep it under 280 chars.
-- If it doesn't, set ready=false and ask ONE clarifying question in chatReply.
+CRITICAL RULES (read these first):
 
-NEVER ask more than one question per turn. NEVER generate when the founder hasn't given specifics — false-positive concepts waste a fal.ai render.
+1. ACKNOWLEDGE the founder's most recent message in chatReply. If they said "metaphorical images with light colors", your chatReply MUST start by paraphrasing that ("Got it — metaphorical, light palette..."). NEVER respond with a generic "Can you tell me more?" — that's the loop bug we're fixing.
+
+2. BE EAGER TO MARK ready=true. The bar is "do I have enough to produce a decent Flux concept?", NOT "do I have a brief good enough to win a design award?". If the founder gives you:
+   - Subject (what the image is OF) + ANY one other hint (mood OR palette OR composition OR metaphor OR audience reference), set ready=true and ship the concept.
+   - A pain point handoff from Research already counts as subject + audience context — that alone is enough to ship.
+   - "carousel about productivity" with no other detail → still ready=true; the concept can be "Carousel about productivity, modern photographic style, warm tones, founder-relatable composition."
+
+3. ONLY return ready=false when the founder has literally given NO subject (e.g. they just said "ok" or "hi" or "make video"). In that single case, ask ONE specific question naming what's missing ("What's the subject — a product, a person, a metaphor?"), not the generic "tell me more".
+
+4. Build the concept by ACCUMULATING context across turns. Each new founder message adds detail to the previous concept; don't reset.
 
 Brand archetype: ${brandArchetype(brandBible)}
-Asset type: ${assetType ?? 'unspecified'}
+Asset type: ${assetType ?? 'unspecified — assume single photo'}
 
 Output schema:
-{"concept": string, "ready": boolean, "chatReply": string}`;
+{"concept": string, "ready": boolean, "chatReply": string}
+- concept: ≤280 chars, ready-to-render description. Include subject + mood + composition cues.
+- ready: true unless the founder literally gave you no subject.
+- chatReply: 1-3 sentences. ALWAYS acknowledge what the founder said. If ready=true, end with "Generating now…" or similar. If ready=false, end with ONE specific question.`;
 
   const userBlock = [
     `Chat thread so far:\n${threadText}`,
-    currentConcept ? `\nPrevious concept (refine this): "${currentConcept}"` : '',
+    currentConcept
+      ? `\nPrevious concept (extend with new detail — don't replace from scratch): "${currentConcept}"`
+      : '',
+    lastUser
+      ? `\nFounder's LATEST message (this is what your chatReply must explicitly acknowledge): "${lastUser.content.slice(0, 500)}"`
+      : '',
     `\nProduce the JSON now.`,
   ].join('\n');
 
@@ -215,12 +237,28 @@ Output schema:
       ready?: boolean;
       chatReply?: string;
     };
+    // PR Sprint D-bugs — if the founder sent at least 2 turns and
+    // the model STILL says ready=false, force-ship anyway. The
+    // worst case is a slightly weaker concept; the previous
+    // behavior was an infinite "tell me more" loop. Cap to 2
+    // turns so a single-message session doesn't bypass the
+    // clarifier on a literal empty input.
+    const userTurns = recent.filter((m) => m.role === 'user').length;
+    const forceShip =
+      userTurns >= 2 &&
+      !Boolean(parsed.ready) &&
+      (String(parsed.concept ?? '').length > 0 ||
+        (currentConcept ?? '').length > 0);
     return {
-      concept: String(parsed.concept ?? '').slice(0, 280),
-      ready: Boolean(parsed.ready),
+      concept: String(
+        parsed.concept ?? currentConcept ?? lastUser?.content ?? '',
+      ).slice(0, 280),
+      ready: Boolean(parsed.ready) || forceShip,
       chatReply:
         String(parsed.chatReply ?? '').trim() ||
-        'Can you tell me more about what you have in mind?',
+        (lastUser
+          ? `Got it — "${lastUser.content.slice(0, 80)}". Generating now…`
+          : 'Generating now…'),
     };
   } catch {
     // Conservative fallback — never auto-generate on classifier
@@ -228,8 +266,9 @@ Output schema:
     return {
       concept: currentConcept ?? '',
       ready: false,
-      chatReply:
-        'I want to make sure I get this right — can you give me one more detail about the mood or composition you have in mind?',
+      chatReply: lastUser
+        ? `Got "${lastUser.content.slice(0, 60)}". What subject should the image show — a product, person, or metaphor?`
+        : 'What subject should the image show — a product, person, or metaphor?',
     };
   }
 }

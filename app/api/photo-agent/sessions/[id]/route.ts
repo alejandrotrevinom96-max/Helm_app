@@ -62,6 +62,40 @@ interface PainPointShape {
   sampleQuote?: string;
 }
 
+// PR Sprint D-bugs — infer asset type from free-form founder
+// text so the message dispatch can advance the state machine
+// without requiring the founder to click a quick-action chip.
+// Pre-fix the awaiting_type_choice message handler dropped free
+// text on the floor (it never called transition with assetType
+// set), which is why "una foto sobre marketing" looped forever.
+function inferAssetTypeFromText(
+  text: string,
+): 'photo' | 'carousel' | 'upload' | null {
+  const t = text.toLowerCase();
+  if (
+    /\b(carousel|carrusel|slides?|slideshow|multi[- ]?image|multiple? images?)\b/.test(
+      t,
+    )
+  ) {
+    return 'carousel';
+  }
+  if (
+    /\b(upload|subir|mi (foto|imagen|asset)|attach|enviar (foto|imagen))\b/.test(
+      t,
+    )
+  ) {
+    return 'upload';
+  }
+  if (
+    /\b(photo|foto|image|imagen|single (photo|image|shot)|just (one|a) (photo|image))\b/.test(
+      t,
+    )
+  ) {
+    return 'photo';
+  }
+  return null;
+}
+
 // PR Sprint D-finish — wrap generateVisual with diagnostic env
 // check + pain-point pass-through + Sentry-rich failure surfacing.
 //
@@ -139,49 +173,101 @@ async function tryGenerateVisual(args: {
     }
   }
 
-  try {
-    const visual = await generateVisual({
-      platform: 'instagram',
-      postContent: args.concept,
-      brandBible: args.brandBible,
-      contentType: args.assetType === 'carousel' ? 'carousel' : 'photo',
-      aspectRatio: args.assetType === 'carousel' ? 'square' : 'portrait',
-      // PR Sprint D-finish — pass painPoint so the IR pipeline
-      // gate fires (it requires painPoint to use the modern
-      // brand-aware builder). When null, generateVisual falls
-      // back to the legacy builder; either path is acceptable
-      // but IR produces visibly better Flux output.
-      painPoint: painPointTheme ?? undefined,
-    });
-    if (!visual) {
-      Sentry.captureMessage('photo_agent_visual_null', {
-        level: 'error',
-        tags: { area: 'photo-agent', kind: 'visual-null' },
+  // PR Sprint D-bugs — single-shot retry with 2s backoff.
+  // Most fal.ai null returns we see are transient (Flux server
+  // hiccups, rate-limit blips). A second try almost always
+  // succeeds; the cost of one extra attempt is ~$0.05.
+  //
+  // Each attempt's failure mode + duration is captured to
+  // Sentry so we can tell flaky fal.ai from a systemic concept
+  // problem when triaging.
+  const callOnce = async (
+    attemptIdx: number,
+  ): Promise<
+    | { ok: true; visual: VisualResult }
+    | { ok: false; error: string; threw: boolean }
+  > => {
+    const t0 = Date.now();
+    try {
+      const visual = await generateVisual({
+        platform: 'instagram',
+        postContent: args.concept,
+        brandBible: args.brandBible,
+        contentType: args.assetType === 'carousel' ? 'carousel' : 'photo',
+        aspectRatio: args.assetType === 'carousel' ? 'square' : 'portrait',
+        // PR Sprint D-finish — pass painPoint so the IR pipeline
+        // gate fires (it requires painPoint to use the modern
+        // brand-aware builder). When null, generateVisual falls
+        // back to the legacy builder; either path is acceptable
+        // but IR produces visibly better Flux output.
+        painPoint: painPointTheme ?? undefined,
+      });
+      if (!visual) {
+        Sentry.captureMessage('photo_agent_visual_null', {
+          level: 'error',
+          tags: {
+            area: 'photo-agent',
+            kind: 'visual-null',
+            attempt: String(attemptIdx),
+          },
+          extra: {
+            rowId: args.rowId,
+            assetType: args.assetType,
+            conceptLen: args.concept.length,
+            concept: args.concept.slice(0, 1000),
+            hadPainPoint: Boolean(painPointTheme),
+            painPointTheme: painPointTheme?.slice(0, 200) ?? null,
+            elapsedMs: Date.now() - t0,
+          },
+        });
+        return {
+          ok: false,
+          error:
+            'fal.ai returned no image. Check Sentry tag area=photo-agent kind=visual-null for the prompt that was sent.',
+          threw: false,
+        };
+      }
+      return { ok: true, visual };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      Sentry.captureException(e, {
+        tags: {
+          area: 'photo-agent',
+          kind: 'visual-threw',
+          attempt: String(attemptIdx),
+        },
         extra: {
           rowId: args.rowId,
           assetType: args.assetType,
           conceptLen: args.concept.length,
+          concept: args.concept.slice(0, 1000),
           hadPainPoint: Boolean(painPointTheme),
+          elapsedMs: Date.now() - t0,
         },
       });
       return {
         ok: false,
-        error:
-          'fal.ai returned no image. Check Sentry for the underlying error — typically Flux rejecting a thin or unsafe concept, or a transient upstream timeout.',
+        error: `Visual generation threw: ${msg.slice(0, 200)}`,
+        threw: true,
       };
     }
-    return { ok: true, visual };
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    Sentry.captureException(e, {
-      tags: { area: 'photo-agent', kind: 'visual-threw' },
-      extra: { rowId: args.rowId, assetType: args.assetType },
-    });
-    return {
-      ok: false,
-      error: `Visual generation threw: ${msg.slice(0, 200)}`,
-    };
-  }
+  };
+
+  const first = await callOnce(1);
+  if (first.ok) return first;
+  // Don't retry on env / config errors — the second call would
+  // fail the same way. Only retry on null returns / network
+  // throws; those are typically transient.
+  await new Promise((r) => setTimeout(r, 2000));
+  const second = await callOnce(2);
+  if (second.ok) return second;
+  // Surface a slightly different message after two failures so
+  // the founder knows we already tried twice.
+  return {
+    ok: false,
+    error:
+      'Visual generation failed twice. Either Flux is having a moment or the concept needs more specifics. Try again, or refine.',
+  };
 }
 
 const UUID_RE =
@@ -437,15 +523,14 @@ export async function POST(
               kind: 'system',
               createdAt: Date.now() + 2,
             };
-            // PR Sprint D-finish — DON'T transition to 'failed'
-            // (terminal). Stay in awaiting_type_choice so the
-            // founder can iterate without starting a new session.
-            // Only env-misconfig deserves a hard failed; other
-            // errors are recoverable with a better concept.
+            // PR Sprint D-bugs — dedicated recovery state
+            // visual_failed lets the UI show Try Again + Refine
+            // Concept chips. Env-misconfig still goes to terminal
+            // 'failed' (no point retrying without the key).
             const isEnvIssue = visualResult.error.includes('FAL_API_KEY');
             const back = await transition(
               generating,
-              isEnvIssue ? 'failed' : 'awaiting_type_choice',
+              isEnvIssue ? 'failed' : 'visual_failed',
               {
                 messages: [...nextMessages, failMsg],
                 errorMessage: isEnvIssue ? visualResult.error : null,
@@ -557,6 +642,82 @@ export async function POST(
           messages: [...messages, visualMsg],
         });
         return NextResponse.json({ session: serialize(fresh) });
+      }
+
+      // PR Sprint D-bugs — 3.5. retry_visual + refine_concept:
+      // recovery actions out of the visual_failed state. retry
+      // re-fires generateVisual with the same concept; refine
+      // sends the session back to awaiting_type_choice so the
+      // founder can adjust the concept via chat before re-trying.
+      if (action === 'retry_visual') {
+        if (currentState !== 'visual_failed') {
+          return NextResponse.json(
+            { error: `Cannot retry from state ${currentState}` },
+            { status: 409 },
+          );
+        }
+        breadcrumb('retry_visual');
+        const generating = await transition(row, 'generating_visual', {});
+        const visualResult = await tryGenerateVisual({
+          concept: row.concept ?? '',
+          brandBible: bibleSnapshot,
+          assetType: row.assetType as 'photo' | 'carousel' | 'upload' | null,
+          painPointId: row.painPointId,
+          userId: user.id,
+          rowId: row.id,
+        });
+        if (!visualResult.ok) {
+          const failMsg: ChatMessage = {
+            role: 'agent',
+            content: `⚠️ ${visualResult.error}`,
+            kind: 'system',
+            createdAt: Date.now(),
+          };
+          const isEnvIssue = visualResult.error.includes('FAL_API_KEY');
+          const back = await transition(
+            generating,
+            isEnvIssue ? 'failed' : 'visual_failed',
+            {
+              messages: [...messages, failMsg],
+              errorMessage: isEnvIssue ? visualResult.error : null,
+            },
+          );
+          return NextResponse.json({ session: serialize(back) });
+        }
+        const visualMsg: ChatMessage = {
+          role: 'agent',
+          content: 'Retry worked — here\'s the new visual.',
+          kind: 'visual',
+          createdAt: Date.now(),
+        };
+        const fresh = await transition(generating, 'awaiting_visual_feedback', {
+          visualUrl: visualResult.visual.url,
+          visualWidth: visualResult.visual.width,
+          visualHeight: visualResult.visual.height,
+          messages: [...messages, visualMsg],
+        });
+        return NextResponse.json({ session: serialize(fresh) });
+      }
+
+      if (action === 'refine_concept') {
+        if (currentState !== 'visual_failed') {
+          return NextResponse.json(
+            { error: `Cannot refine from state ${currentState}` },
+            { status: 409 },
+          );
+        }
+        breadcrumb('refine_concept');
+        const agentMsg: ChatMessage = {
+          role: 'agent',
+          content:
+            'OK — tell me what to change about the concept and I\'ll try again.',
+          kind: 'text',
+          createdAt: Date.now(),
+        };
+        const back = await transition(row, 'awaiting_type_choice', {
+          messages: [...messages, agentMsg],
+        });
+        return NextResponse.json({ session: serialize(back) });
       }
 
       // 4. set_platforms → update the platforms array without
@@ -990,13 +1151,27 @@ export async function POST(
       //   - awaiting_platform_choice + free text → ask the founder
       //     to use the chip rail to confirm
       if (currentState === 'awaiting_type_choice') {
-        // Try to interpret the message as a type pick + concept
-        // refinement in one shot.
+        // PR Sprint D-bugs — full message handler now mirrors the
+        // pick_type ACTION dispatch. Three things changed:
+        //   1. inferAssetTypeFromText() pulls the type ("carousel"
+        //      etc) out of free text so the founder doesn't HAVE
+        //      to click a chip.
+        //   2. refineConcept's stricter "ack the founder" + force-
+        //      ship-after-2-turns means ready=true fires reliably
+        //      on real input.
+        //   3. When ready=true, fire generateVisual + transition
+        //      to awaiting_visual_feedback (or visual_failed on
+        //      Flux failure) — same paths the action handler uses.
+        const inferredType = inferAssetTypeFromText(text);
+        const assetType =
+          (row.assetType as 'photo' | 'carousel' | 'upload' | null) ??
+          inferredType ??
+          'photo';
         const refined = await refineConcept({
           brandBible: bibleSnapshot,
           messages: [...messages, userMsg],
           currentConcept: row.concept ?? null,
-          assetType: (row.assetType as 'photo' | 'carousel' | 'upload') ?? 'photo',
+          assetType,
         });
         const agentMsg: ChatMessage = {
           role: 'agent',
@@ -1004,8 +1179,66 @@ export async function POST(
           kind: 'text',
           createdAt: Date.now() + 1,
         };
+        const nextMessages = [...messages, userMsg, agentMsg];
+
+        if (refined.ready && refined.concept) {
+          breadcrumb(`message_advance assetType=${assetType}`);
+          const generating = await transition(row, 'generating_visual', {
+            assetType,
+            concept: refined.concept,
+            messages: nextMessages,
+          });
+          const visualResult = await tryGenerateVisual({
+            concept: refined.concept,
+            brandBible: bibleSnapshot,
+            assetType,
+            painPointId: row.painPointId,
+            userId: user.id,
+            rowId: row.id,
+          });
+          if (!visualResult.ok) {
+            const failMsg: ChatMessage = {
+              role: 'agent',
+              content: `⚠️ ${visualResult.error}`,
+              kind: 'system',
+              createdAt: Date.now() + 2,
+            };
+            const isEnvIssue = visualResult.error.includes('FAL_API_KEY');
+            const back = await transition(
+              generating,
+              isEnvIssue ? 'failed' : 'visual_failed',
+              {
+                messages: [...nextMessages, failMsg],
+                errorMessage: isEnvIssue ? visualResult.error : null,
+              },
+            );
+            return NextResponse.json({ session: serialize(back) });
+          }
+          const visualMsg: ChatMessage = {
+            role: 'agent',
+            content: `Here's the first take. Tap a chip to iterate, type freely, or approve to move on to platforms.`,
+            kind: 'visual',
+            createdAt: Date.now() + 2,
+          };
+          const fresh = await transition(
+            generating,
+            'awaiting_visual_feedback',
+            {
+              visualUrl: visualResult.visual.url,
+              visualWidth: visualResult.visual.width,
+              visualHeight: visualResult.visual.height,
+              messages: [...nextMessages, visualMsg],
+            },
+          );
+          return NextResponse.json({ session: serialize(fresh) });
+        }
+
+        // Not enough info yet — stay in awaiting_type_choice but
+        // PERSIST the inferred assetType so the chat doesn't lose
+        // it on the next turn.
         const next = await transition(row, 'awaiting_type_choice', {
-          messages: [...messages, userMsg, agentMsg],
+          assetType,
+          messages: nextMessages,
         });
         return NextResponse.json({ session: serialize(next) });
       }

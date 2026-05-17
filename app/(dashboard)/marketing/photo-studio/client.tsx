@@ -77,6 +77,7 @@ const STATE_LABEL: Record<PhotoSessionState, string> = {
   awaiting_platform_choice: 'Pick platforms',
   generating_copies: 'Writing captions…',
   awaiting_copy_feedback: 'Review captions',
+  visual_failed: 'Visual failed — retry?',
   finalized: 'Saved',
   failed: 'Failed',
 };
@@ -89,6 +90,7 @@ const STATE_COLOR: Record<PhotoSessionState, string> = {
   awaiting_platform_choice: 'var(--accent)',
   generating_copies: 'var(--accent)',
   awaiting_copy_feedback: 'var(--accent)',
+  visual_failed: 'var(--d-red-2)',
   finalized: 'var(--d-green-2)',
   failed: 'var(--d-red-2)',
 };
@@ -790,6 +792,21 @@ function ActiveSessionPanel({
     }
     if (a.intent === 'approve' && session.state === 'awaiting_copy_feedback') {
       void sendAction({ kind: 'action', action: 'approve_copies' });
+      return;
+    }
+    // PR Sprint D-bugs — visual_failed recovery chips. "Try
+    // again" maps to retry_visual (same concept), "Refine
+    // concept first" maps to refine_concept (back to chat for
+    // adjustment, then re-fire).
+    if (a.intent === 'approve' && session.state === 'visual_failed') {
+      void sendAction({ kind: 'action', action: 'retry_visual' });
+      return;
+    }
+    if (
+      session.state === 'visual_failed' &&
+      a.label.includes('Refine concept')
+    ) {
+      void sendAction({ kind: 'action', action: 'refine_concept' });
       return;
     }
     // Everything else: pre-fill the input so the founder can tweak

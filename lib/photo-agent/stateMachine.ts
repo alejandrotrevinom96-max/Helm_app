@@ -36,7 +36,15 @@ export type PhotoSessionState =
   | 'awaiting_copy_feedback'
   // Saved into Library; the session is read-only.
   | 'finalized'
-  // Unrecoverable error (fal.ai down, Claude error, etc.) —
+  // PR Sprint D-bugs — dedicated recovery state when fal.ai
+  // returns null / errors but the session is otherwise healthy
+  // (concept set, asset type picked, brand bible loaded).
+  // Differs from 'failed' (terminal) by being RECOVERABLE: the
+  // founder can hit Try Again, refine the concept, or chat to
+  // unblock. Lives between generating_visual and either back to
+  // generating_visual (retry) or awaiting_type_choice (refine).
+  | 'visual_failed'
+  // Unrecoverable error (env misconfigured, schema bug, etc.) —
   // founder gets a "start over" affordance.
   | 'failed';
 
@@ -73,13 +81,19 @@ const VALID_TRANSITIONS: Record<PhotoSessionState, Set<PhotoSessionState>> = {
   ]),
   generating_visual: new Set([
     'awaiting_visual_feedback', // fal.ai returned
-    // PR Sprint D-finish — allow falling back to awaiting_type_
-    // choice when fal.ai returns null on a recoverable cause
-    // (thin concept, transient Flux error). The founder iterates
-    // on the concept and re-fires instead of having to start a
-    // brand-new session for what's effectively a "try again".
+    // PR Sprint D-bugs — visual_failed replaces the previous
+    // awaiting_type_choice fallback. Stale-state ("you already
+    // picked a type") was confusing the founder; the dedicated
+    // failure state has its own Try-Again chip + chat UI.
+    'visual_failed',
+    'failed', // env misconfigured / unrecoverable
+  ]),
+  visual_failed: new Set([
+    // Try again with the same concept.
+    'generating_visual',
+    // Refine the concept first — back to chatting.
     'awaiting_type_choice',
-    'failed', // fal.ai down / env misconfigured / bad result
+    'failed',
   ]),
   awaiting_visual_feedback: new Set([
     'generating_visual', // founder asked to regenerate
@@ -133,6 +147,8 @@ export function inputModeFor(state: PhotoSessionState): InputUiMode {
   if (state === 'finalized' || state === 'failed') {
     return 'hidden';
   }
+  // visual_failed is RECOVERABLE — input enabled so the founder
+  // can refine the concept inline without restarting the session.
   return 'enabled';
 }
 
@@ -156,6 +172,14 @@ export function quickActionsFor(state: PhotoSessionState): QuickAction[] {
         { label: '📸 Single photo', seed: 'A single photo', intent: 'pick_type' },
         { label: '📑 Carousel', seed: 'A carousel (5-7 slides)', intent: 'pick_type' },
         { label: '📤 Upload my asset', seed: 'I want to upload my own photo', intent: 'pick_type' },
+      ];
+    case 'visual_failed':
+      return [
+        // PR Sprint D-bugs — recovery affordances. Try again uses
+        // the same concept (retry); Refine concept reopens the
+        // chat so the founder can change what they want.
+        { label: '🔄 Try again', seed: 'Try generating again with the same concept.', intent: 'approve' },
+        { label: '✏️ Refine concept first', seed: 'Let me refine the concept: ' },
       ];
     case 'awaiting_visual_feedback':
       return [
