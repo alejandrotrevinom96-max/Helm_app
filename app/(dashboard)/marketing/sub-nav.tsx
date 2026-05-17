@@ -10,15 +10,20 @@ interface SubNavItem {
   comingSoon?: boolean;
 }
 
+// PR Sprint D-8 — tab rename. "Generate" → "Photo Studio" frames
+// the surface around the kind of asset (images / carousels), and
+// "Studio" → "UGC Studio" disambiguates it from the new photo
+// flow now that there are two studio paradigms. Calendar +
+// Library unchanged.
 const SUB_NAV_ITEMS: SubNavItem[] = [
   {
-    name: 'Generate',
-    href: '/marketing/generate',
-    description: 'Create new posts',
+    name: 'Photo Studio',
+    href: '/marketing/photo-studio',
+    description: 'Carousels, photos, product shots',
   },
   {
-    name: 'Studio',
-    href: '/marketing/studio',
+    name: 'UGC Studio',
+    href: '/marketing/ugc-studio',
     description: 'Chat with the video agent',
   },
   {
@@ -47,7 +52,10 @@ export function MarketingSubNav() {
       {SUB_NAV_ITEMS.map((item) => {
         const isActive =
           pathname === item.href ||
-          (item.href === '/marketing/generate' && pathname === '/marketing');
+          // /marketing (bare URL) lands on Photo Studio because the
+          // page.tsx server redirect targets the new route name.
+          (item.href === '/marketing/photo-studio' &&
+            pathname === '/marketing');
 
         return (
           <Link

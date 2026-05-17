@@ -134,10 +134,70 @@ export function AssetGeneratePanel({ projectId }: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const incomingPrompt = searchParams.get('prompt') ?? '';
+  // PR Sprint D-8 — Research → Photo Studio handoff. When the
+  // founder clicks "Send to: Photo Studio" on a PainPointCard,
+  // the URL carries ?painPointId=<uuid>. We fetch the full
+  // pain-point row server-side and compose a richer seed than
+  // the legacy ?prompt= flow could carry inline (because URLs
+  // truncate, and theme + quote + angle together blow past the
+  // safe-URL length on many networks). The fetch runs in the
+  // useEffect below — initial prompt state stays on the legacy
+  // ?prompt= path so older Research links don't regress.
+  const incomingPainPointId = searchParams.get('painPointId') ?? '';
 
   const [assetType, setAssetType] = useState<AssetType | null>(null);
   const [selectedPlatforms, setSelectedPlatforms] = useState<Platform[]>([]);
   const [prompt, setPrompt] = useState<string>(() => incomingPrompt);
+  // Mirror of the UGC Studio "Loaded from pain point" hint so the
+  // founder sees why the prompt textarea was pre-filled.
+  const [seededFromPainPoint, setSeededFromPainPoint] = useState<
+    string | null
+  >(null);
+
+  // PR Sprint D-8 — pain-point fetch + prompt seed effect.
+  // Guards against clobbering in-progress typing — only seeds
+  // when the prompt is still empty (i.e. the legacy ?prompt= path
+  // didn't already fill it).
+  useEffect(() => {
+    if (!incomingPainPointId) return;
+    if (prompt.trim().length > 0) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/research/pain-points/${encodeURIComponent(incomingPainPointId)}`,
+          { cache: 'no-store' },
+        );
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          painPoint?: {
+            theme: string;
+            sampleQuote: string;
+            actionableAngle: string;
+          };
+        };
+        if (cancelled || !data.painPoint) return;
+        const { theme, sampleQuote, actionableAngle } = data.painPoint;
+        const seed = [
+          `Address this audience pain: "${theme}"`,
+          actionableAngle ? `Angle: ${actionableAngle}` : null,
+          sampleQuote ? `Real quote from community: "${sampleQuote}"` : null,
+        ]
+          .filter(Boolean)
+          .join('\n\n');
+        setPrompt(seed);
+        setSeededFromPainPoint(theme);
+      } catch {
+        /* non-fatal — founder can still type their own brief */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // prompt.length intentionally not in deps — we only want to
+    // run this once per painPointId, not on every keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [incomingPainPointId]);
   const [phase, setPhase] = useState<Phase>('idle');
   const [error, setError] = useState<string | null>(null);
 
@@ -524,15 +584,48 @@ export function AssetGeneratePanel({ projectId }: Props) {
           >
             3. What should it be about?
           </label>
+          {/* PR Sprint D-8 — pain-point context badge. Same idea as
+              the UGC Studio's "Loaded from pain point" hint: tell
+              the founder why the textarea pre-filled, and clear it
+              when they start editing so the label can't lie about
+              the current text. */}
+          {seededFromPainPoint && (
+            <div
+              style={{
+                marginBottom: '8px',
+                padding: '6px 10px',
+                borderRadius: '6px',
+                background: 'rgba(249,115,22,0.08)',
+                border: '1px solid rgba(249,115,22,0.25)',
+                fontSize: '11px',
+                color: 'var(--text-2)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+              }}
+            >
+              <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>
+                📥 Loaded from pain point:
+              </span>
+              <span style={{ fontWeight: 600, color: 'var(--text-1)' }}>
+                {seededFromPainPoint}
+              </span>
+            </div>
+          )}
           <textarea
             id="asset-prompt"
             value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
+            onChange={(e) => {
+              setPrompt(e.target.value);
+              // Drop the seed badge on first edit — same UX as
+              // the UGC Studio variant.
+              if (seededFromPainPoint) setSeededFromPainPoint(null);
+            }}
             placeholder="Describe what this asset should cover. Brand bible + voice fingerprint load automatically."
             rows={4}
             className="w-full px-3 py-2 bg-bg border border-border rounded-lg text-sm placeholder:text-text-3 focus:outline-none focus:border-border-bright resize-none"
           />
-          {incomingPrompt && (
+          {incomingPrompt && !seededFromPainPoint && (
             <p className="text-[11px] text-text-3 mt-1.5">
               ✦ Pre-filled from Research pain point
             </p>

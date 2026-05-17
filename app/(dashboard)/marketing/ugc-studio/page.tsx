@@ -1,8 +1,12 @@
-// PR Sprint D-2 — Studio page (HeyGen V3 Video Agent chat-mode).
+// PR Sprint D-2 — UGC Studio page (V3 Video Agent chat-mode).
+// PR Sprint D-8 — route renamed from /marketing/studio to
+// /marketing/ugc-studio (Photo Studio is the new sibling tab for
+// images / carousels). next.config.mjs 301-redirects the legacy
+// path so external links keep resolving.
 //
 // Server entry — resolves the active project + auth, hands off
-// to the StudioClient. Same shell pattern as Generate / Library
-// / Calendar.
+// to the StudioClient. Same shell pattern as Photo Studio /
+// Library / Calendar.
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { getActiveProject } from '@/lib/active-project';

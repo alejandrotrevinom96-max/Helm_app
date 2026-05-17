@@ -47,6 +47,13 @@ const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 interface PainPoint {
+  // PR Sprint D-8 — stable UUID per pain point. Lets the
+  // PainPointCard route to /marketing/photo-studio?painPointId=…
+  // and /marketing/ugc-studio?painPointId=… (so the studio agent
+  // can fetch the full pain point context server-side) AND opens
+  // the door to future analytics by-niche / by-theme without
+  // re-deriving identity from a fragile theme-string hash.
+  id: string;
   theme: string;
   frequency: number;
   sampleQuote: string;
@@ -236,6 +243,11 @@ Extract on-domain pain themes that repeat. JSON only.`;
     ? parsed.painPoints
         .filter((p) => p && typeof p === 'object' && p.isOnDomain !== false)
         .map((p) => ({
+          // PR Sprint D-8 — stable id per pain point. Generated
+          // here so the value persists through the angle-gen
+          // round-trip below and lands in the DB unchanged.
+          // crypto.randomUUID is on Node 19+ and on Edge runtime.
+          id: crypto.randomUUID(),
           theme: String(p.theme ?? '').slice(0, 80),
           frequency: Math.max(2, Math.min(99, Number(p.frequency) || 2)),
           sampleQuote: String(p.sampleQuote ?? '').slice(0, 200),

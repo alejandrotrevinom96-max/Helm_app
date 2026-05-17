@@ -148,6 +148,30 @@ const nextConfig = {
       },
     ];
   },
+  // PR Sprint D-8 — permanent route renames. /marketing/generate
+  // became /marketing/photo-studio when the Marketing surface split
+  // into the two-studio paradigm (Photo Studio for images / carousels,
+  // UGC Studio for chat-mode video). Same idea for /marketing/studio
+  // → /marketing/ugc-studio. 301 (permanent=true) so search engines,
+  // browser histories, and any external bookmarks update once and
+  // for all instead of every visitor paying a 302 round-trip.
+  //
+  // Query strings are preserved by Next.js by default — ?prompt=…
+  // and ?painPointId=… both flow through the redirect untouched.
+  async redirects() {
+    return [
+      {
+        source: '/marketing/generate',
+        destination: '/marketing/photo-studio',
+        permanent: true,
+      },
+      {
+        source: '/marketing/studio',
+        destination: '/marketing/ugc-studio',
+        permanent: true,
+      },
+    ];
+  },
 };
 
 export default withSentryConfig(nextConfig, {

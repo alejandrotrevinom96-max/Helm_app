@@ -16,6 +16,7 @@
 // manual refresh.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 
 import { GlassCard } from '@/components/ui/glass-card';
 import { Button } from '@/components/ui/button';
@@ -137,10 +138,22 @@ export function StudioClient({ projectId }: Props) {
   const [error, setError] = useState<string | null>(null);
 
   // New-session draft state.
+  // PR Sprint D-8 — seeded from URL params (?prompt= or
+  // ?painPointId=) so deep-links from Research land with the
+  // composer pre-filled. The seeding logic lives in the useEffect
+  // below — initial state is an empty string so React doesn't
+  // render the textarea with a stale snapshot before the param
+  // resolves.
   const [draftPrompt, setDraftPrompt] = useState('');
   const [draftStyleId, setDraftStyleId] = useState<string | null>(null);
   const [draftOrientation, setDraftOrientation] =
     useState<'portrait' | 'landscape'>('portrait');
+  // PR Sprint D-8 — surface "loaded from pain point" hint so the
+  // founder knows the textarea isn't their own typing. Cleared
+  // once they edit.
+  const [seededFromPainPoint, setSeededFromPainPoint] = useState<
+    string | null
+  >(null);
 
   // Follow-up message draft.
   const [followUp, setFollowUp] = useState('');
@@ -153,6 +166,69 @@ export function StudioClient({ projectId }: Props) {
     () => sessions.find((s) => s.id === activeSessionId) ?? null,
     [sessions, activeSessionId],
   );
+
+  // ─── Seed draft prompt from URL params (Sprint D-8) ────────
+  //
+  // Two entry vectors from Research:
+  //   ?prompt=…         — legacy fallback (used when a pain point
+  //                       predates the D-8 id backfill). Set the
+  //                       textarea verbatim.
+  //   ?painPointId=…    — preferred. Fetch the full pain-point
+  //                       row server-side, compose a richer
+  //                       starter that quotes the theme + sample
+  //                       so the founder can shape the video
+  //                       brief around real audience words.
+  //
+  // Effect runs once on mount + whenever the params change. Guard
+  // against overwriting in-progress typing: only seed if
+  // draftPrompt is still empty.
+  const searchParams = useSearchParams();
+  useEffect(() => {
+    if (draftPrompt.length > 0) return;
+    const prompt = searchParams.get('prompt');
+    const painPointId = searchParams.get('painPointId');
+    if (prompt) {
+      setDraftPrompt(prompt);
+      return;
+    }
+    if (!painPointId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/research/pain-points/${encodeURIComponent(painPointId)}`,
+          { cache: 'no-store' },
+        );
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          painPoint?: {
+            theme: string;
+            sampleQuote: string;
+            actionableAngle: string;
+          };
+        };
+        if (cancelled || !data.painPoint) return;
+        const { theme, sampleQuote, actionableAngle } = data.painPoint;
+        // Compose a UGC-ready brief. The video agent reads this
+        // verbatim as the founder's initial prompt — keep it
+        // narrative, not a checklist.
+        const seed = [
+          `Address this audience pain: "${theme}"`,
+          actionableAngle ? `Angle: ${actionableAngle}` : null,
+          sampleQuote ? `Real quote from community: "${sampleQuote}"` : null,
+        ]
+          .filter(Boolean)
+          .join('\n\n');
+        setDraftPrompt(seed);
+        setSeededFromPainPoint(theme);
+      } catch {
+        /* non-fatal — founder can still type their own brief */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [searchParams, draftPrompt.length]);
 
   // ─── Load initial session list ─────────────────────────────
   useEffect(() => {
@@ -432,9 +508,43 @@ export function StudioClient({ projectId }: Props) {
               you.
             </p>
 
+            {/* PR Sprint D-8 — context badge when the textarea was
+                pre-filled by a Research → UGC Studio handoff. The
+                badge stays visible until the founder edits the
+                seed, at which point it's no longer accurate. */}
+            {seededFromPainPoint && (
+              <div
+                style={{
+                  marginBottom: '10px',
+                  padding: '8px 12px',
+                  borderRadius: '8px',
+                  background: 'rgba(249,115,22,0.08)',
+                  border: '1px solid rgba(249,115,22,0.25)',
+                  fontSize: '11px',
+                  color: 'var(--text-2)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                }}
+              >
+                <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>
+                  📥 Loaded from pain point:
+                </span>
+                <span style={{ fontWeight: 600, color: 'var(--text-1)' }}>
+                  {seededFromPainPoint}
+                </span>
+              </div>
+            )}
+
             <textarea
               value={draftPrompt}
-              onChange={(e) => setDraftPrompt(e.target.value)}
+              onChange={(e) => {
+                setDraftPrompt(e.target.value);
+                // First keystroke means the founder is rewriting
+                // the seed — drop the "loaded from" badge so it
+                // doesn't lie about the current text.
+                if (seededFromPainPoint) setSeededFromPainPoint(null);
+              }}
               placeholder="e.g. 30-second UGC where I explain how our automated marketing system saves 7 hours per week for solo founders. Friendly, energetic tone."
               rows={5}
               maxLength={10_000}
