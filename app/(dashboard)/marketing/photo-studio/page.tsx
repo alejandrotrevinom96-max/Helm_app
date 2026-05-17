@@ -1,42 +1,26 @@
-// PR #76 — Sprint 7.3: /marketing/generate refactored to lead
-// with the structured-drafts flow.
+// PR Sprint D-8 Phase 2 — Photo Studio chat-agent page.
 //
-// What changed vs the previous version (PR #60):
-//   - The legacy pillar-variants UI (MarketingClient) is no
-//     longer rendered here. The component file itself is NOT
-//     deleted — it stays at app/(dashboard)/marketing/client.tsx
-//     so a quick revert (this file only) can restore the prior
-//     behavior if the new flow regresses something.
-//   - StructuredGeneratePanel becomes the primary surface
-//     (formerly StructuredDraftsPanel was an opt-in collapse at
-//     the bottom of the page).
-//   - BrandBibleCard is wrapped by CollapsibleBrandBible —
-//     collapsed when bible completion ≥80%, expanded with a
-//     yellow nudge otherwise.
-//   - PerformanceInsights (Voice Memory + Performance Memory)
-//     and Voice Fingerprint (inside BrandBibleCard) preserved.
+// Replaces the legacy form-flow surface (Brand Bible card +
+// PerformanceInsights + AssetGeneratePanel) with the new chat-
+// agent paradigm. The page itself is a thin server shell (auth +
+// active-project resolve); PhotoStudioClient owns the three-panel
+// UI + state-machine driving.
 //
-// What we deliberately did NOT change:
-//   - The marketing sub-nav (Generate/Calendar/Library tabs)
-//     lives in app/(dashboard)/marketing/layout.tsx — untouched.
-//   - The like/dislike + scheduling APIs — untouched.
-//   - The BrandBibleCard internals — wrapped, not edited, so
-//     voiceFingerprint rendering and the modal-open behavior
-//     stay byte-for-byte identical.
+// Revert path: the old AssetGeneratePanel + BrandBible card stay
+// at components/marketing/asset-generate-panel.tsx and
+// components/marketing/collapsible-brand-bible.tsx — restoring
+// the legacy surface is a one-line import swap here.
+//
+// History — this file was app/(dashboard)/marketing/generate/page.tsx
+// through PR #76 → Sprint 7.26 → Sprint D-8 Phase 1 (where it got
+// renamed to photo-studio/). Sprint D-8 Phase 2 (this PR) is the
+// substantive replacement of the flow.
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { getActiveProject } from '@/lib/active-project';
-import type { BrandBible } from '@/lib/types/brand';
-import type { VoiceFingerprint } from '@/lib/types/voice';
-import { CollapsibleBrandBible } from '@/components/marketing/collapsible-brand-bible';
-// PR Sprint 7.26 — Asset-based content flow. AssetGeneratePanel
-// replaces StructuredGeneratePanel as the primary generate surface.
-// The old panel file isn't deleted (revertable in a single line
-// edit here) but the new flow is the one that ships.
-import { AssetGeneratePanel } from '@/components/marketing/asset-generate-panel';
-import { PerformanceInsights } from '../performance-insights';
+import { PhotoStudioClient } from './client';
 
-export default async function MarketingGeneratePage() {
+export default async function PhotoStudioPage() {
   const supabase = await createClient();
   const {
     data: { user },
@@ -46,43 +30,5 @@ export default async function MarketingGeneratePage() {
   const project = await getActiveProject(user.id);
   if (!project) redirect('/onboarding');
 
-  // Reshape the project into BrandProject (the shape
-  // CollapsibleBrandBible / BrandBibleCard expect). Same casting
-  // pattern as the legacy MarketingClient — voice fingerprint
-  // fields are loosely typed on the DB row so we narrow here.
-  const projectForCard = {
-    id: project.id,
-    name: project.name,
-    brandUrl: project.brandUrl,
-    brandContext: (project.brandContext as BrandBible | null) ?? null,
-    voiceFingerprint:
-      (
-        project as unknown as {
-          voiceFingerprint?: VoiceFingerprint | null;
-        }
-      ).voiceFingerprint ?? null,
-    voiceFingerprintUpdatedAt:
-      (
-        project as unknown as { voiceFingerprintUpdatedAt?: Date | null }
-      ).voiceFingerprintUpdatedAt?.toISOString() ?? null,
-  };
-
-  return (
-    <div className="space-y-6 platform-reveal-2">
-      {/* Voice Memory + Performance Memory — unchanged from the
-          legacy flow, fetched via /api/marketing/insights. */}
-      <PerformanceInsights projectId={project.id} />
-
-      {/* Brand bible — collapsible based on completion score. */}
-      <CollapsibleBrandBible project={projectForCard} />
-
-      {/* PR Sprint 7.26 — Asset-based content flow. New mental
-          model: pick an asset TYPE (UGC video / reel / carousel /
-          photo / long-form text), pick the PLATFORMS to publish
-          to (filtered by what's compatible with the type), and
-          Helm generates the asset once + adapts a caption per
-          network. Cost drops Nx for multi-platform pushes. */}
-      <AssetGeneratePanel projectId={project.id} />
-    </div>
-  );
+  return <PhotoStudioClient projectId={project.id} />;
 }

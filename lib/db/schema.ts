@@ -2266,3 +2266,103 @@ export type HeygenTranslationJobRow =
   typeof heygenTranslationJobs.$inferSelect;
 export type NewHeygenTranslationJobRow =
   typeof heygenTranslationJobs.$inferInsert;
+
+// ===== Photo Studio agent sessions =====
+// PR Sprint D-8 Phase 2 — chat-agent paradigm for photo / carousel
+// creation.
+//
+// Mirrors heygen_agent_sessions in spirit but built entirely in-
+// house (no external chat-mode API to delegate to). The agent
+// uses Haiku for intent classification + concept refinement, Opus
+// for per-platform copy generation. Visual generation goes
+// through the existing lib/visuals/generate.ts pipeline (we pass
+// `concept` as `postContent`; the IR prompt-builder owns the
+// actual Flux prompt).
+//
+// CRITICAL design rule: the state machine NEVER auto-advances
+// from an awaiting_* state. Each transition requires explicit
+// user input — text, a quick-action button, or an Approve click.
+// Same lesson learned the hard way from the HeyGen V3 chat-mode
+// auto_proceed bug (Sprint D-7 fix 84b709d).
+export const photoAgentSessions = pgTable('photo_agent_sessions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  projectId: uuid('project_id')
+    .notNull()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  // Founder's original brief, stored verbatim for re-use ("clone
+  // session" affordance) + session list previews.
+  prompt: text('prompt').notNull(),
+  // Optional pain-point seed if the session was started from a
+  // Research → Photo Studio handoff. Stored as text (not FK)
+  // because pain points live in jsonb today — see Sprint D-8
+  // Phase 1 / migrate to a real table later.
+  painPointId: text('pain_point_id'),
+  // Brand bible snapshot at session start. Locked for the
+  // lifetime of the session so mid-session brand edits don't
+  // alter what the agent is producing (founder expectation: "this
+  // session uses the brand voice I had when I opened it").
+  brandSnapshot: jsonb('brand_snapshot'),
+  // State machine. See lib/photo-agent/stateMachine.ts for the
+  // full enum + valid transitions.
+  //   understanding | awaiting_type_choice | generating_visual |
+  //   awaiting_visual_feedback | awaiting_platform_choice |
+  //   generating_copies | awaiting_copy_feedback | finalized |
+  //   failed
+  state: text('state').notNull().default('understanding'),
+  // Asset type the founder picked: 'photo' | 'carousel' | 'upload'.
+  assetType: text('asset_type'),
+  // If assetType='upload', the URL of the user-uploaded reference
+  // image (Supabase Storage). fal.ai uses this as a reference.
+  uploadedAssetUrl: text('uploaded_asset_url'),
+  // The visual concept the agent + founder converged on. Passed
+  // to generateVisual() as postContent. Updated each time the
+  // founder asks for visual changes.
+  concept: text('concept'),
+  // Generated visual result.
+  visualUrl: text('visual_url'),
+  visualWidth: integer('visual_width'),
+  visualHeight: integer('visual_height'),
+  // Platforms the founder confirmed for distribution. Stored as
+  // text array because the platform vocab evolves and we don't
+  // want a hard enum constraint.
+  platforms: jsonb('platforms').$type<string[]>(),
+  // Per-platform generated copies. Shape mirrors what the
+  // copyGenerator returns; the Library save translates it into
+  // content_assets + generated_posts rows.
+  copies: jsonb('copies').$type<
+    Array<{
+      platform: string;
+      text: string;
+      hashtags: string[];
+      ctaText: string | null;
+    }>
+  >(),
+  // Full chat thread for this session. Truncated client-side for
+  // display but stored verbatim so we can replay / debug.
+  messages: jsonb('messages').$type<
+    Array<{
+      role: 'user' | 'agent';
+      content: string;
+      kind: 'text' | 'system' | 'visual' | 'platforms' | 'copies';
+      createdAt: number;
+    }>
+  >(),
+  // Linked content_asset id once the founder approves & saves.
+  // ON DELETE SET NULL so deleting the library entry doesn't
+  // cascade-delete the session history.
+  contentAssetId: uuid('content_asset_id').references(
+    () => contentAssets.id,
+    { onDelete: 'set null' },
+  ),
+  errorMessage: text('error_message'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  completedAt: timestamp('completed_at'),
+});
+
+export type PhotoAgentSessionRow = typeof photoAgentSessions.$inferSelect;
+export type NewPhotoAgentSessionRow =
+  typeof photoAgentSessions.$inferInsert;
