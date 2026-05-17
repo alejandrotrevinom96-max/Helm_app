@@ -52,9 +52,21 @@ export async function POST() {
       CREATE INDEX IF NOT EXISTS idx_heygen_agent_sessions_heygen_id
         ON heygen_agent_sessions (heygen_session_id)
     `);
+    // PR Sprint D-bugs (UGC fix) — server-side approval gate
+    // columns. Idempotent ADD COLUMN IF NOT EXISTS so prod rows
+    // that already exist pick up the gate machinery without a
+    // backfill. New rows get the schema-level DEFAULT false.
+    await db.execute(sql`
+      ALTER TABLE heygen_agent_sessions
+        ADD COLUMN IF NOT EXISTS approval_gate_active boolean NOT NULL DEFAULT false
+    `);
+    await db.execute(sql`
+      ALTER TABLE heygen_agent_sessions
+        ADD COLUMN IF NOT EXISTS approval_gate_at timestamp
+    `);
     return NextResponse.json({
       success: true,
-      message: 'heygen_agent_sessions ready.',
+      message: 'heygen_agent_sessions ready (with approval gate columns).',
     });
   } catch (e) {
     return NextResponse.json(

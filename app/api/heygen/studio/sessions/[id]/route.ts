@@ -38,9 +38,32 @@ import * as Sentry from '@sentry/nextjs';
 // on the row), so we narrow before we touch it.
 interface AgentMessageShape {
   role?: string;
+  content?: string;
 }
 function isAgentMessageArray(v: unknown): v is AgentMessageShape[] {
   return Array.isArray(v);
+}
+
+// PR Sprint D-bugs (UGC fix) — approval-checkpoint detector.
+//
+// HeyGen V3 chat agent fires a "Take a look at the blueprint…"
+// style message right before it auto-proceeds to render.
+// Detecting that message lets us flip the local approvalGateActive
+// flag + freeze the surfaced status at 'reviewing' until the
+// founder explicitly approves or sends feedback.
+//
+// Detection is keyword-based and intentionally generous — false
+// positives just produce an extra "confirm to proceed" beat,
+// which is the right default. Missing the checkpoint produces
+// the auto-render bug, which is the wrong default.
+function looksLikeApprovalCheckpoint(content: string | undefined): boolean {
+  if (!content) return false;
+  const lower = content.toLowerCase();
+  return (
+    /\b(take a look|blueprint|storyboard|let me know|looks? good|ready to (bring|render)|approve|review the (plan|script|concept|storyboard)|sound (good|right)|shall i (proceed|render)|here'?s the (plan|outline|script))\b/.test(
+      lower,
+    )
+  );
 }
 
 const UUID_RE =
@@ -49,10 +72,19 @@ const UUID_RE =
 export const maxDuration = 30;
 
 function serialize(row: HeygenAgentSessionRow) {
+  // PR Sprint D-bugs (UGC fix) — when the approval gate is
+  // active, the client should see status='reviewing' (the
+  // existing waiting-for-feedback enum) and NO video URLs,
+  // regardless of what HeyGen has actually done in the
+  // background. The local row keeps the real values; we just
+  // don't surface them until the founder approves.
+  const gated = row.approvalGateActive === true;
+  const surfacedStatus = gated ? 'reviewing' : row.status;
   return {
     id: row.id,
     heygenSessionId: row.heygenSessionId,
-    status: row.status,
+    status: surfacedStatus,
+    approvalGateActive: gated,
     prompt: row.prompt,
     title: row.title,
     styleId: row.styleId,
@@ -61,12 +93,18 @@ function serialize(row: HeygenAgentSessionRow) {
     orientation: row.orientation,
     messages: row.messages ?? [],
     lastResources: row.lastResources ?? [],
+    // PR Sprint D-bugs (UGC fix) — gate ALL final-video fields
+    // while approvalGateActive=true. If HeyGen completed the
+    // render in the background (which it will, since chat mode
+    // doesn't actually pause), we don't expose the URL to the
+    // client until the founder approves. finalVideoId stays
+    // surfaced so the UI can debug if needed.
     finalVideoId: row.finalVideoId,
-    finalVideoUrl: row.finalVideoUrl,
-    finalVideoThumbnailUrl: row.finalVideoThumbnailUrl,
-    finalVideoCaptionedUrl: row.finalVideoCaptionedUrl,
-    finalVideoSubtitleUrl: row.finalVideoSubtitleUrl,
-    finalVideoDurationSec: row.finalVideoDurationSec,
+    finalVideoUrl: gated ? null : row.finalVideoUrl,
+    finalVideoThumbnailUrl: gated ? null : row.finalVideoThumbnailUrl,
+    finalVideoCaptionedUrl: gated ? null : row.finalVideoCaptionedUrl,
+    finalVideoSubtitleUrl: gated ? null : row.finalVideoSubtitleUrl,
+    finalVideoDurationSec: gated ? null : row.finalVideoDurationSec,
     errorMessage: row.errorMessage,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -157,6 +195,55 @@ async function refreshSession(
     !row.completedAt
   ) {
     updates.completedAt = new Date();
+  }
+
+  // PR Sprint D-bugs (UGC fix) — approval-gate detection.
+  //
+  // Scan the freshly merged messages array for HeyGen's "review
+  // this storyboard / let me know" agent message. If found AND
+  // the gate isn't already active AND the founder hasn't sent
+  // ANY message yet, flip the gate so the serializer surfaces
+  // status='reviewing' + hides the video URL.
+  //
+  // Gate is sticky once set — only the POST handler clears it.
+  // We re-detect on every poll (cheap regex on the latest msg)
+  // so even if HeyGen sends multiple agent messages in quick
+  // succession, the first checkpoint trips the gate.
+  if (!row.approvalGateActive) {
+    const mergedMessages = isAgentMessageArray(updates.messages)
+      ? updates.messages
+      : isAgentMessageArray(row.messages)
+        ? row.messages
+        : [];
+    const userMessageCount = mergedMessages.filter(
+      (m) => m && typeof m === 'object' && m.role === 'user',
+    ).length;
+    // Only gate on the FIRST agent checkpoint, before any
+    // founder input. Once the founder has sent a feedback /
+    // approval message, subsequent agent checkpoints are
+    // expected (HeyGen acknowledging the founder's input) and
+    // shouldn't trigger another gate.
+    if (userMessageCount === 0) {
+      const lastAgentMsg = [...mergedMessages]
+        .reverse()
+        .find((m) => m && typeof m === 'object' && m.role === 'model');
+      if (looksLikeApprovalCheckpoint(lastAgentMsg?.content)) {
+        updates.approvalGateActive = true;
+        updates.approvalGateAt = new Date();
+        // Sentry breadcrumb for visibility — lets us tune the
+        // detector's keyword list against what HeyGen actually
+        // says in production.
+        Sentry.captureMessage('heygen_agent_gate_engaged', {
+          level: 'info',
+          tags: { area: 'heygen-v3', kind: 'approval-gate' },
+          extra: {
+            rowId: row.id,
+            heygenStatus: fresh.status,
+            triggerSnippet: (lastAgentMsg?.content ?? '').slice(0, 200),
+          },
+        });
+      }
+    }
   }
 
   // PR Sprint D-7 — unapproved-render telemetry.
@@ -260,7 +347,16 @@ export async function POST(
   if (!row) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
-  if (row.status === 'completed' || row.status === 'failed') {
+  // PR Sprint D-bugs (UGC fix) — allow follow-up even when the
+  // LOCAL row reads as 'completed'. If the gate is active, the
+  // surfaced status is 'reviewing' but the underlying row.status
+  // could be 'completed' (HeyGen finished the render in the
+  // background). The founder is still expected to approve /
+  // iterate before the video is exposed.
+  if (
+    !row.approvalGateActive &&
+    (row.status === 'completed' || row.status === 'failed')
+  ) {
     return NextResponse.json(
       { error: 'Session already finished; start a new one.' },
       { status: 409 },
@@ -281,15 +377,51 @@ export async function POST(
     );
   }
 
+  // PR Sprint D-bugs (UGC fix) — clearing the approval gate.
+  //
+  // Whenever the founder sends ANY message (approval or
+  // feedback) we clear the gate. After this point the serializer
+  // exposes the real HeyGen state — typically already at
+  // 'completed' with a video URL, which the founder can now
+  // see + decide what to do with.
+  //
+  // We forward the message to HeyGen as usual. If HeyGen's
+  // session is already at a terminal state on its side, the
+  // message just gets logged + ignored; that's the right
+  // failure mode (the founder's intent is captured in the
+  // local message thread regardless).
+  const wasGated = row.approvalGateActive === true;
+  if (wasGated) {
+    await db
+      .update(heygenAgentSessions)
+      .set({ approvalGateActive: false, updatedAt: new Date() })
+      .where(eq(heygenAgentSessions.id, row.id));
+  }
+
   const send = await sendAgentMessage(row.heygenSessionId, {
     message,
     autoProceed: Boolean(body.autoProceed),
   });
   if (!send.ok) {
-    return NextResponse.json({ error: send.error }, { status: 502 });
+    // Even if HeyGen rejected the message (typically because the
+    // upstream session is at a terminal state), we already
+    // cleared the gate above so the founder isn't stranded.
+    // Surface the upstream error so the UI can show it; the
+    // next GET will return the real session state with the gate
+    // off and the video URL exposed.
+    return NextResponse.json(
+      {
+        error: `${send.error} (Gate released — refresh to see HeyGen's actual state.)`,
+        gateCleared: wasGated,
+      },
+      { status: 502 },
+    );
   }
   // Poll once so the agent's response (or "thinking" state)
   // surfaces on the same response.
-  const refreshed = await refreshSession(row);
+  const refreshed = await refreshSession({
+    ...row,
+    approvalGateActive: false,
+  } as HeygenAgentSessionRow);
   return NextResponse.json({ session: serialize(refreshed) });
 }

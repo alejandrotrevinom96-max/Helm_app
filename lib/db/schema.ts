@@ -2143,6 +2143,30 @@ export const heygenAgentSessions = pgTable('heygen_agent_sessions', {
     scale: 2,
   }),
   errorMessage: text('error_message'),
+  // PR Sprint D-bugs (UGC fix) — server-side approval gate.
+  //
+  // HeyGen V3's Video Agent is auto-pilot in chat mode: even with
+  // mode='chat' set, the agent fires a chain of messages
+  // (storyboard → review → render) without pausing for our input.
+  // The "Take a look at the blueprint and let me know" message is
+  // followed by 'generating' status within ~5 seconds — well
+  // before a human can read + decide.
+  //
+  // We add a Helm-side gate: when the GET poll detects the agent
+  // is at an approval checkpoint, we set this flag + override the
+  // serialized status to 'reviewing' until the founder explicitly
+  // approves or sends feedback. The actual HeyGen state continues
+  // to update locally (so the eventual render is captured), but
+  // we don't surface it to the client until the founder acts.
+  //
+  // This is a UI-layer lock, not a HeyGen-side stop. We don't
+  // claim to save HeyGen quota — the render likely happens
+  // anyway. We DO claim to give the founder the explicit-approval
+  // workflow they expect from chat mode.
+  approvalGateActive: boolean('approval_gate_active')
+    .notNull()
+    .default(false),
+  approvalGateAt: timestamp('approval_gate_at'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
   completedAt: timestamp('completed_at'),

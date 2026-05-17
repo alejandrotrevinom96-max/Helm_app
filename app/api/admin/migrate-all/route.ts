@@ -153,6 +153,17 @@ export async function POST() {
         CREATE INDEX IF NOT EXISTS idx_heygen_agent_session_project
           ON heygen_agent_sessions (project_id, created_at DESC)
       `);
+      // PR Sprint D-bugs (UGC fix) — approval gate columns,
+      // appended to the same step so a fresh migrate-all picks
+      // them up without a separate run. Idempotent.
+      await db.execute(sql`
+        ALTER TABLE heygen_agent_sessions
+          ADD COLUMN IF NOT EXISTS approval_gate_active boolean NOT NULL DEFAULT false
+      `);
+      await db.execute(sql`
+        ALTER TABLE heygen_agent_sessions
+          ADD COLUMN IF NOT EXISTS approval_gate_at timestamp
+      `);
     }),
   );
 
