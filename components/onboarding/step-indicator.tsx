@@ -85,13 +85,20 @@ export function StepIndicator({ current, total = 3, labels }: Props) {
               >
                 {isDone ? '✓' : n}
               </span>
-              <span>
-                {isActive
-                  ? `${n} (active)`
-                  : labels?.[idx]
-                    ? labels[idx]
-                    : `${n}`}
-              </span>
+              {/* PR Sprint onboarding-wow polish — pre-fix the
+                  label span echoed the step number for every
+                  non-active, non-labeled step. Combined with the
+                  circle (which already shows `n` for future
+                  steps) you got "3 3" / "2 2". Now: render the
+                  active "(active)" caption, an explicit label
+                  when provided, OR nothing — the numbered circle
+                  alone is sufficient indication for future
+                  steps. */}
+              {(isActive || labels?.[idx]) && (
+                <span>
+                  {isActive ? `${n} (active)` : labels![idx]}
+                </span>
+              )}
             </div>
             {idx < steps.length - 1 && (
               <span

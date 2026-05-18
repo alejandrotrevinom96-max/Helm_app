@@ -8,7 +8,20 @@
 // linear and skipping forward via the indicator would create
 // half-filled state. The "← Atrás" links inside each step page
 // handle the back-nav case.
-import { usePathname } from 'next/navigation';
+//
+// PR Sprint onboarding-wow polish — Cambio B. The new-project
+// flow (added in Sprint onboarding-wow) only walks 3 steps
+// (project → brand → wow), not the 5-step wizard. Surfacing the
+// 5-dot bar there shows "Brand = step 3 of 5" which is wrong
+// for that path and confuses the founder. Detect via:
+//   - pathname === '/onboarding/wow'           → always new-project
+//   - pathname === '/onboarding/brand' AND
+//     ?newProject=1 in the query                → brand step of new
+//                                                  project flow
+// and hide the bar in both cases. The inline <StepIndicator/>
+// in the page content carries the progress UI for the
+// new-project flow instead.
+import { usePathname, useSearchParams } from 'next/navigation';
 
 const STEPS = [
   { key: 'welcome', label: 'Welcome' },
@@ -20,6 +33,17 @@ const STEPS = [
 
 export function OnboardingProgressBar() {
   const pathname = usePathname() ?? '';
+  const searchParams = useSearchParams();
+
+  // Hide on the new-project flow — the inline StepIndicator in
+  // the page content carries the progress UI there.
+  const isWowPath = pathname.includes('/onboarding/wow');
+  const isNewProjectBrand =
+    pathname.includes('/onboarding/brand') &&
+    (searchParams?.get('newProject') === '1');
+  if (isWowPath || isNewProjectBrand) {
+    return null;
+  }
 
   // Match against the segment after /onboarding/. We test the
   // longer keys first so `first-content` doesn't accidentally

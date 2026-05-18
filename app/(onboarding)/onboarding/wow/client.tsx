@@ -127,6 +127,65 @@ export function WowClient({
     let generateOk = false;
     let photoOk = false;
 
+    // PR Sprint onboarding-wow polish — Cambio E. Defensive JSON
+    // parse for both auto-fired endpoints. Pre-fix the founder
+    // saw "Unexpected end of JSON input" pop into the error
+    // surface whenever either backend returned an empty body or
+    // an HTML error page (Vercel cold-start timeouts, gateway
+    // 5xx, etc.). Now: read text first, try JSON.parse, capture
+    // the raw body to Sentry on failure so on-call has the actual
+    // payload to debug, and surface a clean error to the founder.
+    const safeParseJson = async <T,>(
+      res: Response,
+      area: 'generate-structured' | 'photo-agent',
+    ): Promise<{ ok: true; data: T } | { ok: false; error: string }> => {
+      let raw = '';
+      try {
+        raw = await res.text();
+      } catch (readErr) {
+        Sentry.captureException(readErr, {
+          tags: { area: 'onboarding', kind: 'wow-moment-body-read' },
+          extra: { upstream: area, status: res.status },
+        });
+        return {
+          ok: false,
+          error: `${area === 'generate-structured' ? 'Drafts' : 'Photo'} response could not be read.`,
+        };
+      }
+      if (!raw.trim()) {
+        Sentry.captureMessage('onboarding_wow_empty_body', {
+          level: 'warning',
+          tags: { area: 'onboarding', kind: 'wow-moment-empty-body' },
+          extra: { upstream: area, status: res.status },
+        });
+        return {
+          ok: false,
+          error: `${area === 'generate-structured' ? 'Drafts' : 'Photo'} server returned an empty response. Try again.`,
+        };
+      }
+      try {
+        return { ok: true, data: JSON.parse(raw) as T };
+      } catch (parseErr) {
+        Sentry.captureException(parseErr, {
+          tags: { area: 'onboarding', kind: 'wow-moment-json-parse' },
+          extra: {
+            upstream: area,
+            status: res.status,
+            // Cap to keep Sentry payload small; the prefix is
+            // usually enough to tell HTML-error-page from
+            // truncated-JSON from non-JSON-string.
+            rawBodySnippet: raw.slice(0, 800),
+            rawBodyLen: raw.length,
+          },
+        });
+        return {
+          ok: false,
+          error:
+            "We received an unexpected response from the server. Try refreshing — your brand bible is already saved.",
+        };
+      }
+    };
+
     const fireGenerate = async (): Promise<void> => {
       setWow('generating');
       try {
@@ -141,13 +200,18 @@ export function WowClient({
             wowMode: true,
           }),
         });
-        const data = (await res.json()) as {
+        const parsed = await safeParseJson<{
           success?: boolean;
           drafts?: DraftPayload[];
           draftIds?: string[];
           error?: string;
           hint?: string;
-        };
+        }>(res, 'generate-structured');
+        if (!parsed.ok) {
+          setGenError(parsed.error);
+          return;
+        }
+        const data = parsed.data;
         if (!res.ok || data.success === false) {
           setGenError(
             data.hint ?? data.error ?? 'Draft generation failed.',
@@ -166,6 +230,10 @@ export function WowClient({
           generateOk = data.drafts.some((d) => d.structuredContent != null);
         }
       } catch (err) {
+        Sentry.captureException(err, {
+          tags: { area: 'onboarding', kind: 'wow-moment-fetch-threw' },
+          extra: { upstream: 'generate-structured' },
+        });
         setGenError(
           err instanceof Error ? err.message : 'Network error generating drafts.',
         );
@@ -183,10 +251,15 @@ export function WowClient({
             autoApproveForOnboarding: true,
           }),
         });
-        const data = (await res.json()) as {
+        const parsed = await safeParseJson<{
           session?: PhotoSessionPayload;
           error?: string;
-        };
+        }>(res, 'photo-agent');
+        if (!parsed.ok) {
+          setPhotoError(parsed.error);
+          return;
+        }
+        const data = parsed.data;
         if (!res.ok || !data.session) {
           setPhotoError(data.error ?? 'Photo generation failed.');
           return;
@@ -202,6 +275,10 @@ export function WowClient({
           );
         }
       } catch (err) {
+        Sentry.captureException(err, {
+          tags: { area: 'onboarding', kind: 'wow-moment-fetch-threw' },
+          extra: { upstream: 'photo-agent' },
+        });
         setPhotoError(
           err instanceof Error ? err.message : 'Network error generating photo.',
         );
@@ -273,13 +350,17 @@ export function WowClient({
           color: 'var(--text-1)',
         }}
       >
-        {wow === 'ready'
-          ? `${projectName} is ready to ship.`
-          : wow === 'partial'
-            ? `${projectName} is mostly ready.`
-            : wow === 'failed'
-              ? `${projectName} setup hit a snag.`
-              : `We're warming up ${projectName}…`}
+        {/* PR Sprint onboarding-wow polish — Cambio F. Both the
+            'ready' and 'partial' states surface the same
+            celebratory headline ("Your first assets are ready.")
+            so a single failed sub-call doesn't feel like a
+            consolation prize. The per-item error chip below
+            still tells the founder which one to retry. */}
+        {wow === 'ready' || wow === 'partial'
+          ? 'Your first assets are ready.'
+          : wow === 'failed'
+            ? `${projectName} setup hit a snag.`
+            : `We're warming up ${projectName}…`}
       </h1>
       <p
         style={{
@@ -289,13 +370,11 @@ export function WowClient({
           maxWidth: '720px',
         }}
       >
-        {wow === 'ready'
+        {wow === 'ready' || wow === 'partial'
           ? "Three drafts and your first visual — generated from your brand bible. Open the Library to iterate, schedule, or publish."
-          : wow === 'partial'
-            ? "Some of what we tried came back. You can refine the rest from your Library."
-            : wow === 'failed'
-              ? "We couldn't auto-generate this round. Head to your Library to compose manually — your brand bible is already saved."
-              : "We're using your brand bible to generate three first drafts plus a rendered visual. Usually takes 30-45 seconds."}
+          : wow === 'failed'
+            ? "We couldn't auto-generate this round. Head to your Library to compose manually — your brand bible is already saved."
+            : "We're using your brand bible to generate three first drafts plus a rendered visual. Usually takes 30-45 seconds."}
       </p>
 
       {(wow === 'pending' || wow === 'generating') && (

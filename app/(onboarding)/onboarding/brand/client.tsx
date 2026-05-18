@@ -32,6 +32,50 @@ import { Sparkles } from 'lucide-react';
 // research → first-content path; we don't disrupt that yet.
 import { StepIndicator } from '@/components/onboarding/step-indicator';
 
+// PR Sprint onboarding-wow polish — Cambio A. Collapses the
+// numeric BrandVoice sliders (0..10 on five axes — formal /
+// serious / bold / innovative / approachable) into a comma-
+// separated tone descriptor the founder can read and edit.
+// Each axis only contributes a word when the score crosses
+// its threshold (<= 3 or >= 7); middling scores are dropped
+// to avoid noise like "moderately formal, moderately serious".
+function synthesizeTone(
+  voice:
+    | {
+        formal?: number;
+        serious?: number;
+        bold?: number;
+        innovative?: number;
+        approachable?: number;
+      }
+    | null
+    | undefined,
+): string {
+  if (!voice) return '';
+  const parts: string[] = [];
+  const formal = voice.formal ?? 5;
+  const serious = voice.serious ?? 5;
+  const bold = voice.bold ?? 5;
+  const innovative = voice.innovative ?? 5;
+  const approachable = voice.approachable ?? 5;
+  // formal: 0=super casual, 10=corporate formal
+  if (formal <= 3) parts.push('casual');
+  else if (formal >= 7) parts.push('formal');
+  // serious: 0=playful, 10=dead serious
+  if (serious <= 3) parts.push('playful');
+  else if (serious >= 7) parts.push('serious');
+  // bold: 0=reserved, 10=bold/confident
+  if (bold <= 3) parts.push('reserved');
+  else if (bold >= 7) parts.push('bold');
+  // innovative: 0=traditional, 10=cutting edge
+  if (innovative <= 3) parts.push('traditional');
+  else if (innovative >= 7) parts.push('innovative');
+  // approachable: 0=exclusive, 10=welcoming
+  if (approachable <= 3) parts.push('exclusive');
+  else if (approachable >= 7) parts.push('approachable');
+  return parts.join(', ');
+}
+
 interface Props {
   initialNiche: string;
   initialAudience: string;
@@ -102,9 +146,17 @@ export function BrandClient({
       const data = (await res.json().catch(() => ({}))) as {
         success?: boolean;
         brandBible?: {
+          identity?: { tagline?: string | null; mission?: string | null };
           archetype?: { primary?: string | null };
           audience?: { primary?: { description?: string } };
           pillars?: Array<{ name: string }>;
+          voice?: {
+            formal?: number;
+            serious?: number;
+            bold?: number;
+            innovative?: number;
+            approachable?: number;
+          };
         };
         error?: string;
       };
@@ -113,20 +165,35 @@ export function BrandClient({
         setAutogenState('failed');
         return;
       }
-      // Map the persisted bible into the 3 visible form fields
-      // so the founder sees "campos llenos" before clicking
-      // Continue. The bible itself was already saved server-
-      // side, so even if the founder edits these and re-saves,
-      // the rich bible (with valueProp + primaryPain) is what
-      // /onboarding/wow reads downstream.
+      // PR Sprint onboarding-wow polish — Cambio A. Map the
+      // persisted bible into the 3 visible form fields so the
+      // founder sees "campos llenos" before clicking Continue.
+      // The bible itself was already saved server-side, so even
+      // if the founder edits these and re-saves, the rich bible
+      // (with valueProp + primaryPain) is what /onboarding/wow
+      // reads downstream.
+      //
+      // Pre-fix mapping was off:
+      //   - niche joined ALL pillars (e.g. "Pillar1, Pillar2,
+      //     Pillar3") — overflowed the textarea and read like
+      //     a tag soup. Now: prefer identity.tagline (a single
+      //     concise sentence) → fall back to the first pillar.
+      //   - tone surfaced archetype.primary (e.g. "Magician") —
+      //     a one-word archetype isn't what the founder needs
+      //     in the tone box. Now: synthesize the voice sliders
+      //     into a comma-separated descriptor (e.g. "casual,
+      //     playful, bold, innovative, approachable") that
+      //     reads as natural tone copy and is editable.
       const bb = data.brandBible;
-      setNiche(
-        (bb.pillars ?? []).map((p) => p.name).join(', ').slice(0, 500),
-      );
+      const niche =
+        (bb.identity?.tagline ?? '').trim() ||
+        (bb.pillars?.[0]?.name ?? '').trim() ||
+        (bb.identity?.mission ?? '').trim();
+      setNiche(niche.slice(0, 500));
       setAudience(
         (bb.audience?.primary?.description ?? '').slice(0, 500),
       );
-      setTone((bb.archetype?.primary ?? '').toString().slice(0, 1000));
+      setTone(synthesizeTone(bb.voice).slice(0, 1000));
       setAutogenState('ready');
       setAutogenStage('');
     } catch (e) {
@@ -418,11 +485,7 @@ export function BrandClient({
             onClick={handleContinue}
             disabled={!niche.trim() || !audience.trim() || busy}
           >
-            {busy
-              ? 'Saving…'
-              : isNewProject
-                ? 'Save and go to library →'
-                : 'Continue →'}
+            {busy ? 'Saving…' : 'Continue →'}
           </Button>
         </div>
       </div>
