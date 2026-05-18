@@ -86,7 +86,27 @@ export default async function DashboardLayout({
   }
 
   return (
-    <div className="min-h-screen md:grid md:grid-cols-[240px_1fr]">
+    // PR Sprint final-fix — dashboard root.
+    //
+    // Root cause of "Photo Studio page-scrolls but UGC doesn't":
+    // the dashboard's <main> had `overflow-y-auto` BUT no height
+    // constraint. Main grew with content; the OUTER PAGE scrolled.
+    // UGC happened to fit; Photo Studio's preview with
+    // visual_failed messages didn't. The studio-shell-grid
+    // bounding worked in isolation but lost the war against the
+    // unbounded parent main.
+    //
+    // Fix: bound <main> to the viewport with both a vh height
+    // (universally supported) and a dvh cap (modern mobile
+    // chrome-aware). Two arbitrary-value Tailwind classes:
+    //   h-[calc(100vh)]      → main is at least viewport-tall
+    //   max-h-[calc(100dvh)] → but cap at the *visible* viewport
+    // Combined: on desktop both ≈ 100vh; on mobile when chrome
+    // is showing, dvh < vh so max-h caps to dvh (no overflow
+    // under URL bar); when chrome hides, dvh ≈ vh so layout
+    // expands naturally. Outer div gets overflow-hidden so the
+    // page itself can never scroll regardless of inner content.
+    <div className="h-[calc(100vh)] max-h-[calc(100dvh)] md:grid md:grid-cols-[240px_1fr] overflow-hidden">
       <Sidebar
         activeProject={activeProject}
         allProjects={allProjects}
@@ -96,7 +116,9 @@ export default async function DashboardLayout({
           avatarUrl: dbUser?.avatarUrl ?? null,
         }}
       />
-      <main className="overflow-y-auto">{children}</main>
+      <main className="h-[calc(100vh)] max-h-[calc(100dvh)] overflow-y-auto">
+        {children}
+      </main>
       {showWizard && (
         <OnboardingClientWrapper
           initialStep={onboardingStep}
