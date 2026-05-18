@@ -273,6 +273,14 @@ export async function POST() {
         ALTER TABLE photo_agent_sessions
           ADD COLUMN IF NOT EXISTS approval_gate_at timestamp
       `);
+      // PR Sprint onboarding-wow — auto-approved-reason column.
+      // Tracks WHY a session bypassed the approval gate. Currently
+      // only 'onboarding_wow' is a valid value; future bypass
+      // reasons extend the column without a schema change.
+      await db.execute(sql`
+        ALTER TABLE photo_agent_sessions
+          ADD COLUMN IF NOT EXISTS auto_approved_reason text
+      `);
     }),
   );
 

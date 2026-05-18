@@ -23,6 +23,14 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { GlassCard } from '@/components/ui/glass-card';
 import { Sparkles } from 'lucide-react';
+// PR Sprint onboarding-wow — Cambio B + C.
+//
+// StepIndicator + Autogenerate button only render in the
+// `new_project` flow (the "+ Add project" sidebar modal hands
+// the founder here with a brand-new project + URL). The
+// original first-time wizard flow keeps the existing
+// research → first-content path; we don't disrupt that yet.
+import { StepIndicator } from '@/components/onboarding/step-indicator';
 
 interface Props {
   initialNiche: string;
@@ -53,6 +61,79 @@ export function BrandClient({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const isNewProject = mode === 'new_project' && !!projectId;
+  // PR Sprint onboarding-wow — Cambio B.
+  //
+  // Autogenerate state tracks the one-shot scrape → generate →
+  // persist flow that the "✨ Autogenerate from your website"
+  // button triggers. Status surfaces to the founder via the
+  // progress text below the button:
+  //   idle      → button enabled, ready to click
+  //   running   → "Scraping your site…" / "Synthesizing voice…"
+  //   ready     → fields populated, founder reviews + Continues
+  //   failed    → fall back to manual entry, surface the error
+  const [autogenState, setAutogenState] = useState<
+    'idle' | 'running' | 'ready' | 'failed'
+  >('idle');
+  const [autogenStage, setAutogenStage] = useState<string>('');
+
+  // Cambio B handler — fires /api/brand-bible/quickstart, which
+  // does scrape + Opus + persist server-side. Populates the 3
+  // visible form fields with derived values so the founder sees
+  // "campos llenos" (per QA step 3 of the spec). Failure falls
+  // back to the manual form.
+  const handleAutogenerate = async () => {
+    if (!isNewProject || !projectId || autogenState === 'running') return;
+    setAutogenState('running');
+    setAutogenStage('Scraping your website…');
+    setError(null);
+    try {
+      // Stage text is cosmetic; Opus dominates the wait so we
+      // bump it once after a short delay so the founder doesn't
+      // think it froze on "Scraping".
+      const stageTimer = setTimeout(() => {
+        setAutogenStage('Synthesizing voice + brand bible…');
+      }, 3000);
+      const res = await fetch('/api/brand-bible/quickstart', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId }),
+      });
+      clearTimeout(stageTimer);
+      const data = (await res.json().catch(() => ({}))) as {
+        success?: boolean;
+        brandBible?: {
+          archetype?: { primary?: string | null };
+          audience?: { primary?: { description?: string } };
+          pillars?: Array<{ name: string }>;
+        };
+        error?: string;
+      };
+      if (!res.ok || !data.success || !data.brandBible) {
+        setError(data.error ?? 'Autogenerate failed');
+        setAutogenState('failed');
+        return;
+      }
+      // Map the persisted bible into the 3 visible form fields
+      // so the founder sees "campos llenos" before clicking
+      // Continue. The bible itself was already saved server-
+      // side, so even if the founder edits these and re-saves,
+      // the rich bible (with valueProp + primaryPain) is what
+      // /onboarding/wow reads downstream.
+      const bb = data.brandBible;
+      setNiche(
+        (bb.pillars ?? []).map((p) => p.name).join(', ').slice(0, 500),
+      );
+      setAudience(
+        (bb.audience?.primary?.description ?? '').slice(0, 500),
+      );
+      setTone((bb.archetype?.primary ?? '').toString().slice(0, 1000));
+      setAutogenState('ready');
+      setAutogenStage('');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Network error');
+      setAutogenState('failed');
+    }
+  };
 
   const handleContinue = async () => {
     if (!niche.trim() || !audience.trim() || busy) return;
@@ -126,13 +207,14 @@ export function BrandClient({
 
       // Hand-off:
       //   - normal wizard → continue to step 4 (research)
-      //   - new-project flow → drop the founder directly into the
-      //     new project's library so they can start generating
-      //     content. Skipping research+first-content keeps the
-      //     "I'm setting up a NEW project" path short — they
-      //     already know how Helm works.
+      //   - new-project flow → /onboarding/wow (Cambio D) for the
+      //     3-draft wow moment, then on to Library. Pre-Sprint
+      //     onboarding-wow this went straight to /marketing/library;
+      //     we insert the wow step so the founder sees Helm
+      //     producing real on-brand drafts before they touch the
+      //     general dashboard.
       if (isNewProject) {
-        router.push('/marketing/library');
+        router.push(`/onboarding/wow?projectId=${encodeURIComponent(projectId)}`);
       } else {
         router.push('/onboarding/research');
       }
@@ -156,27 +238,86 @@ export function BrandClient({
     } catch {
       /* non-fatal */
     }
-    // Same hand-off logic as continue.
-    router.push(isNewProject ? '/marketing/library' : '/onboarding/research');
+    // Same hand-off logic as continue — wizard skip still goes to
+    // /research, new-project skip still gets the wow moment so
+    // the founder leaves onboarding having seen Helm work.
+    router.push(
+      isNewProject
+        ? `/onboarding/wow?projectId=${encodeURIComponent(projectId!)}`
+        : '/onboarding/research',
+    );
   };
 
   return (
     <div>
+      {/* PR Sprint onboarding-wow — Cambio C. StepIndicator only
+          surfaces in the new-project flow (1=project, 2=brand,
+          3=wow). The original first-time wizard keeps the legacy
+          research → first-content path; surfacing a 3-step
+          indicator there would mislead the founder about what's
+          ahead. */}
+      {isNewProject && <StepIndicator current={2} total={3} />}
+
       <h1 className="font-display text-3xl md:text-4xl font-light tracking-tight mb-2">
         {isNewProject ? 'Set up your new project' : 'Brand context'}
       </h1>
       <p className="text-text-2 mb-3">
         {isNewProject
-          ? 'Each project gets its own brand bible. Three quick questions and Helm scopes everything (drafts, research, voice) to this project.'
+          ? 'Each project gets its own brand bible. Helm can autogenerate it from your website or you can fill the fields manually.'
           : 'Helm needs to understand your niche to generate specific content (not generic).'}
       </p>
-      <div className="mb-8 p-3 bg-accent/10 border border-accent/30 rounded-lg flex items-start gap-2">
-        <Sparkles className="w-4 h-4 text-accent shrink-0 mt-0.5" />
-        <p className="text-sm text-accent">
-          This step is what most impacts the quality of EVERYTHING Helm
-          generates. Worth the 2 minutes.
-        </p>
-      </div>
+      {/* PR Sprint onboarding-wow — the orange "this step is THE
+          most impactful" banner is suppressed in the new-project
+          flow per QA spec ("sin banner naranja"). It still
+          renders for the legacy first-time wizard so that
+          surface keeps its existing nudge. */}
+      {!isNewProject && (
+        <div className="mb-8 p-3 bg-accent/10 border border-accent/30 rounded-lg flex items-start gap-2">
+          <Sparkles className="w-4 h-4 text-accent shrink-0 mt-0.5" />
+          <p className="text-sm text-accent">
+            This step is what most impacts the quality of EVERYTHING Helm
+            generates. Worth the 2 minutes.
+          </p>
+        </div>
+      )}
+
+      {/* PR Sprint onboarding-wow — Cambio B. "✨ Autogenerate
+          from your website" button. Available only in the
+          new-project flow because that flow guarantees a fresh
+          project with a URL. Calls /api/brand-bible/quickstart
+          (server-side scrape + Opus + persist). Success populates
+          the 3 form fields below so the founder can review +
+          edit before clicking Continue. */}
+      {isNewProject && (
+        <div className="mb-6">
+          <Button
+            onClick={() => void handleAutogenerate()}
+            disabled={busy || autogenState === 'running'}
+            className="w-full justify-center"
+          >
+            {autogenState === 'running'
+              ? '⏳ Working…'
+              : autogenState === 'ready'
+                ? '✓ Autogenerated — review below'
+                : '✨ Autogenerate from your website'}
+          </Button>
+          {autogenState === 'running' && autogenStage && (
+            <p className="text-xs text-text-3 mt-2 text-center">
+              {autogenStage}
+            </p>
+          )}
+          {autogenState === 'ready' && (
+            <p className="text-xs text-text-2 mt-2 text-center">
+              Edit anything below if it doesn&apos;t match. Then continue.
+            </p>
+          )}
+          {autogenState === 'failed' && (
+            <p className="text-xs text-danger mt-2 text-center">
+              Autogenerate hiccuped — fill the fields manually below.
+            </p>
+          )}
+        </div>
+      )}
 
       <GlassCard className="p-6 space-y-5">
         <div>

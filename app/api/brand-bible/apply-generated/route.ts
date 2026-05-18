@@ -207,6 +207,11 @@ function mergeGenerated(
       },
       completionScore: 0, // recalculated below
     },
+    // Cambio A — wow anchors. Non-empty generator output wins;
+    // empty string preserves whatever the founder had set
+    // manually before autogenerate fired.
+    valueProp: generated.valueProp || base.valueProp,
+    primaryPain: generated.primaryPain || base.primaryPain,
   };
 
   merged.meta.completionScore = computeCompletionScore(merged);

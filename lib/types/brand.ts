@@ -298,6 +298,25 @@ export interface BrandBible {
   visual: BrandVisual;
   culturalMoments: CulturalMoment[];
   meta: BrandMeta;
+  // === Onboarding wow moment — Cambio A ===
+  //
+  // Both optional + passthrough at the jsonb layer so existing
+  // rows don't need a backfill (no Zod runtime parsing exists).
+  // Separate concern from `messaging.valueProps[]` (which is a
+  // structured array of pillar-tagged propositions for the
+  // generator). These two are anchors for the /onboarding/wow
+  // moment — a single founder-voice sentence each, used by the
+  // wowMode prompt in /api/ai/generate-structured to produce
+  // specific copies instead of "Empower your business" defaults.
+  //
+  // valueProp:    1-2 sentences, founder's own voice, says what
+  //               makes this brand uncopiable. NOT marketing-
+  //               speak.
+  // primaryPain:  the most acute audience pain — one sentence,
+  //               in the audience's own words when an analyzed
+  //               source quoted it directly.
+  valueProp?: string;
+  primaryPain?: string;
   // Voice engine Patch 2 — per-project pain → product bridges.
   // Optional for backward compat with existing rows; absent or empty
   // means the matcher returns "no bridges available" and the

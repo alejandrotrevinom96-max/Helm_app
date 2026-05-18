@@ -138,6 +138,10 @@ import type { ArchetypeUsage, PostArchetype } from '@/lib/types/brand';
 // >=10 posted samples on the platform.
 import { getOrRefreshIdiosyncrasies } from '@/lib/voice-engine/maybe-refresh-idiosyncrasies';
 import { formatIdiosyncrasiesAsPromptRules } from '@/lib/voice-engine/voice-idiosyncrasy-extractor';
+// PR Sprint onboarding-wow — Sentry capture for the dedicated
+// area='onboarding' kind='wow-moment' events the wow page reads
+// off telemetry dashboards.
+import * as Sentry from '@sentry/nextjs';
 
 export const maxDuration = 60;
 
@@ -330,21 +334,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const limit = checkRateLimit(
-    `generate-structured:${user.id}`,
-    5,
-    60 * 60 * 1000,
-  );
-  if (!limit.allowed) {
-    return NextResponse.json(
-      {
-        error: 'Rate limit exceeded',
-        hint: `Try again in ${Math.ceil(limit.resetMs / 60000)} minutes.`,
-      },
-      { status: 429 },
-    );
-  }
-
   // PR Sprint 7.24 — Prompt 3. variantLabel + variantGroupId are
   // optional. When the new client passes both, the request is one
   // half of an A/B pair fired in parallel from the panel; the
@@ -361,6 +350,12 @@ export async function POST(request: Request) {
     types?: string[];
     variantLabel?: VariantLabel;
     variantGroupId?: string;
+    // PR Sprint onboarding-wow — when true, the request comes from
+    // /onboarding/wow and gets a dedicated rate-limit bucket (so
+    // it doesn't compete with the founder's main 5/hour limit on
+    // the same day they sign up) + a top-level draftIds[] in the
+    // response for easy consumption.
+    wowMode?: boolean;
   };
   try {
     body = (await request.json()) as {
@@ -370,9 +365,35 @@ export async function POST(request: Request) {
       types?: string[];
       variantLabel?: VariantLabel;
       variantGroupId?: string;
+      wowMode?: boolean;
     };
   } catch {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
+  }
+
+  const wowMode = body.wowMode === true;
+
+  // PR Sprint onboarding-wow — separate rate-limit bucket. The wow
+  // page calls this exactly once per project (auto-dispatch on
+  // mount), so a 3/day ceiling is plenty for honest signup +
+  // signup-retry scenarios while still cutting off a script that
+  // keeps spamming the endpoint with wowMode=true.
+  const limitKey = wowMode
+    ? `generate-structured-wow:${user.id}`
+    : `generate-structured:${user.id}`;
+  const limitCount = wowMode ? 3 : 5;
+  const limitWindowMs = wowMode ? 24 * 60 * 60 * 1000 : 60 * 60 * 1000;
+  const limit = checkRateLimit(limitKey, limitCount, limitWindowMs);
+  if (!limit.allowed) {
+    return NextResponse.json(
+      {
+        error: 'Rate limit exceeded',
+        hint: wowMode
+          ? 'Onboarding wow moment already generated today. Use the regular Library or /marketing/generate to make more.'
+          : `Try again in ${Math.ceil(limit.resetMs / 60000)} minutes.`,
+      },
+      { status: 429 },
+    );
   }
 
   const { projectId, platform, prompt } = body;
@@ -1190,6 +1211,24 @@ Return STRICT JSON matching the schema. No markdown fences, no prose outside JSO
     const first = drafts[0];
     const kind = (first.errorKind ?? 'unknown') as ErrorKind;
     const desc = describeError(kind);
+    if (wowMode) {
+      // PR Sprint onboarding-wow — terminal failure telemetry. The
+      // wow page renders a fallback CTA when zero drafts succeed;
+      // this event lets us measure how often the onboarding moment
+      // fails entirely vs. partially fails.
+      Sentry.captureMessage('onboarding_wow_drafts_failed', {
+        level: 'warning',
+        tags: { area: 'onboarding', kind: 'wow-moment' },
+        extra: {
+          userId: user.id,
+          projectId,
+          platform,
+          requestedTypes,
+          errorKind: kind,
+          firstErrorMessage: first.error,
+        },
+      });
+    }
     return NextResponse.json(
       {
         success: false,
@@ -1203,6 +1242,10 @@ Return STRICT JSON matching the schema. No markdown fences, no prose outside JSO
         // with categorized errors even on a total failure.
         drafts,
         typesGenerated: [],
+        // PR Sprint onboarding-wow — even on total failure return
+        // an empty draftIds[] so the wow page can read the field
+        // unconditionally.
+        draftIds: [] as string[],
       },
       { status: desc.status },
     );
@@ -1301,10 +1344,36 @@ Return STRICT JSON matching the schema. No markdown fences, no prose outside JSO
     }
   }
 
+  // PR Sprint onboarding-wow — extract IDs of successful drafts so
+  // the wow page (and any future caller) doesn't have to filter
+  // drafts[] client-side. Order matches the requested types order
+  // because we iterate `templates` in DB row order which corresponds
+  // to `requestedTypes`.
+  const draftIds = successful.map((d) => d.id);
+
+  if (wowMode) {
+    Sentry.captureMessage('onboarding_wow_drafts_completed', {
+      level: 'info',
+      tags: { area: 'onboarding', kind: 'wow-moment' },
+      extra: {
+        userId: user.id,
+        projectId,
+        platform,
+        requestedTypes,
+        draftIds,
+        successCount: successful.length,
+      },
+    });
+  }
+
   return NextResponse.json({
     success: true,
     drafts,
     typesGenerated: successful.map((d) => d.contentType),
+    // PR Sprint onboarding-wow — top-level draftIds[] for easy
+    // consumption. Always present (empty on total failure handled
+    // above; populated here for partial + full success).
+    draftIds,
   });
 }
 

@@ -29,12 +29,18 @@ import {
   refineConcept,
 } from '@/lib/photo-agent/conceptBuilder';
 import { inferAssetTypeFromText } from '@/lib/photo-agent/intentClassifier';
+import { generateVisual } from '@/lib/visuals/generate';
 import * as Sentry from '@sentry/nextjs';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export const maxDuration = 30;
+// PR Sprint onboarding-wow — bumped from 30s to 60s. The
+// autoApproveForOnboarding fast path does inline fal.ai render
+// (~15-30s) on top of the Opus refineConcept (~5-10s). 60s gives
+// us comfortable headroom; the non-onboarding path still returns
+// well under the old 30s ceiling.
+export const maxDuration = 60;
 
 interface ChatMessage {
   role: 'user' | 'agent';
@@ -104,6 +110,10 @@ function serialize(row: PhotoAgentSessionRow) {
     state: row.state,
     approvalGateActive: row.approvalGateActive === true,
     approvalGateAt: row.approvalGateAt?.toISOString() ?? null,
+    // PR Sprint onboarding-wow — surface autoApprovedReason so
+    // the wow page can render an "auto-approved during onboarding"
+    // badge in audit views without re-fetching.
+    autoApprovedReason: row.autoApprovedReason ?? null,
     assetType: row.assetType,
     uploadedAssetUrl: row.uploadedAssetUrl,
     concept: row.concept,
@@ -181,6 +191,14 @@ export async function POST(request: Request) {
     projectId?: string;
     prompt?: string;
     painPointId?: string;
+    // PR Sprint onboarding-wow — when true, the fast-path
+    // concept-ready branch skips the reviewing_concept gate
+    // entirely and fires fal.ai inline, landing the session at
+    // awaiting_visual_feedback in a single round-trip. The row
+    // also gets auto_approved_reason='onboarding_wow' for audit
+    // visibility. Only used by /onboarding/wow; any other caller
+    // omitting this flag follows the normal explicit-approval flow.
+    autoApproveForOnboarding?: boolean;
   };
   try {
     body = await request.json();
@@ -191,6 +209,7 @@ export async function POST(request: Request) {
   const projectId = body.projectId;
   const prompt = (body.prompt ?? '').trim();
   const painPointId = body.painPointId ?? null;
+  const autoApproveForOnboarding = body.autoApproveForOnboarding === true;
   if (!projectId || !UUID_RE.test(projectId)) {
     return NextResponse.json(
       { error: 'projectId required' },
@@ -277,6 +296,161 @@ export async function POST(request: Request) {
         kind: 'text',
         createdAt: Date.now() + 1,
       };
+
+      // PR Sprint onboarding-wow — bypass branch. When the wow
+      // page kicks off the photo flow, we want a one-shot:
+      //   prompt → concept → visual → render-done.
+      // No reviewing_concept gate, no chat round-trip. Land the
+      // row at awaiting_visual_feedback with the rendered visual
+      // attached, set auto_approved_reason='onboarding_wow' for
+      // audit, and fire onboarding-tagged Sentry events the wow
+      // page can grep on dashboards.
+      if (autoApproveForOnboarding) {
+        Sentry.captureMessage('onboarding_wow_visual_started', {
+          level: 'info',
+          tags: { area: 'onboarding', kind: 'wow-moment' },
+          extra: {
+            userId: user.id,
+            projectId,
+            assetType: inferredAssetType,
+            conceptSnippet: refined.concept.slice(0, 200),
+          },
+        });
+
+        const conceptText = refined.concept.slice(0, 280);
+        const t0 = Date.now();
+
+        // Insert at generating_visual first so the row exists +
+        // is queryable while fal.ai works. The state machine
+        // allows initial inserts at any non-terminal state.
+        const [pendingRow] = await db
+          .insert(photoAgentSessions)
+          .values({
+            userId: user.id,
+            projectId,
+            prompt,
+            painPointId,
+            brandSnapshot: bibleSnapshot,
+            state: 'generating_visual',
+            assetType: inferredAssetType,
+            concept: conceptText,
+            messages: [userMsg, agentMsg],
+            approvalGateActive: false,
+            autoApprovedReason: 'onboarding_wow',
+          })
+          .returning();
+
+        // Inline render. Single attempt — the wow page surfaces a
+        // retry affordance on visual_failed via the existing [id]
+        // route, so we don't need the wrapper's 2x retry budget
+        // here. Anti-naming: any error string shown to the founder
+        // goes through serialize's sanitizer.
+        let visualUrl: string | null = null;
+        let visualWidth: number | null = null;
+        let visualHeight: number | null = null;
+        let visualError: string | null = null;
+        try {
+          if (!process.env.FAL_API_KEY) {
+            visualError =
+              'Visual generation is not configured (FAL_API_KEY missing in deployment).';
+          } else {
+            const visual = await generateVisual({
+              platform: 'instagram',
+              postContent: conceptText,
+              brandBible: bibleSnapshot,
+              contentType:
+                inferredAssetType === 'carousel' ? 'carousel' : 'photo',
+              aspectRatio:
+                inferredAssetType === 'carousel' ? 'square' : 'portrait',
+              painPoint: painPoint?.theme ?? undefined,
+            });
+            if (visual) {
+              visualUrl = visual.url;
+              visualWidth = visual.width;
+              visualHeight = visual.height;
+            } else {
+              visualError =
+                'The image generator returned no result. Try again, or refine the concept.';
+            }
+          }
+        } catch (e) {
+          Sentry.captureException(e, {
+            tags: { area: 'onboarding', kind: 'wow-moment-visual-threw' },
+            extra: {
+              rowId: pendingRow.id,
+              elapsedMs: Date.now() - t0,
+            },
+          });
+          visualError =
+            'Image generation hit an unexpected error. Try again from your Library.';
+        }
+
+        if (visualUrl) {
+          const visualMsg: ChatMessage = {
+            role: 'agent',
+            content:
+              "Here's your first visual. Open it in the Library to iterate or save.",
+            kind: 'visual',
+            createdAt: Date.now() + 2,
+          };
+          const [done] = await db
+            .update(photoAgentSessions)
+            .set({
+              state: 'awaiting_visual_feedback',
+              visualUrl,
+              visualWidth,
+              visualHeight,
+              messages: [userMsg, agentMsg, visualMsg],
+              updatedAt: new Date(),
+            })
+            .where(eq(photoAgentSessions.id, pendingRow.id))
+            .returning();
+          Sentry.captureMessage('onboarding_wow_visual_completed', {
+            level: 'info',
+            tags: { area: 'onboarding', kind: 'wow-moment' },
+            extra: {
+              userId: user.id,
+              projectId,
+              rowId: pendingRow.id,
+              elapsedMs: Date.now() - t0,
+            },
+          });
+          return NextResponse.json({ session: serialize(done) });
+        }
+
+        // fal.ai failed. Land at visual_failed so the founder
+        // gets the recovery chips inside the Library detail view.
+        const failMsg: ChatMessage = {
+          role: 'agent',
+          content: `⚠️ ${visualError ?? 'Visual generation failed.'}`,
+          kind: 'system',
+          createdAt: Date.now() + 2,
+        };
+        const [failed] = await db
+          .update(photoAgentSessions)
+          .set({
+            state: 'visual_failed',
+            errorMessage: visualError,
+            messages: [userMsg, agentMsg, failMsg],
+            updatedAt: new Date(),
+          })
+          .where(eq(photoAgentSessions.id, pendingRow.id))
+          .returning();
+        Sentry.captureMessage('onboarding_wow_visual_failed', {
+          level: 'warning',
+          tags: { area: 'onboarding', kind: 'wow-moment' },
+          extra: {
+            userId: user.id,
+            projectId,
+            rowId: pendingRow.id,
+            errorMessage: visualError,
+            elapsedMs: Date.now() - t0,
+          },
+        });
+        return NextResponse.json({ session: serialize(failed) });
+      }
+
+      // Normal (non-onboarding) fast path — reviewing_concept gate.
       Sentry.captureMessage('photo_agent_gate_engaged', {
         level: 'info',
         tags: { area: 'photo-studio', kind: 'approval-gate' },

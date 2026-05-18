@@ -2391,6 +2391,17 @@ export const photoAgentSessions = pgTable('photo_agent_sessions', {
     .notNull()
     .default(false),
   approvalGateAt: timestamp('approval_gate_at'),
+  // PR Sprint onboarding-wow — audit trail for sessions that
+  // bypass the approval gate. Currently the only legitimate
+  // bypass is the /onboarding/wow flow, where the wow moment
+  // wants instant fal.ai output (no founder-confirmation gate)
+  // because the brand bible just got produced + reviewed in the
+  // previous step. Values:
+  //   'onboarding_wow' — the wow moment auto-approved
+  //   null             — normal session, gate behaves normally
+  // Future bypass reasons (e.g. clone-asset auto-render) would
+  // extend the enum here.
+  autoApprovedReason: text('auto_approved_reason'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
   completedAt: timestamp('completed_at'),
