@@ -16,6 +16,29 @@ if (process.env.FAL_API_KEY) {
   fal.config({ credentials: process.env.FAL_API_KEY });
 }
 
+// PR Sprint flux-2 migration — single source of truth for the
+// fal.ai model identifier.
+//
+// Was: 'fal-ai/flux-pro/v1.1' (FLUX 1.1 [pro]) — hardcoded in
+// two call sites (IR pipeline + legacy path).
+// Now: 'fal-ai/flux-2-pro' (FLUX.2 [pro]). Same provider
+// (Black Forest Labs via fal.ai), same cost ($0.03/MP),
+// noticeably better quality + more consistent across batches.
+//
+// API shape diff vs flux-pro/v1.1:
+//   - prompt: same (required, string)
+//   - image_size: same enum (square_hd, square, portrait_4_3,
+//                            portrait_16_9, landscape_4_3,
+//                            landscape_16_9). Backward compat.
+//   - num_images: REMOVED. FLUX.2 [pro] always returns 1 image
+//                 and rejects unknown inputs. Our previous
+//                 num_images:1 was a no-op on the old endpoint
+//                 too — dropping it has no behavioral effect
+//                 beyond making the new endpoint stop 400-ing.
+//   - Response: same shape (images[].url, seed). No client-
+//               side changes needed downstream of the image URL.
+const FAL_FLUX_MODEL = 'fal-ai/flux-2-pro';
+
 export type AspectRatio = 'square' | 'portrait' | 'landscape';
 
 export interface VisualPrompt {
@@ -226,11 +249,13 @@ async function tryIRPipelinePath(
     const prompt = renderForFlux(ir);
     const fal_input = falInputFromIR(ir);
 
-    const result = (await fal.subscribe('fal-ai/flux-pro/v1.1', {
+    // PR Sprint flux-2 migration — model + input shape updated.
+    // num_images removed: FLUX.2 [pro] always returns 1 image
+    // and rejects unknown inputs per its OpenAPI schema.
+    const result = (await fal.subscribe(FAL_FLUX_MODEL, {
       input: {
         prompt,
         image_size: fal_input.image_size,
-        num_images: 1,
       },
       logs: false,
     })) as {
@@ -248,6 +273,7 @@ async function tryIRPipelinePath(
       url: imageUrl,
       provider: 'fal',
       prompt,
+      // Cost stable at $0.03/MP — same as flux-pro/v1.1.
       costEstimate: 0.055, // ~$0.05 fal + ~$0.005 Haiku subject extractor
       width: fal_input.width,
       height: fal_input.height,
@@ -283,11 +309,12 @@ async function runLegacyPath(input: VisualPrompt): Promise<VisualResult | null> 
   const prompt = buildVisualPrompt(input);
 
   try {
-    const result = (await fal.subscribe('fal-ai/flux-pro/v1.1', {
+    // PR Sprint flux-2 migration — model + input shape updated.
+    // Same num_images-removed treatment as the IR path above.
+    const result = (await fal.subscribe(FAL_FLUX_MODEL, {
       input: {
         prompt,
         image_size: dims.image_size,
-        num_images: 1,
       },
       logs: false,
     })) as {
