@@ -48,14 +48,14 @@ function serialize(row: HeygenAgentSessionRow) {
   // never showed the approval flow.
   const gated = row.approvalGateActive === true;
   const surfacedStatus = gated ? 'reviewing' : row.status;
+  // PR Sprint UGC+Photo paridad — anti-naming. Removed
+  // viewInHeygenUrl from the client-facing payload. heygenSessionId
+  // stays in the response because it's an opaque UUID (no brand
+  // text leaks via the value) but the View-in-HeyGen affordance
+  // is gone from the client.
   return {
     id: row.id,
     heygenSessionId: row.heygenSessionId,
-    viewInHeygenUrl: row.heygenSessionId
-      ? `https://app.heygen.com/video-agent/${encodeURIComponent(
-          row.heygenSessionId,
-        )}`
-      : null,
     status: surfacedStatus,
     approvalGateActive: gated,
     approvalGateAt: row.approvalGateAt?.toISOString() ?? null,

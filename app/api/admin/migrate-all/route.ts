@@ -262,6 +262,17 @@ export async function POST() {
         CREATE INDEX IF NOT EXISTS idx_photo_agent_session_project
           ON photo_agent_sessions (project_id, created_at DESC)
       `);
+      // PR Sprint UGC+Photo paridad — approval gate columns,
+      // appended to the same step so a fresh migrate-all picks
+      // them up without a separate run. Idempotent.
+      await db.execute(sql`
+        ALTER TABLE photo_agent_sessions
+          ADD COLUMN IF NOT EXISTS approval_gate_active boolean NOT NULL DEFAULT false
+      `);
+      await db.execute(sql`
+        ALTER TABLE photo_agent_sessions
+          ADD COLUMN IF NOT EXISTS approval_gate_at timestamp
+      `);
     }),
   );
 

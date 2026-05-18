@@ -46,12 +46,18 @@ interface PainPointShape {
 }
 
 function serialize(row: PhotoAgentSessionRow) {
+  // PR Sprint UGC+Photo paridad — mirror the [id] route shape
+  // so the create POST response matches the polling GET. Pre-
+  // fix the create endpoint omitted approval-gate fields and
+  // the client read undefined on its first round-trip.
   return {
     id: row.id,
     projectId: row.projectId,
     prompt: row.prompt,
     painPointId: row.painPointId,
     state: row.state,
+    approvalGateActive: row.approvalGateActive === true,
+    approvalGateAt: row.approvalGateAt?.toISOString() ?? null,
     assetType: row.assetType,
     uploadedAssetUrl: row.uploadedAssetUrl,
     concept: row.concept,

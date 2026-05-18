@@ -20,6 +20,18 @@ export type PhotoSessionState =
   // input is enabled and we're waiting for the founder to pick.
   // Free-text replies route through the intent classifier.
   | 'awaiting_type_choice'
+  // PR Sprint UGC+Photo paridad — concept-review checkpoint.
+  // Agent has converged on a renderable concept (subject + mood
+  // + composition) but HASN'T fired fal.ai yet. Founder reviews
+  // in chat, then either:
+  //   - "Send feedback" → back to awaiting_type_choice for
+  //     iteration (gate clears + refines)
+  //   - "✓ Approve & generate" → generating_visual (gate
+  //     clears + fal.ai fires)
+  // Mirrors the UGC Studio's 'reviewing' state. Approval gate
+  // (approvalGateActive on the row) engages whenever we land
+  // here so the serializer pins this state for the client.
+  | 'reviewing_concept'
   // fal.ai call in flight. Input visible but disabled with a
   // "rendering" placeholder.
   | 'generating_visual'
@@ -75,8 +87,27 @@ const VALID_TRANSITIONS: Record<PhotoSessionState, Set<PhotoSessionState>> = {
     'failed',
   ]),
   awaiting_type_choice: new Set([
-    'generating_visual', // founder picked a type + concept
-    'awaiting_type_choice', // founder asked for clarification, re-prompt
+    // PR Sprint UGC+Photo paridad — agent converged on a concept
+    // → reviewing_concept gate engages instead of firing fal.ai
+    // immediately. The old direct-to-generating_visual transition
+    // is kept for back-compat with any in-flight session that
+    // pre-dates this PR but is otherwise unused.
+    'reviewing_concept',
+    'generating_visual',
+    'awaiting_type_choice',
+    'failed',
+  ]),
+  reviewing_concept: new Set([
+    // Approve → fire fal.ai
+    'generating_visual',
+    // Send feedback → back to chat for refinement
+    'awaiting_type_choice',
+    // Re-converged on a fresh concept (e.g. founder asked to
+    // adjust mood, refiner produced a new concept that's still
+    // ready=true). Self-transition is valid; the gate's
+    // approvalGateAt bumps so the founder sees the updated
+    // concept as a new review.
+    'reviewing_concept',
     'failed',
   ]),
   generating_visual: new Set([
@@ -149,6 +180,8 @@ export function inputModeFor(state: PhotoSessionState): InputUiMode {
   }
   // visual_failed is RECOVERABLE — input enabled so the founder
   // can refine the concept inline without restarting the session.
+  // reviewing_concept is the explicit-approval checkpoint —
+  // input enabled so feedback can flow before fal.ai fires.
   return 'enabled';
 }
 
@@ -172,6 +205,16 @@ export function quickActionsFor(state: PhotoSessionState): QuickAction[] {
         { label: '📸 Single photo', seed: 'A single photo', intent: 'pick_type' },
         { label: '📑 Carousel', seed: 'A carousel (5-7 slides)', intent: 'pick_type' },
         { label: '📤 Upload my asset', seed: 'I want to upload my own photo', intent: 'pick_type' },
+      ];
+    case 'reviewing_concept':
+      return [
+        // PR Sprint UGC+Photo paridad — explicit-approval chips.
+        // Approve fires fal.ai; the others pre-fill the textarea
+        // with a starter for iteration. Founder edits then sends.
+        { label: '✓ Approve & generate', seed: 'Approve the concept and generate.', intent: 'approve' },
+        { label: '🎨 Adjust style', seed: 'Adjust the style: ' },
+        { label: '📐 Different composition', seed: 'Try a different composition: ' },
+        { label: '🔄 New concept', seed: 'Start with a different concept: ' },
       ];
     case 'visual_failed':
       return [

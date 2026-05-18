@@ -2382,6 +2382,15 @@ export const photoAgentSessions = pgTable('photo_agent_sessions', {
     { onDelete: 'set null' },
   ),
   errorMessage: text('error_message'),
+  // PR Sprint UGC+Photo paridad — approval-gate parity with the
+  // UGC Studio. Engaged when the agent has converged on a concept
+  // it considers ready to render; the founder reviews the concept
+  // (in chat) and explicitly approves before fal.ai burns a Flux
+  // render. Mirror of heygen_agent_sessions.approval_gate_*.
+  approvalGateActive: boolean('approval_gate_active')
+    .notNull()
+    .default(false),
+  approvalGateAt: timestamp('approval_gate_at'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
   completedAt: timestamp('completed_at'),

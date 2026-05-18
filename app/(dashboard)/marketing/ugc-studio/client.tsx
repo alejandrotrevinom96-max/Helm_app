@@ -32,11 +32,6 @@ interface AgentMessage {
 interface Session {
   id: string;
   heygenSessionId: string;
-  // PR Sprint D-bugs-2 — server-built deep-link to HeyGen's own
-  // editor for this session. Server is source of truth for the
-  // URL pattern (matches the actual /video-agent/{id} path
-  // HeyGen uses on app.heygen.com).
-  viewInHeygenUrl: string | null;
   status:
     | 'thinking'
     | 'waiting_for_input'
@@ -338,6 +333,19 @@ export function StudioClient({ projectId }: Props) {
       /* non-fatal */
     }
   }, [styles.length]);
+
+  // ─── Chat thread auto-scroll ───────────────────────────────
+  //
+  // PR Sprint UGC+Photo paridad — fixed-height container + auto-
+  // scroll keeps the newest message visible without forcing the
+  // page to scroll. Triggered whenever the visible message count
+  // changes (new agent reply or new user send).
+  const threadRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (threadRef.current) {
+      threadRef.current.scrollTop = threadRef.current.scrollHeight;
+    }
+  }, [activeSession?.messages.length, activeSession?.id]);
 
   // ─── Poll active session while live ────────────────────────
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -875,7 +883,21 @@ export function StudioClient({ projectId }: Props) {
             )}
           </GlassCard>
         ) : (
-          <GlassCard className="p-5" style={{ display: 'flex', flexDirection: 'column', minHeight: '70vh' }}>
+          <GlassCard
+            className="p-5"
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              // PR Sprint UGC+Photo paridad — fixed-height chat
+              // container. height (not min-height) so the inner
+              // scrolling region is bounded; page-level scroll
+              // no longer triggered by long threads.
+              height: 'calc(100vh - 280px)',
+              maxHeight: '720px',
+              minHeight: '420px',
+              overflow: 'hidden',
+            }}
+          >
             <div
               style={{
                 display: 'flex',
@@ -901,6 +923,7 @@ export function StudioClient({ projectId }: Props) {
             </div>
 
             <div
+              ref={threadRef}
               style={{
                 flex: 1,
                 overflowY: 'auto',
@@ -908,12 +931,14 @@ export function StudioClient({ projectId }: Props) {
                 flexDirection: 'column',
                 gap: '10px',
                 padding: '8px 0',
-                minHeight: '300px',
+                minHeight: 0,
               }}
             >
-              {[...activeSession.messages]
-                .reverse()
-                .map((m, i) => (
+              {/* PR Sprint UGC+Photo paridad — removed .reverse().
+                  Newest message renders at the bottom; auto-scroll
+                  effect keeps it visible. Matches Photo Studio
+                  chronological ordering. */}
+              {activeSession.messages.map((m, i) => (
                   <div
                     key={`${m.created_at ?? i}-${m.role}`}
                     style={{
@@ -1187,21 +1212,9 @@ export function StudioClient({ projectId }: Props) {
                       ⬇ SRT
                     </a>
                   )}
-                  {/* PR Sprint D-bugs-2 — server-built URL.
-                      Server owns the path pattern so a future
-                      HeyGen URL change is a one-line server edit
-                      instead of hunting through client code. */}
-                  {activeSession.viewInHeygenUrl && (
-                    <a
-                      href={activeSession.viewInHeygenUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="platform-btn platform-btn-ghost"
-                      style={{ fontSize: '11px' }}
-                    >
-                      ↗ View in HeyGen
-                    </a>
-                  )}
+                  {/* PR Sprint UGC+Photo paridad — View-in-HeyGen
+                      link removed. Anti-naming: the founder never
+                      sees the provider name in the UI. */}
                 </div>
               </>
             ) : isTerminal(activeSession.status) ? (
@@ -1241,25 +1254,9 @@ export function StudioClient({ projectId }: Props) {
                         ? 'Rendering — typically 2-5 min.'
                         : 'Waiting for input.'}
                 </span>
-                {/* PR Sprint D-bugs-2 — server-built URL during
-                    the reviewing checkpoint, so the founder can
-                    pop into HeyGen's storyboard editor. */}
-                {activeSession.viewInHeygenUrl &&
-                  activeSession.status === 'reviewing' && (
-                    <a
-                      href={activeSession.viewInHeygenUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{
-                        fontSize: '11px',
-                        fontFamily: 'JetBrains Mono, monospace',
-                        color: 'var(--accent)',
-                        textDecoration: 'underline',
-                      }}
-                    >
-                      ↗ View draft in HeyGen
-                    </a>
-                  )}
+                {/* PR Sprint UGC+Photo paridad — View-in-HeyGen
+                    link removed for anti-naming. Founder reviews
+                    + approves inline in the Helm chat surface. */}
               </div>
             )}
           </GlassCard>

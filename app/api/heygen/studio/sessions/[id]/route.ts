@@ -84,18 +84,14 @@ function serialize(row: HeygenAgentSessionRow) {
   // don't surface them until the founder approves.
   const gated = row.approvalGateActive === true;
   const surfacedStatus = gated ? 'reviewing' : row.status;
+  // PR Sprint UGC+Photo paridad — anti-naming. Removed
+  // viewInHeygenUrl from the client-facing payload. The DB
+  // still stores heygenSessionId for internal use (Sentry
+  // breadcrumbs, debugging), and the column heygen_session_id
+  // remains on the row for joins, but the founder never sees
+  // the provider name in the UI.
   return {
     id: row.id,
-    heygenSessionId: row.heygenSessionId,
-    // PR Sprint D-bugs-2 — server-built deep-link to HeyGen's
-    // own UI for this session. Surfaced regardless of gate state
-    // so the founder can always pop into HeyGen's storyboard
-    // editor (richer feedback surface than the inline chat).
-    viewInHeygenUrl: row.heygenSessionId
-      ? `https://app.heygen.com/video-agent/${encodeURIComponent(
-          row.heygenSessionId,
-        )}`
-      : null,
     status: surfacedStatus,
     approvalGateActive: gated,
     approvalGateAt: row.approvalGateAt?.toISOString() ?? null,

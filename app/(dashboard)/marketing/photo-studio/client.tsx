@@ -53,6 +53,12 @@ interface Session {
   prompt: string;
   painPointId: string | null;
   state: PhotoSessionState;
+  // PR Sprint UGC+Photo paridad — approval-gate fields. Server
+  // sets approvalGateActive=true when the agent has converged on
+  // a concept and the founder needs to explicitly approve before
+  // fal.ai fires.
+  approvalGateActive: boolean;
+  approvalGateAt: string | null;
   assetType: 'photo' | 'carousel' | 'upload' | null;
   uploadedAssetUrl: string | null;
   concept: string | null;
@@ -72,6 +78,7 @@ interface Session {
 const STATE_LABEL: Record<PhotoSessionState, string> = {
   understanding: 'Thinking…',
   awaiting_type_choice: 'Pick a type',
+  reviewing_concept: 'Reviewing concept',
   generating_visual: 'Rendering visual…',
   awaiting_visual_feedback: 'Review visual',
   awaiting_platform_choice: 'Pick platforms',
@@ -85,6 +92,7 @@ const STATE_LABEL: Record<PhotoSessionState, string> = {
 const STATE_COLOR: Record<PhotoSessionState, string> = {
   understanding: 'var(--text-3)',
   awaiting_type_choice: 'var(--accent)',
+  reviewing_concept: 'var(--accent)',
   generating_visual: 'var(--accent)',
   awaiting_visual_feedback: 'var(--accent)',
   awaiting_platform_choice: 'var(--accent)',
@@ -769,6 +777,18 @@ function ActiveSessionPanel({
   const mode = inputModeFor(session.state);
   const quickActions = quickActionsFor(session.state);
 
+  // PR Sprint UGC+Photo paridad — fixed-height chat container +
+  // auto-scroll to bottom on new message. Pre-fix the container
+  // grew with each message and pushed the page-level scrollbar
+  // past the viewport. Now the thread is bounded; only the
+  // inner div scrolls; newest message stays visible.
+  const threadRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (threadRef.current) {
+      threadRef.current.scrollTop = threadRef.current.scrollHeight;
+    }
+  }, [session.messages.length, session.id]);
+
   const onQuickAction = (a: QuickAction) => {
     // Type-pick chips dispatch as a structured action (not a free-
     // text message) so the backend skips the classifier and goes
@@ -780,6 +800,15 @@ function ActiveSessionPanel({
           ? 'upload'
           : 'photo';
       void sendAction({ kind: 'action', action: 'pick_type', assetType });
+      return;
+    }
+    // PR Sprint UGC+Photo paridad — concept-review approval chip
+    // fires the approve_concept action so fal.ai runs after
+    // explicit founder confirmation. Other chips in this state
+    // (Adjust style / Different composition / New concept)
+    // pre-fill the textarea for feedback.
+    if (a.intent === 'approve' && session.state === 'reviewing_concept') {
+      void sendAction({ kind: 'action', action: 'approve_concept' });
       return;
     }
     if (a.intent === 'approve' && session.state === 'awaiting_visual_feedback') {
@@ -817,7 +846,17 @@ function ActiveSessionPanel({
   return (
     <GlassCard
       className="p-5"
-      style={{ display: 'flex', flexDirection: 'column', minHeight: '72vh' }}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        // PR Sprint UGC+Photo paridad — fixed height (not min)
+        // so the inner thread scrolls instead of pushing the
+        // page. Cap matches the UGC Studio.
+        height: 'calc(100vh - 280px)',
+        maxHeight: '720px',
+        minHeight: '420px',
+        overflow: 'hidden',
+      }}
     >
       <div
         style={{
@@ -844,6 +883,7 @@ function ActiveSessionPanel({
       </div>
 
       <div
+        ref={threadRef}
         style={{
           flex: 1,
           overflowY: 'auto',
@@ -851,7 +891,7 @@ function ActiveSessionPanel({
           flexDirection: 'column',
           gap: '10px',
           padding: '8px 0',
-          minHeight: '300px',
+          minHeight: 0,
         }}
       >
         {session.messages.map((m, i) => (
@@ -943,7 +983,9 @@ function ActiveSessionPanel({
             placeholder={
               mode === 'disabled'
                 ? STATE_LABEL[session.state]
-                : 'Reply or describe what to change in your own words…'
+                : session.state === 'reviewing_concept'
+                  ? 'Send feedback or hit Approve to generate…'
+                  : 'Reply or describe what to change in your own words…'
             }
             rows={2}
             disabled={mode === 'disabled'}

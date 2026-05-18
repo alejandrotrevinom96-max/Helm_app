@@ -283,12 +283,20 @@ interface ChatMessage {
 }
 
 function serialize(row: PhotoAgentSessionRow) {
+  // PR Sprint UGC+Photo paridad — expose approval-gate state to
+  // the client. The state machine already pins `state` at
+  // 'reviewing_concept' when the gate is active, but we surface
+  // approvalGateActive + approvalGateAt explicitly so the
+  // client can render gate-aware UI (badges, telemetry chips)
+  // without re-deriving from state alone.
   return {
     id: row.id,
     projectId: row.projectId,
     prompt: row.prompt,
     painPointId: row.painPointId,
     state: row.state,
+    approvalGateActive: row.approvalGateActive === true,
+    approvalGateAt: row.approvalGateAt?.toISOString() ?? null,
     assetType: row.assetType,
     uploadedAssetUrl: row.uploadedAssetUrl,
     concept: row.concept,
@@ -496,61 +504,36 @@ export async function POST(
         const nextMessages = [...messages, userMsg, agentMsg];
 
         if (refined.ready && refined.concept) {
-          // Concept is specific enough — fire the visual.
-          // Transition: awaiting_type_choice → generating_visual.
-          const generating = await transition(row, 'generating_visual', {
+          // PR Sprint UGC+Photo paridad — concept-review gate.
+          //
+          // Pre-fix the agent went straight from "I have a
+          // concept" to firing fal.ai. Now we land at
+          // reviewing_concept first, engage the approval gate,
+          // and wait for the founder to explicitly approve or
+          // send feedback. Mirror of the UGC Studio flow.
+          //
+          // Sentry telemetry for the gate engagement is paritary
+          // to heygen_agent_gate_engaged so dashboards can grep
+          // both kinds with kind=approval-gate.
+          Sentry.captureMessage('photo_agent_gate_engaged', {
+            level: 'info',
+            tags: { area: 'photo-studio', kind: 'approval-gate' },
+            extra: {
+              sessionId: row.id,
+              assetType,
+              conceptSnippet: refined.concept.slice(0, 200),
+              msgCreatedAtMs: Date.now(),
+            },
+          });
+          const reviewing = await transition(row, 'reviewing_concept', {
             assetType,
             uploadedAssetUrl: body.uploadedAssetUrl ?? null,
             concept: refined.concept,
             messages: nextMessages,
+            approvalGateActive: true,
+            approvalGateAt: new Date(),
           });
-          // PR Sprint D-finish — tryGenerateVisual wraps env check
-          // + painPoint pass-through + Sentry-rich failure
-          // surfacing so the founder sees WHY it failed instead
-          // of a generic "no result" message.
-          const visualResult = await tryGenerateVisual({
-            concept: refined.concept,
-            brandBible: bibleSnapshot,
-            assetType,
-            painPointId: row.painPointId,
-            userId: user.id,
-            rowId: row.id,
-          });
-          if (!visualResult.ok) {
-            const failMsg: ChatMessage = {
-              role: 'agent',
-              content: `⚠️ ${visualResult.error}`,
-              kind: 'system',
-              createdAt: Date.now() + 2,
-            };
-            // PR Sprint D-bugs — dedicated recovery state
-            // visual_failed lets the UI show Try Again + Refine
-            // Concept chips. Env-misconfig still goes to terminal
-            // 'failed' (no point retrying without the key).
-            const isEnvIssue = visualResult.error.includes('FAL_API_KEY');
-            const back = await transition(
-              generating,
-              isEnvIssue ? 'failed' : 'visual_failed',
-              {
-                messages: [...nextMessages, failMsg],
-                errorMessage: isEnvIssue ? visualResult.error : null,
-              },
-            );
-            return NextResponse.json({ session: serialize(back) });
-          }
-          const visualMsg: ChatMessage = {
-            role: 'agent',
-            content: `Here's the first take. Tap a chip to iterate, type freely, or approve to move on to platforms.`,
-            kind: 'visual',
-            createdAt: Date.now() + 2,
-          };
-          const fresh = await transition(generating, 'awaiting_visual_feedback', {
-            visualUrl: visualResult.visual.url,
-            visualWidth: visualResult.visual.width,
-            visualHeight: visualResult.visual.height,
-            messages: [...nextMessages, visualMsg],
-          });
-          return NextResponse.json({ session: serialize(fresh) });
+          return NextResponse.json({ session: serialize(reviewing) });
         }
 
         // Not ready yet — persist the chat exchange + asset type
@@ -562,6 +545,77 @@ export async function POST(
           messages: nextMessages,
         });
         return NextResponse.json({ session: serialize(next) });
+      }
+
+      // PR Sprint UGC+Photo paridad — 1.5. approve_concept:
+      // founder explicitly approves the proposed concept. Clear
+      // the gate + fire fal.ai. Mirror of the UGC approve action
+      // (which calls /v3/.../approve upstream). Here the
+      // "approval" is local — we just stop showing the gate UI
+      // and run the Flux pipeline.
+      if (action === 'approve_concept') {
+        if (currentState !== 'reviewing_concept') {
+          return NextResponse.json(
+            { error: `Cannot approve concept from state ${currentState}` },
+            { status: 409 },
+          );
+        }
+        breadcrumb('approve_concept');
+        const userMsg: ChatMessage = {
+          role: 'user',
+          content: '✓ Approve & generate.',
+          kind: 'system',
+          createdAt: Date.now(),
+        };
+        const generating = await transition(row, 'generating_visual', {
+          messages: [...messages, userMsg],
+          approvalGateActive: false,
+          approvalGateAt: new Date(),
+        });
+        const visualResult = await tryGenerateVisual({
+          concept: row.concept ?? '',
+          brandBible: bibleSnapshot,
+          assetType: row.assetType as
+            | 'photo'
+            | 'carousel'
+            | 'upload'
+            | null,
+          painPointId: row.painPointId,
+          userId: user.id,
+          rowId: row.id,
+        });
+        if (!visualResult.ok) {
+          const failMsg: ChatMessage = {
+            role: 'agent',
+            content: `⚠️ ${visualResult.error}`,
+            kind: 'system',
+            createdAt: Date.now() + 1,
+          };
+          const isEnvIssue = visualResult.error.includes('FAL_API_KEY');
+          const back = await transition(
+            generating,
+            isEnvIssue ? 'failed' : 'visual_failed',
+            {
+              messages: [...messages, userMsg, failMsg],
+              errorMessage: isEnvIssue ? visualResult.error : null,
+            },
+          );
+          return NextResponse.json({ session: serialize(back) });
+        }
+        const visualMsg: ChatMessage = {
+          role: 'agent',
+          content:
+            "Here's the first take. Tap a chip to iterate, type freely, or approve to move on to platforms.",
+          kind: 'visual',
+          createdAt: Date.now() + 1,
+        };
+        const fresh = await transition(generating, 'awaiting_visual_feedback', {
+          visualUrl: visualResult.visual.url,
+          visualWidth: visualResult.visual.width,
+          visualHeight: visualResult.visual.height,
+          messages: [...messages, userMsg, visualMsg],
+        });
+        return NextResponse.json({ session: serialize(fresh) });
       }
 
       // 2. approve_visual → move to platform-choice with a
@@ -1144,6 +1198,63 @@ export async function POST(
         return NextResponse.json({ session: serialize(next) });
       }
 
+      // PR Sprint UGC+Photo paridad — feedback while reviewing
+      // a concept. Clear the gate, transition back to
+      // awaiting_type_choice + run refineConcept. The refiner
+      // produces an updated concept (or asks a clarifying
+      // question); if ready=true we re-engage the gate at
+      // reviewing_concept with the new concept. Net result is an
+      // iteration loop with the founder always in control.
+      if (currentState === 'reviewing_concept') {
+        breadcrumb(`feedback_during_review`);
+        const assetType =
+          (row.assetType as 'photo' | 'carousel' | 'upload' | null) ??
+          inferAssetTypeFromText(text) ??
+          'photo';
+        const refined = await refineConcept({
+          brandBible: bibleSnapshot,
+          messages: [...messages, userMsg],
+          currentConcept: row.concept ?? null,
+          assetType,
+        });
+        const agentMsg: ChatMessage = {
+          role: 'agent',
+          content: refined.chatReply,
+          kind: 'text',
+          createdAt: Date.now() + 1,
+        };
+        const nextMessages = [...messages, userMsg, agentMsg];
+
+        if (refined.ready && refined.concept) {
+          // Re-engaged. New concept proposed — gate snaps back on.
+          Sentry.captureMessage('photo_agent_gate_engaged', {
+            level: 'info',
+            tags: { area: 'photo-studio', kind: 'approval-gate' },
+            extra: {
+              sessionId: row.id,
+              assetType,
+              conceptSnippet: refined.concept.slice(0, 200),
+              msgCreatedAtMs: Date.now(),
+              reEngagement: true,
+            },
+          });
+          const reviewing = await transition(row, 'reviewing_concept', {
+            concept: refined.concept,
+            messages: nextMessages,
+            approvalGateActive: true,
+            approvalGateAt: new Date(),
+          });
+          return NextResponse.json({ session: serialize(reviewing) });
+        }
+        // Need more info — gate clears, back to chat.
+        const back = await transition(row, 'awaiting_type_choice', {
+          messages: nextMessages,
+          approvalGateActive: false,
+          approvalGateAt: new Date(),
+        });
+        return NextResponse.json({ session: serialize(back) });
+      }
+
       // Default for any other intent in any other state — just
       // refine and re-prompt. Specifically covers:
       //   - awaiting_type_choice + free text → refineConcept may
@@ -1182,55 +1293,29 @@ export async function POST(
         const nextMessages = [...messages, userMsg, agentMsg];
 
         if (refined.ready && refined.concept) {
-          breadcrumb(`message_advance assetType=${assetType}`);
-          const generating = await transition(row, 'generating_visual', {
+          // PR Sprint UGC+Photo paridad — same concept-review
+          // gate as the pick_type action handler above. Free-
+          // text path also lands at reviewing_concept instead
+          // of firing fal.ai immediately.
+          breadcrumb(`message_concept_ready assetType=${assetType}`);
+          Sentry.captureMessage('photo_agent_gate_engaged', {
+            level: 'info',
+            tags: { area: 'photo-studio', kind: 'approval-gate' },
+            extra: {
+              sessionId: row.id,
+              assetType,
+              conceptSnippet: refined.concept.slice(0, 200),
+              msgCreatedAtMs: Date.now(),
+            },
+          });
+          const reviewing = await transition(row, 'reviewing_concept', {
             assetType,
             concept: refined.concept,
             messages: nextMessages,
+            approvalGateActive: true,
+            approvalGateAt: new Date(),
           });
-          const visualResult = await tryGenerateVisual({
-            concept: refined.concept,
-            brandBible: bibleSnapshot,
-            assetType,
-            painPointId: row.painPointId,
-            userId: user.id,
-            rowId: row.id,
-          });
-          if (!visualResult.ok) {
-            const failMsg: ChatMessage = {
-              role: 'agent',
-              content: `⚠️ ${visualResult.error}`,
-              kind: 'system',
-              createdAt: Date.now() + 2,
-            };
-            const isEnvIssue = visualResult.error.includes('FAL_API_KEY');
-            const back = await transition(
-              generating,
-              isEnvIssue ? 'failed' : 'visual_failed',
-              {
-                messages: [...nextMessages, failMsg],
-                errorMessage: isEnvIssue ? visualResult.error : null,
-              },
-            );
-            return NextResponse.json({ session: serialize(back) });
-          }
-          const visualMsg: ChatMessage = {
-            role: 'agent',
-            content: `Here's the first take. Tap a chip to iterate, type freely, or approve to move on to platforms.`,
-            kind: 'visual',
-            createdAt: Date.now() + 2,
-          };
-          const fresh = await transition(
-            generating,
-            'awaiting_visual_feedback',
-            {
-              visualUrl: visualResult.visual.url,
-              visualWidth: visualResult.visual.width,
-              visualHeight: visualResult.visual.height,
-              messages: [...nextMessages, visualMsg],
-            },
-          );
-          return NextResponse.json({ session: serialize(fresh) });
+          return NextResponse.json({ session: serialize(reviewing) });
         }
 
         // Not enough info yet — stay in awaiting_type_choice but

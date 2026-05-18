@@ -51,9 +51,22 @@ export async function POST() {
       CREATE INDEX IF NOT EXISTS idx_photo_agent_session_project
         ON photo_agent_sessions (project_id, created_at DESC)
     `);
+    // PR Sprint UGC+Photo paridad — approval-gate columns. Same
+    // shape as heygen_agent_sessions; surfaces 'reviewing_concept'
+    // in the API serializer when active so the founder sees the
+    // explicit-approval UI before fal.ai burns a Flux render.
+    await db.execute(sql`
+      ALTER TABLE photo_agent_sessions
+        ADD COLUMN IF NOT EXISTS approval_gate_active boolean NOT NULL DEFAULT false
+    `);
+    await db.execute(sql`
+      ALTER TABLE photo_agent_sessions
+        ADD COLUMN IF NOT EXISTS approval_gate_at timestamp
+    `);
     return NextResponse.json({
       success: true,
-      message: 'photo_agent_sessions ready.',
+      message:
+        'photo_agent_sessions ready (with approval gate columns).',
     });
   } catch (e) {
     return NextResponse.json(
