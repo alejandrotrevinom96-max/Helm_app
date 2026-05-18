@@ -494,25 +494,22 @@ export function StudioClient({ projectId }: Props) {
   }
 
   return (
+    // PR Sprint UGC+Photo final-fix — moved the bounding +
+    // overflow + per-aside/main rules into the shared
+    // .studio-shell-grid class in globals.css. Both studios use
+    // it so they can't drift apart. CSS class also carries a
+    // 100vh fallback for browsers without 100dvh support — which
+    // was the suspected root cause of "Photo still scrolls" on
+    // some sessions even though my code looked identical to UGC.
     <div
+      className="studio-shell-grid"
       style={{
-        display: 'grid',
-        gridTemplateColumns: 'minmax(240px, 280px) minmax(360px, 1fr) minmax(320px, 400px)',
-        gap: '16px',
-        // PR Sprint UGC+Photo final — bound the OUTER grid, not
-        // just the chat panel. Previously each column could grow
-        // independently → the row stretched to the tallest cell
-        // → the page scrolled even though the chat was bounded.
-        // dvh handles mobile chrome; 240px reserves the page
-        // header + sub-nav.
-        height: 'calc(100dvh - 240px)',
-        maxHeight: 'calc(100dvh - 240px)',
-        minHeight: '420px',
-        overflow: 'hidden',
+        gridTemplateColumns:
+          'minmax(240px, 280px) minmax(360px, 1fr) minmax(320px, 400px)',
       }}
     >
       {/* ─── Sessions sidebar ───────────────────────────────── */}
-      <aside style={{ overflowY: 'auto', minHeight: 0 }}>
+      <aside>
         <div
           className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2"
           style={{ marginBottom: '8px' }}
@@ -578,14 +575,9 @@ export function StudioClient({ projectId }: Props) {
       </aside>
 
       {/* ─── Chat panel ─────────────────────────────────────── */}
-      <main
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          minHeight: 0,
-          overflow: 'hidden',
-        }}
-      >
+      {/* main styling (flex column + overflow:hidden + minHeight:0)
+          comes from .studio-shell-grid > main in globals.css */}
+      <main>
         {!activeSession ? (
           <GlassCard
             className="p-5"
@@ -1165,7 +1157,7 @@ export function StudioClient({ projectId }: Props) {
       </main>
 
       {/* ─── Preview panel ──────────────────────────────────── */}
-      <aside style={{ overflowY: 'auto', minHeight: 0 }}>
+      <aside>
         {activeSession ? (
           <GlassCard className="p-4">
             <div
@@ -1262,13 +1254,13 @@ export function StudioClient({ projectId }: Props) {
                 }}
               >
                 <div
+                  className="studio-spinner"
                   style={{
                     width: '28px',
                     height: '28px',
                     border: '3px solid var(--border)',
                     borderTopColor: 'var(--accent)',
                     borderRadius: '50%',
-                    animation: 'spin 1s linear infinite',
                   }}
                 />
                 <span>
@@ -1295,11 +1287,10 @@ export function StudioClient({ projectId }: Props) {
         )}
       </aside>
 
-      <style>{`
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
-      `}</style>
+      {/* PR Sprint UGC+Photo final-fix — @keyframes lives in
+          globals.css as `studio-spin` so both studios share one
+          definition. Spinner divs reference `studio-spin` via
+          the `.studio-spinner` class. */}
     </div>
   );
 }

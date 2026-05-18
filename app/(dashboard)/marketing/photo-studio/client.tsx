@@ -430,24 +430,19 @@ export function PhotoStudioClient({ projectId }: Props) {
   }
 
   return (
+    // PR Sprint UGC+Photo final-fix — shared sizing via
+    // .studio-shell-grid class in globals.css. Same class as the
+    // UGC Studio so they can't drift apart; CSS has the 100vh
+    // fallback for browsers without 100dvh support.
     <div
+      className="studio-shell-grid"
       style={{
-        display: 'grid',
         gridTemplateColumns:
           'minmax(220px, 260px) minmax(360px, 1fr) minmax(320px, 420px)',
-        gap: '16px',
-        // PR Sprint UGC+Photo final — bound the outer grid so
-        // all three columns share a fixed height and scroll
-        // independently. dvh handles mobile chrome; 240px
-        // reserves the page header + sub-nav.
-        height: 'calc(100dvh - 240px)',
-        maxHeight: 'calc(100dvh - 240px)',
-        minHeight: '420px',
-        overflow: 'hidden',
       }}
     >
       {/* ─── Sessions sidebar ──────────────────────────────── */}
-      <aside style={{ overflowY: 'auto', minHeight: 0 }}>
+      <aside>
         <div
           className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3"
           style={{ marginBottom: '8px' }}
@@ -505,14 +500,8 @@ export function PhotoStudioClient({ projectId }: Props) {
       </aside>
 
       {/* ─── Chat panel ───────────────────────────────────── */}
-      <main
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          minHeight: 0,
-          overflow: 'hidden',
-        }}
-      >
+      {/* main styling comes from .studio-shell-grid > main */}
+      <main>
         {!activeSession ? (
           <NewSessionPanel
             draftPrompt={draftPrompt}
@@ -558,7 +547,7 @@ export function PhotoStudioClient({ projectId }: Props) {
       </main>
 
       {/* ─── Preview panel ─────────────────────────────────── */}
-      <aside style={{ overflowY: 'auto', minHeight: 0 }}>
+      <aside>
         {activeSession ? (
           <PreviewPanel session={activeSession} sendAction={sendAction} />
         ) : (
@@ -1340,15 +1329,21 @@ function CopyCard({ copy, session, sendAction }: CopyCardProps) {
 }
 
 function Spinner() {
+  // PR Sprint UGC+Photo final-fix — reference the shared
+  // `studio-spin` keyframes via the .studio-spinner class.
+  // Pre-fix Photo Studio had no @keyframes spin defined
+  // anywhere (UGC defined it inline in a <style> block); this
+  // spinner was visually static. Now both studios share the
+  // same animation from globals.css.
   return (
     <div
+      className="studio-spinner"
       style={{
         width: '24px',
         height: '24px',
         border: '3px solid var(--border)',
         borderTopColor: 'var(--accent)',
         borderRadius: '50%',
-        animation: 'spin 1s linear infinite',
       }}
     />
   );

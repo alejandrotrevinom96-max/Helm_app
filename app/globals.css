@@ -3936,3 +3936,60 @@ details[open] .platform-payload-summary::before {
 .bible-preview-cta-btn {
   flex: 0 0 auto;
 }
+
+/* PR Sprint UGC+Photo final-fix — shared studio shell sizing.
+   Single source of truth for the 3-column studio grid's
+   bounded height so UGC + Photo can't drift apart again.
+
+   Why a CSS class instead of inline styles in JSX:
+     1. React's style prop can't hold two declarations for the
+        same property → no clean way to declare a 100vh fallback
+        for browsers that don't grok 100dvh (mainly older Safari
+        + WebView shells). The two `height` rules below do exactly
+        that: browsers that recognize dvh use the second rule;
+        browsers that don't use the first.
+     2. Bundles both studios to the same actual rule. Drift across
+        studios was the root cause of the "Photo still scrolls
+        the page" report (UGC + Photo both had calc(100dvh-…) but
+        any future edit could diverge).
+
+   The 240px reserve accounts for the marketing layout above:
+   platform-main padding (top) + platform-page-head (eyebrow +
+   "Marketing." h1 + sub) + MarketingSubNav + 20px margin-top
+   on the children wrapper.
+
+   Bounded by min-height: 420px so the grid doesn't collapse
+   into a tiny strip on a short window (laptop in split-screen,
+   short browser chrome, etc).
+*/
+.studio-shell-grid {
+  display: grid;
+  gap: 16px;
+  height: calc(100vh - 240px);
+  height: calc(100dvh - 240px);
+  max-height: calc(100vh - 240px);
+  max-height: calc(100dvh - 240px);
+  min-height: 420px;
+  overflow: hidden;
+}
+.studio-shell-grid > aside {
+  overflow-y: auto;
+  min-height: 0;
+}
+.studio-shell-grid > main {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+/* Shared spin animation so each studio doesn't have to declare
+   its own inline @keyframes block (Photo Studio was silently
+   missing it post-Sprint D-final). */
+@keyframes studio-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.studio-spinner {
+  animation: studio-spin 1s linear infinite;
+}
