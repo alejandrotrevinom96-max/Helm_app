@@ -264,6 +264,60 @@ interface ChatMessage {
   createdAt: number;
 }
 
+// PR Sprint anti-naming final — display-time message sanitizer.
+//
+// Why this exists: chat messages live in the `messages` jsonb
+// column as IMMUTABLE history. When the agent failed back when
+// the code said "Either Flux is having a moment…", that exact
+// string was frozen into the row. Re-naming the source code
+// only fixes NEW sessions — every historical session still
+// renders the old text from its stored snapshot.
+//
+// Server-side replacement at read-time fixes both worlds:
+//   - Old sessions: stale "Flux" / "fal.ai" / "HeyGen" strings
+//     get rewritten on every fetch before they hit the client.
+//   - New sessions: the source code already produces clean text,
+//     so the sanitizer is a no-op. It's still cheap defense-in-
+//     depth in case a future edit reintroduces a brand name.
+//
+// Scoped to AGENT messages (what the founder reads). User
+// messages pass through unchanged because the founder might
+// type "Flux" themselves and we shouldn't rewrite their words.
+function sanitizeAgentText(text: string): string {
+  return text
+    .replace(/\bFlux\b/g, 'the renderer')
+    .replace(/\bfal\.ai\b/gi, 'the renderer')
+    .replace(/\bHeyGen\b/g, 'the video service')
+    .replace(/\bAnthropic\b/g, 'the AI')
+    .replace(/\bClaude\b/g, 'the AI')
+    .replace(/\bOpus\b/g, 'the AI')
+    .replace(/\bHaiku\b/g, 'the AI');
+}
+
+interface MessageShape {
+  role: string;
+  content: string;
+  kind?: string;
+  createdAt?: number;
+}
+
+function sanitizeMessages(messages: unknown): unknown[] {
+  if (!Array.isArray(messages)) return [];
+  return messages.map((m) => {
+    if (
+      m &&
+      typeof m === 'object' &&
+      'role' in m &&
+      (m as MessageShape).role === 'agent' &&
+      typeof (m as MessageShape).content === 'string'
+    ) {
+      const typed = m as MessageShape;
+      return { ...typed, content: sanitizeAgentText(typed.content) };
+    }
+    return m;
+  });
+}
+
 function serialize(row: PhotoAgentSessionRow) {
   // PR Sprint UGC+Photo paridad — expose approval-gate state to
   // the client. The state machine already pins `state` at
@@ -287,9 +341,14 @@ function serialize(row: PhotoAgentSessionRow) {
     visualHeight: row.visualHeight,
     platforms: row.platforms ?? [],
     copies: row.copies ?? [],
-    messages: row.messages ?? [],
+    // PR Sprint anti-naming final — rewrite agent messages at
+    // read-time so stale "Flux" / "fal.ai" / "HeyGen" strings
+    // stored in older session rows never reach the founder's UI.
+    messages: sanitizeMessages(row.messages),
     contentAssetId: row.contentAssetId,
-    errorMessage: row.errorMessage,
+    errorMessage: row.errorMessage
+      ? sanitizeAgentText(row.errorMessage)
+      : row.errorMessage,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     completedAt: row.completedAt?.toISOString() ?? null,

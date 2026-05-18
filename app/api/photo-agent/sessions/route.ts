@@ -50,6 +50,47 @@ interface PainPointShape {
   actionableAngle?: string;
 }
 
+// PR Sprint anti-naming final — same display-time sanitizer as
+// the [id] route. Old session rows in the list view also get
+// their agent messages rewritten before they reach the client.
+// Inlined here (not imported from the [id] route) because route
+// files shouldn't cross-import; the function is tiny and trivial
+// to keep in sync. Single source of truth could live in
+// lib/photo-agent/sanitize.ts but the duplication cost is < the
+// import overhead for two ~40-line helpers.
+function sanitizeAgentText(text: string): string {
+  return text
+    .replace(/\bFlux\b/g, 'the renderer')
+    .replace(/\bfal\.ai\b/gi, 'the renderer')
+    .replace(/\bHeyGen\b/g, 'the video service')
+    .replace(/\bAnthropic\b/g, 'the AI')
+    .replace(/\bClaude\b/g, 'the AI')
+    .replace(/\bOpus\b/g, 'the AI')
+    .replace(/\bHaiku\b/g, 'the AI');
+}
+interface MessageShape {
+  role: string;
+  content: string;
+  kind?: string;
+  createdAt?: number;
+}
+function sanitizeMessages(messages: unknown): unknown[] {
+  if (!Array.isArray(messages)) return [];
+  return messages.map((m) => {
+    if (
+      m &&
+      typeof m === 'object' &&
+      'role' in m &&
+      (m as MessageShape).role === 'agent' &&
+      typeof (m as MessageShape).content === 'string'
+    ) {
+      const typed = m as MessageShape;
+      return { ...typed, content: sanitizeAgentText(typed.content) };
+    }
+    return m;
+  });
+}
+
 function serialize(row: PhotoAgentSessionRow) {
   // PR Sprint UGC+Photo paridad — mirror the [id] route shape
   // so the create POST response matches the polling GET. Pre-
@@ -71,9 +112,11 @@ function serialize(row: PhotoAgentSessionRow) {
     visualHeight: row.visualHeight,
     platforms: row.platforms ?? [],
     copies: row.copies ?? [],
-    messages: row.messages ?? [],
+    messages: sanitizeMessages(row.messages),
     contentAssetId: row.contentAssetId,
-    errorMessage: row.errorMessage,
+    errorMessage: row.errorMessage
+      ? sanitizeAgentText(row.errorMessage)
+      : row.errorMessage,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     completedAt: row.completedAt?.toISOString() ?? null,
