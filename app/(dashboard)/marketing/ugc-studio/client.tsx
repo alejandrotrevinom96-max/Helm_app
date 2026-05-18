@@ -888,12 +888,17 @@ export function StudioClient({ projectId }: Props) {
             style={{
               display: 'flex',
               flexDirection: 'column',
-              // PR Sprint UGC+Photo paridad — fixed-height chat
-              // container. height (not min-height) so the inner
-              // scrolling region is bounded; page-level scroll
-              // no longer triggered by long threads.
-              height: 'calc(100vh - 280px)',
-              maxHeight: '720px',
+              // PR Sprint UGC+Photo polish — bounded chat
+              // container. dvh (dynamic viewport height) handles
+              // mobile browser chrome hide/show correctly; 240px
+              // offset matches the marketing layout's header +
+              // sub-nav + page padding so the studio fits the
+              // visible area without the page scrolling. The
+              // hard cap (maxHeight) was removed — long-form
+              // sessions still scroll INTERNALLY but the
+              // container expands with the viewport.
+              height: 'calc(100dvh - 240px)',
+              maxHeight: 'calc(100dvh - 240px)',
               minHeight: '420px',
               overflow: 'hidden',
             }}

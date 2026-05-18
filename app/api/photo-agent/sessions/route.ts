@@ -24,7 +24,12 @@ import {
 import { and, desc, eq } from 'drizzle-orm';
 import { checkRateLimit } from '@/lib/rate-limit';
 import type { BrandBible } from '@/lib/types/brand';
-import { buildFirstMessage } from '@/lib/photo-agent/conceptBuilder';
+import {
+  buildFirstMessage,
+  refineConcept,
+} from '@/lib/photo-agent/conceptBuilder';
+import { inferAssetTypeFromText } from '@/lib/photo-agent/intentClassifier';
+import * as Sentry from '@sentry/nextjs';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -189,10 +194,83 @@ export async function POST(request: Request) {
   // Pain-point fetch (optional).
   const painPoint = painPointId ? await findPainPoint(user.id, painPointId) : null;
 
+  const bibleSnapshot = (project.brandContext as BrandBible | null) ?? null;
+  const inferredAssetType = inferAssetTypeFromText(prompt);
+
+  // PR Sprint UGC+Photo polish — fast path: if the founder's
+  // initial prompt already implies a format (e.g. "carousel
+  // about productivity"), skip the picker entirely. Run
+  // refineConcept directly; if it produces a render-ready
+  // concept, land the session in reviewing_concept with the
+  // gate engaged. Founder goes straight from prompt → concept
+  // review without an extra "pick a type" round-trip.
+  //
+  // Conditions:
+  //   - prompt is non-empty AND ≥15 chars (must be meaty enough
+  //     for the refiner to have something to work with)
+  //   - inferAssetTypeFromText returns a non-null type
+  //   - refineConcept comes back ready=true
+  // Any miss → fall back to the existing buildFirstMessage flow.
+  const promptLooksSpecific =
+    prompt.length >= 15 && inferredAssetType !== null;
+
+  if (promptLooksSpecific && inferredAssetType) {
+    const userMsg: ChatMessage = {
+      role: 'user',
+      content: prompt,
+      kind: 'text',
+      createdAt: Date.now(),
+    };
+    const refined = await refineConcept({
+      brandBible: bibleSnapshot,
+      messages: [userMsg],
+      currentConcept: null,
+      assetType: inferredAssetType,
+    });
+    if (refined.ready && refined.concept) {
+      const agentMsg: ChatMessage = {
+        role: 'agent',
+        content: refined.chatReply,
+        kind: 'text',
+        createdAt: Date.now() + 1,
+      };
+      Sentry.captureMessage('photo_agent_gate_engaged', {
+        level: 'info',
+        tags: { area: 'photo-studio', kind: 'approval-gate' },
+        extra: {
+          assetType: inferredAssetType,
+          conceptSnippet: refined.concept.slice(0, 200),
+          msgCreatedAtMs: Date.now(),
+          fastPath: true,
+        },
+      });
+      const [row] = await db
+        .insert(photoAgentSessions)
+        .values({
+          userId: user.id,
+          projectId,
+          prompt,
+          painPointId,
+          brandSnapshot: bibleSnapshot,
+          // PR Sprint UGC+Photo polish — direct to review.
+          state: 'reviewing_concept',
+          assetType: inferredAssetType,
+          concept: refined.concept.slice(0, 280),
+          messages: [userMsg, agentMsg],
+          approvalGateActive: true,
+          approvalGateAt: new Date(),
+        })
+        .returning();
+      return NextResponse.json({ session: serialize(row) });
+    }
+    // Refiner couldn't ship a concept — fall through to the
+    // existing buildFirstMessage flow so the founder gets the
+    // conversational clarifier.
+  }
+
   // Compose the agent's first message based on whichever context
   // we have. Falls back to a no-context greeting if neither
   // prompt nor painPoint produced anything usable.
-  const bibleSnapshot = (project.brandContext as BrandBible | null) ?? null;
   const firstMessage = await buildFirstMessage({
     founderFirstName: dbUser?.name ?? null,
     brandBible: bibleSnapshot,
@@ -227,6 +305,10 @@ export async function POST(request: Request) {
       prompt: prompt.length > 0 ? prompt : painPoint?.theme ?? '(no prompt)',
       painPointId,
       brandSnapshot: bibleSnapshot,
+      // assetType might already be inferred (e.g. founder said
+      // "carousel" but the prompt was too short to refine). We
+      // persist the hint so the next turn's refiner picks it up.
+      assetType: inferredAssetType,
       // Skip 'understanding' — buildFirstMessage already ran and
       // we have the agent's reply ready. Land directly on
       // awaiting_type_choice so the input is enabled.

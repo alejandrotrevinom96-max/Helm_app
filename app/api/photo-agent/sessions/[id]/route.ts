@@ -41,7 +41,10 @@ import {
   canTransition,
   type PhotoSessionState,
 } from '@/lib/photo-agent/stateMachine';
-import { classifyIntent } from '@/lib/photo-agent/intentClassifier';
+import {
+  classifyIntent,
+  inferAssetTypeFromText,
+} from '@/lib/photo-agent/intentClassifier';
 import { refineConcept } from '@/lib/photo-agent/conceptBuilder';
 import {
   generateCopies,
@@ -60,40 +63,6 @@ interface PainPointShape {
   id?: string;
   theme?: string;
   sampleQuote?: string;
-}
-
-// PR Sprint D-bugs — infer asset type from free-form founder
-// text so the message dispatch can advance the state machine
-// without requiring the founder to click a quick-action chip.
-// Pre-fix the awaiting_type_choice message handler dropped free
-// text on the floor (it never called transition with assetType
-// set), which is why "una foto sobre marketing" looped forever.
-function inferAssetTypeFromText(
-  text: string,
-): 'photo' | 'carousel' | 'upload' | null {
-  const t = text.toLowerCase();
-  if (
-    /\b(carousel|carrusel|slides?|slideshow|multi[- ]?image|multiple? images?)\b/.test(
-      t,
-    )
-  ) {
-    return 'carousel';
-  }
-  if (
-    /\b(upload|subir|mi (foto|imagen|asset)|attach|enviar (foto|imagen))\b/.test(
-      t,
-    )
-  ) {
-    return 'upload';
-  }
-  if (
-    /\b(photo|foto|image|imagen|single (photo|image|shot)|just (one|a) (photo|image))\b/.test(
-      t,
-    )
-  ) {
-    return 'photo';
-  }
-  return null;
 }
 
 // PR Sprint D-finish — wrap generateVisual with diagnostic env

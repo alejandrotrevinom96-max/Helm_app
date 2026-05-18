@@ -849,11 +849,13 @@ function ActiveSessionPanel({
       style={{
         display: 'flex',
         flexDirection: 'column',
-        // PR Sprint UGC+Photo paridad — fixed height (not min)
-        // so the inner thread scrolls instead of pushing the
-        // page. Cap matches the UGC Studio.
-        height: 'calc(100vh - 280px)',
-        maxHeight: '720px',
+        // PR Sprint UGC+Photo polish — bounded height with dvh.
+        // Matches the UGC Studio: dvh handles mobile chrome
+        // hide/show, 240px offset reserves space for the
+        // marketing layout's header + sub-nav + page padding so
+        // only the inner thread scrolls.
+        height: 'calc(100dvh - 240px)',
+        maxHeight: 'calc(100dvh - 240px)',
         minHeight: '420px',
         overflow: 'hidden',
       }}

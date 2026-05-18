@@ -18,6 +18,43 @@
 import { anthropic, MODELS } from '@/lib/ai/claude';
 import type { IntentKind, PhotoSessionState } from './stateMachine';
 
+// PR Sprint UGC+Photo polish — assetType inference from free
+// text. Lifted from the in-route helper so the create endpoint
+// can use it too (skip the picker when the founder's first
+// prompt is already specific about the format).
+//
+// Regex is intentionally generous on common synonyms (es + en)
+// and conservative on ambiguous words. Returns null when the
+// text doesn't clearly imply a single format — falls back to
+// the chip picker UI in that case.
+export function inferAssetTypeFromText(
+  text: string,
+): 'photo' | 'carousel' | 'upload' | null {
+  const t = text.toLowerCase();
+  if (
+    /\b(carousel|carrusel|slides?|slideshow|multi[- ]?image|multiple? images?)\b/.test(
+      t,
+    )
+  ) {
+    return 'carousel';
+  }
+  if (
+    /\b(upload|subir|mi (foto|imagen|asset)|attach|enviar (foto|imagen))\b/.test(
+      t,
+    )
+  ) {
+    return 'upload';
+  }
+  if (
+    /\b(photo|foto|image|imagen|single (photo|image|shot)|just (one|a) (photo|image))\b/.test(
+      t,
+    )
+  ) {
+    return 'photo';
+  }
+  return null;
+}
+
 interface ClassifyInput {
   message: string;
   state: PhotoSessionState;
