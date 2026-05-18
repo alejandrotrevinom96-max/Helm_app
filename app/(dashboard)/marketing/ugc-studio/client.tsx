@@ -499,11 +499,20 @@ export function StudioClient({ projectId }: Props) {
         display: 'grid',
         gridTemplateColumns: 'minmax(240px, 280px) minmax(360px, 1fr) minmax(320px, 400px)',
         gap: '16px',
-        minHeight: '70vh',
+        // PR Sprint UGC+Photo final — bound the OUTER grid, not
+        // just the chat panel. Previously each column could grow
+        // independently → the row stretched to the tallest cell
+        // → the page scrolled even though the chat was bounded.
+        // dvh handles mobile chrome; 240px reserves the page
+        // header + sub-nav.
+        height: 'calc(100dvh - 240px)',
+        maxHeight: 'calc(100dvh - 240px)',
+        minHeight: '420px',
+        overflow: 'hidden',
       }}
     >
       {/* ─── Sessions sidebar ───────────────────────────────── */}
-      <aside>
+      <aside style={{ overflowY: 'auto', minHeight: 0 }}>
         <div
           className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2"
           style={{ marginBottom: '8px' }}
@@ -569,9 +578,27 @@ export function StudioClient({ projectId }: Props) {
       </aside>
 
       {/* ─── Chat panel ─────────────────────────────────────── */}
-      <main>
+      <main
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          minHeight: 0,
+          overflow: 'hidden',
+        }}
+      >
         {!activeSession ? (
-          <GlassCard className="p-5">
+          <GlassCard
+            className="p-5"
+            style={{
+              // PR Sprint UGC+Photo final — new-session panel
+              // also bounded so the form (chip rail + textarea +
+              // style picker grid) scrolls internally within the
+              // chat-panel grid cell instead of pushing the page.
+              flex: 1,
+              minHeight: 0,
+              overflowY: 'auto',
+            }}
+          >
             <div
               className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2"
             >
@@ -886,20 +913,14 @@ export function StudioClient({ projectId }: Props) {
           <GlassCard
             className="p-5"
             style={{
+              // PR Sprint UGC+Photo final — chat card just fills
+              // its grid cell. Height bounding moved to the
+              // outer grid (above) so all three columns share
+              // the same height + each scrolls internally.
+              flex: 1,
+              minHeight: 0,
               display: 'flex',
               flexDirection: 'column',
-              // PR Sprint UGC+Photo polish — bounded chat
-              // container. dvh (dynamic viewport height) handles
-              // mobile browser chrome hide/show correctly; 240px
-              // offset matches the marketing layout's header +
-              // sub-nav + page padding so the studio fits the
-              // visible area without the page scrolling. The
-              // hard cap (maxHeight) was removed — long-form
-              // sessions still scroll INTERNALLY but the
-              // container expands with the viewport.
-              height: 'calc(100dvh - 240px)',
-              maxHeight: 'calc(100dvh - 240px)',
-              minHeight: '420px',
               overflow: 'hidden',
             }}
           >
@@ -1144,7 +1165,7 @@ export function StudioClient({ projectId }: Props) {
       </main>
 
       {/* ─── Preview panel ──────────────────────────────────── */}
-      <aside>
+      <aside style={{ overflowY: 'auto', minHeight: 0 }}>
         {activeSession ? (
           <GlassCard className="p-4">
             <div

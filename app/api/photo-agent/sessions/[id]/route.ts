@@ -191,8 +191,14 @@ async function tryGenerateVisual(args: {
         });
         return {
           ok: false,
+          // PR Sprint UGC+Photo final — anti-naming. Founder
+          // sees the `error` string verbatim in the chat thread,
+          // so it must not mention the upstream provider. The
+          // full provider-specific detail is in Sentry (tag
+          // area=photo-agent kind=visual-null) where on-call
+          // looks anyway.
           error:
-            'fal.ai returned no image. Check Sentry tag area=photo-agent kind=visual-null for the prompt that was sent.',
+            "The image generator returned no result. Try again, or refine the concept with more specifics.",
           threw: false,
         };
       }
@@ -216,7 +222,12 @@ async function tryGenerateVisual(args: {
       });
       return {
         ok: false,
-        error: `Visual generation threw: ${msg.slice(0, 200)}`,
+        // PR Sprint UGC+Photo final — anti-naming. Don't echo
+        // the raw upstream exception (which often quotes
+        // provider library names like "fal" or "FluxClient");
+        // surface a generic message. The full exception is in
+        // Sentry already (captureException above).
+        error: 'Image generation hit an unexpected error. Try again — refresh the concept if it keeps failing.',
         threw: true,
       };
     }
@@ -231,11 +242,13 @@ async function tryGenerateVisual(args: {
   const second = await callOnce(2);
   if (second.ok) return second;
   // Surface a slightly different message after two failures so
-  // the founder knows we already tried twice.
+  // the founder knows we already tried twice. Anti-naming: the
+  // upstream provider stays out of the founder's view; Sentry
+  // tags capture which provider hiccuped.
   return {
     ok: false,
     error:
-      'Visual generation failed twice. Either Flux is having a moment or the concept needs more specifics. Try again, or refine.',
+      'Image generation is having a moment after two tries. Refine the concept with more specifics, or try again in a minute.',
   };
 }
 
@@ -818,7 +831,12 @@ export async function POST(
           };
           const failed = await transition(generating, 'failed', {
             messages: [...messages, userMsg, generatingMsg, failMsg],
-            errorMessage: 'Opus returned empty copies array',
+            // PR Sprint UGC+Photo final — anti-naming. The
+            // errorMessage column is surfaced verbatim to the
+            // client (post-detail / serializer); keep it
+            // provider-agnostic. Sentry captures the model
+            // name internally.
+            errorMessage: 'Copy generation returned no usable result.',
           });
           return NextResponse.json({ session: serialize(failed) });
         }
@@ -1045,7 +1063,12 @@ export async function POST(
                   createdAt: Date.now() + 2,
                 },
               ],
-              errorMessage: 'Opus returned empty copies array',
+              // PR Sprint UGC+Photo final — anti-naming. The
+            // errorMessage column is surfaced verbatim to the
+            // client (post-detail / serializer); keep it
+            // provider-agnostic. Sentry captures the model
+            // name internally.
+            errorMessage: 'Copy generation returned no usable result.',
             });
             return NextResponse.json({ session: serialize(failed) });
           }

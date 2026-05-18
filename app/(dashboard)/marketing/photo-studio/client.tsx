@@ -436,11 +436,18 @@ export function PhotoStudioClient({ projectId }: Props) {
         gridTemplateColumns:
           'minmax(220px, 260px) minmax(360px, 1fr) minmax(320px, 420px)',
         gap: '16px',
-        minHeight: '72vh',
+        // PR Sprint UGC+Photo final — bound the outer grid so
+        // all three columns share a fixed height and scroll
+        // independently. dvh handles mobile chrome; 240px
+        // reserves the page header + sub-nav.
+        height: 'calc(100dvh - 240px)',
+        maxHeight: 'calc(100dvh - 240px)',
+        minHeight: '420px',
+        overflow: 'hidden',
       }}
     >
       {/* ─── Sessions sidebar ──────────────────────────────── */}
-      <aside>
+      <aside style={{ overflowY: 'auto', minHeight: 0 }}>
         <div
           className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3"
           style={{ marginBottom: '8px' }}
@@ -498,7 +505,14 @@ export function PhotoStudioClient({ projectId }: Props) {
       </aside>
 
       {/* ─── Chat panel ───────────────────────────────────── */}
-      <main>
+      <main
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          minHeight: 0,
+          overflow: 'hidden',
+        }}
+      >
         {!activeSession ? (
           <NewSessionPanel
             draftPrompt={draftPrompt}
@@ -544,7 +558,7 @@ export function PhotoStudioClient({ projectId }: Props) {
       </main>
 
       {/* ─── Preview panel ─────────────────────────────────── */}
-      <aside>
+      <aside style={{ overflowY: 'auto', minHeight: 0 }}>
         {activeSession ? (
           <PreviewPanel session={activeSession} sendAction={sendAction} />
         ) : (
@@ -599,7 +613,17 @@ function NewSessionPanel({
   error,
 }: NewSessionPanelProps) {
   return (
-    <GlassCard className="p-5">
+    <GlassCard
+      className="p-5"
+      style={{
+        // PR Sprint UGC+Photo final — same flex behavior as the
+        // active session card so the new-session form scrolls
+        // internally instead of pushing the grid cell taller.
+        flex: 1,
+        minHeight: 0,
+        overflowY: 'auto',
+      }}
+    >
       <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-text-3 mb-2">
         Start a new session
       </div>
@@ -847,16 +871,13 @@ function ActiveSessionPanel({
     <GlassCard
       className="p-5"
       style={{
+        // PR Sprint UGC+Photo final — chat card just fills its
+        // grid cell. Outer grid handles height bounding so all
+        // three columns line up and scroll independently.
+        flex: 1,
+        minHeight: 0,
         display: 'flex',
         flexDirection: 'column',
-        // PR Sprint UGC+Photo polish — bounded height with dvh.
-        // Matches the UGC Studio: dvh handles mobile chrome
-        // hide/show, 240px offset reserves space for the
-        // marketing layout's header + sub-nav + page padding so
-        // only the inner thread scrolls.
-        height: 'calc(100dvh - 240px)',
-        maxHeight: 'calc(100dvh - 240px)',
-        minHeight: '420px',
         overflow: 'hidden',
       }}
     >
