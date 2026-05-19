@@ -2410,3 +2410,99 @@ export const photoAgentSessions = pgTable('photo_agent_sessions', {
 export type PhotoAgentSessionRow = typeof photoAgentSessions.$inferSelect;
 export type NewPhotoAgentSessionRow =
   typeof photoAgentSessions.$inferInsert;
+
+// ============================================================
+// PR Sprint pillarengine — external blog content ingest.
+//
+// PillarEngine (pillarengine.vercel.app) is an external content
+// engine that drafts + approves SEO/AEO articles and ships them
+// here through two paths:
+//
+//   1. Webhook (real-time) — /api/pillarengine/webhook receives
+//      page.approved events with HMAC-signed payloads. We upsert
+//      into blog_posts_external + revalidate the blog routes.
+//
+//   2. Cron pull (6h backup) — /api/cron/sync-pillarengine
+//      fetches /api/v1/pages?status=approved&since=<lastSync>,
+//      same upsert. Catches anything the webhook missed (network
+//      glitch, deploy window, etc.).
+//
+// The blog loader (lib/blog/loader.ts) reads from this table
+// AND from the legacy filesystem (content/blog/*.md) and unions
+// them. File-backed posts take precedence on slug collision so
+// the founder's hand-written editorial isn't silently
+// overwritten by an upstream PillarEngine retry. Source rows
+// carry source='pillarengine' so the UI can badge them.
+// ============================================================
+export const blogPostsExternal = pgTable(
+  'blog_posts_external',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    // Upstream identifier from PillarEngine — globally unique
+    // across all of their projects. Idempotency key for upserts:
+    // a webhook retry or cron re-fetch of the same page must
+    // update the existing row, not insert a duplicate.
+    pillarengineId: text('pillarengine_id').notNull().unique(),
+    // The blog URL slug (segment after /blog/). Must also be
+    // unique app-wide because routes resolve by slug. PillarEngine
+    // is responsible for picking a non-colliding slug.
+    slug: text('slug').notNull().unique(),
+    // Display title (the H1 + <title>).
+    title: text('title').notNull(),
+    // SEO meta title — falls back to title when absent. Stored
+    // separately because some PillarEngine intents (e.g. AEO)
+    // emit different copy for the meta tag vs. the H1.
+    metaTitle: text('meta_title'),
+    // SEO meta description. Used in <meta name="description">.
+    metaDescription: text('meta_description'),
+    // The full Markdown body. PillarEngine emits the same prose
+    // shape (intro stat → H2-as-question → FAQ → CTA → · · ·)
+    // as the file-based posts, so the existing markdown renderer
+    // doesn't need to branch on source.
+    markdownBody: text('markdown_body').notNull(),
+    // 'seo' | 'aeo' | 'hybrid' — drives nothing functional today;
+    // surfaced as a badge in the blog list for editorial context.
+    intent: text('intent'),
+    // ISO timestamp from PillarEngine for when the page was
+    // approved + published. Used for sort + as a "published on"
+    // line in the post header.
+    approvedAt: timestamp('approved_at'),
+    // Origin tag. Always 'pillarengine' for rows in this table;
+    // we keep the column so future external sources (Notion,
+    // Sanity, etc.) can land in the same union without a new
+    // table. The loader uses it to differentiate badge copy.
+    source: text('source').notNull().default('pillarengine'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+);
+
+export type BlogPostExternalRow = typeof blogPostsExternal.$inferSelect;
+export type NewBlogPostExternalRow =
+  typeof blogPostsExternal.$inferInsert;
+
+// Single-row config table tracking the last successful PillarEngine
+// cron sync. Avoids a /tmp file or an env var hack — the cron
+// pulls /api/v1/pages?since=<lastSyncAt> and updates this row at
+// the tail of a successful sync. If the row doesn't exist we
+// fall through to ~7 days ago on the first run.
+//
+// We seed a known constant id ('pillarengine') in the migrate
+// endpoint instead of using an autogen uuid so the cron's
+// upsert query targets a stable primary key.
+export const pillarengineSyncState = pgTable('pillarengine_sync_state', {
+  id: text('id').primaryKey(),
+  lastSyncAt: timestamp('last_sync_at'),
+  // Count + duration on the last run — pure observability so
+  // operators have a quick "is the cron still doing real work"
+  // signal in psql without spinning up Sentry.
+  lastRunPagesSynced: integer('last_run_pages_synced'),
+  lastRunMs: integer('last_run_ms'),
+  lastRunError: text('last_run_error'),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+export type PillarengineSyncStateRow =
+  typeof pillarengineSyncState.$inferSelect;
+export type NewPillarengineSyncStateRow =
+  typeof pillarengineSyncState.$inferInsert;

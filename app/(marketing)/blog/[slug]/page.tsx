@@ -35,16 +35,30 @@ const ICP_LABEL: Record<string, string> = {
   general: 'Field notes',
 };
 
-// SSG: emit one path per discovered markdown file. The build-time
-// scan happens via listPosts() which reads the filesystem; runtime
-// scope is `dynamicParams: false` so an unknown slug 404s instead
-// of trying to render an empty page.
+// SSG with on-demand fallback. generateStaticParams pre-renders
+// every post the loader knew about at build time (file-backed +
+// any pillarengine rows already in the DB). dynamicParams=true
+// lets new pillarengine slugs render the FIRST time they're
+// requested after the webhook/cron upsert — they're then cached
+// per the next on-demand revalidate cycle.
+//
+// PR Sprint pillarengine — was dynamicParams=false. Flipping it
+// is what unblocks runtime ingest: webhook writes blog_posts_external,
+// calls revalidatePath('/blog'), and the next request for the new
+// slug resolves through getPost() (which now reads the DB) instead
+// of 404ing because the slug wasn't in the static manifest.
+//
+// Worth noting: the loader's path-validation regex (^[a-z0-9-]+$)
+// is the only thing standing between a malicious slug and
+// notFound(). If we ever want stricter "only registered slugs
+// render" semantics, we'd add a registered-slug check here BEFORE
+// calling getPost.
 export async function generateStaticParams() {
   const posts = await listPosts();
   return posts.map((p) => ({ slug: p.slug }));
 }
 
-export const dynamicParams = false;
+export const dynamicParams = true;
 
 export async function generateMetadata({
   params,

@@ -284,6 +284,50 @@ export async function POST() {
     }),
   );
 
+  // 7. blog_posts_external + pillarengine_sync_state (Sprint
+  // pillarengine — external content ingest). Inlined here so a
+  // fresh migrate-all picks them up without a separate run.
+  // Same schema body as /api/admin/migrate-pillarengine.
+  results.push(
+    await runStep('pillarengine-blog-ingest', async () => {
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS blog_posts_external (
+          id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+          pillarengine_id text NOT NULL UNIQUE,
+          slug text NOT NULL UNIQUE,
+          title text NOT NULL,
+          meta_title text,
+          meta_description text,
+          markdown_body text NOT NULL,
+          intent text,
+          approved_at timestamp,
+          source text NOT NULL DEFAULT 'pillarengine',
+          created_at timestamp NOT NULL DEFAULT now(),
+          updated_at timestamp NOT NULL DEFAULT now()
+        )
+      `);
+      await db.execute(sql`
+        CREATE INDEX IF NOT EXISTS idx_blog_posts_external_approved_at
+          ON blog_posts_external (approved_at DESC NULLS LAST)
+      `);
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS pillarengine_sync_state (
+          id text PRIMARY KEY,
+          last_sync_at timestamp,
+          last_run_pages_synced integer,
+          last_run_ms integer,
+          last_run_error text,
+          updated_at timestamp NOT NULL DEFAULT now()
+        )
+      `);
+      await db.execute(sql`
+        INSERT INTO pillarengine_sync_state (id, updated_at)
+        VALUES ('pillarengine', now())
+        ON CONFLICT (id) DO NOTHING
+      `);
+    }),
+  );
+
   const allOk = results.every((r) => r.ok);
   return NextResponse.json(
     {
